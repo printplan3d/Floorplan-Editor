@@ -31,6 +31,21 @@ export {
   resolveLevelId,
 } from './hooks/spatial-grid/spatial-grid-sync'
 export { useSpatialQuery } from './hooks/spatial-grid/use-spatial-query'
+// Arc / curved-wall geometry helpers
+export {
+  arcLength,
+  arcMidpoint,
+  type ArcParams,
+  arcParamsFromBulge,
+  arcSagitta,
+  bulgeFromThreePoints,
+  isStraight,
+  type Point2,
+  STRAIGHT_BULGE_EPSILON,
+  tangentAtEnd,
+  tangentAtStart,
+  tessellateArc,
+} from './lib/arc-math'
 // Asset storage
 export { loadAssetUrl, saveAsset } from './lib/asset-storage'
 // Space detection
