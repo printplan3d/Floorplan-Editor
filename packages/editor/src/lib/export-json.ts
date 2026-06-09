@@ -39,6 +39,7 @@ export function exportFloorPlanJSON(): object {
         // Collect doors/windows on this wall
         const wallChildren = (w.children || []).map((id: string) => nodes[id as AnyNodeId]).filter(Boolean)
         for (const wc of wallChildren) {
+          if (!wc) continue  // .filter(Boolean) doesn't narrow the TS type
           if (wc.type === 'door') {
             const d = wc as DoorNode
             const wallLen = Math.hypot(w.end[0] - w.start[0], w.end[1] - w.start[1])
@@ -134,6 +135,7 @@ export function exportFloorPlanJSON(): object {
         })
         const wallChildren = (w.children || []).map((id: string) => nodes[id as AnyNodeId]).filter(Boolean)
         for (const wc of wallChildren) {
+          if (!wc) continue  // .filter(Boolean) doesn't narrow the TS type
           if (wc.type === 'door') {
             const d = wc as DoorNode
             const wallLen = Math.hypot(w.end[0] - w.start[0], w.end[1] - w.start[1])

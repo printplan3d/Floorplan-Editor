@@ -242,12 +242,10 @@ function CameraPopover({
     <Popover onOpenChange={onOpenChange} open={open}>
       <PopoverTrigger asChild>
         <button
-          className={cn(
-            'relative flex h-6 w-6 cursor-pointer items-center justify-center rounded',
-            buttonClassName,
-          )}
           onClick={(e) => e.stopPropagation()}
-          title="Camera snapshot" className="hidden" style={{display:"none"}}
+          title="Camera snapshot"
+          className={cn('hidden', buttonClassName)}
+          style={{ display: 'none' }}
         >
           <Camera className="h-3.5 w-3.5" />
           {hasCamera && (
@@ -670,14 +668,10 @@ function LevelItem({
         <Popover onOpenChange={setCameraPopoverOpen} open={cameraPopoverOpen}>
           <PopoverTrigger asChild>
             <button
-              className={cn(
-                'relative mr-1 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md opacity-0 transition-colors group-hover/level:opacity-100',
-                selectedLevelId === level.id
-                  ? 'hover:bg-black/5 dark:hover:bg-white/10'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-              )}
               onClick={(e) => e.stopPropagation()}
-              title="Camera snapshot" className="hidden" style={{display:"none"}}
+              title="Camera snapshot"
+              className="hidden"
+              style={{ display: 'none' }}
             >
               <Camera className="h-3.5 w-3.5" />
               {level.camera && (
@@ -866,123 +860,11 @@ function LayerToggle() {
   return null
 }
 
-function _LayerToggle_DISABLED() {
-  // Original code preserved but unused
-  const activeTab = 'structure' as const
-  return (
-    <div className="hidden">
-      <button
-        className={cn(
-          'relative flex flex-1 cursor-pointer flex-col items-center justify-center rounded-md py-2 font-medium text-[10px] transition-all duration-200',
-          activeTab === 'structure'
-            ? 'text-foreground'
-            : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
-        )}
-        onClick={() => {
-          setPhase('structure')
-          setStructureLayer('elements')
-        }}
-      >
-        {activeTab === 'structure' && (
-          <motion.div
-            className="absolute inset-0 rounded-md bg-[#3e3e3e] shadow-sm ring-1 ring-border/50"
-            layoutId="layerToggleActiveBg"
-            transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
-          />
-        )}
-        <div className="relative z-10 flex flex-col items-center">
-          <img
-            alt="Structure"
-            className={cn(
-              'mb-1 h-6 w-6 transition-all',
-              activeTab !== 'structure' && 'opacity-50 grayscale',
-            )}
-            src="/icons/room.png"
-          />
-          Structure
-        </div>
-        <div className="absolute right-1.5 bottom-1 z-10 rounded border border-border/40 bg-background/40 px-1 py-[2px] backdrop-blur-md">
-          <span className="block font-medium font-mono text-[9px] text-muted-foreground/70 leading-none">
-            S
-          </span>
-        </div>
-      </button>
-
-      <button
-        className={cn(
-          'relative flex flex-1 cursor-pointer flex-col items-center justify-center rounded-md py-2 font-medium text-[10px] transition-all duration-200',
-          activeTab === 'furnish'
-            ? 'text-foreground'
-            : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
-        )}
-        onClick={() => {
-          setPhase('furnish')
-        }}
-      >
-        {activeTab === 'furnish' && (
-          <motion.div
-            className="absolute inset-0 rounded-md bg-[#3e3e3e] shadow-sm ring-1 ring-border/50"
-            layoutId="layerToggleActiveBg"
-            transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
-          />
-        )}
-        <div className="relative z-10 flex flex-col items-center">
-          <img
-            alt="Furnish"
-            className={cn(
-              'mb-1 h-6 w-6 transition-all',
-              activeTab !== 'furnish' && 'opacity-50 grayscale',
-            )}
-            src="/icons/couch.png"
-          />
-          Furnish
-        </div>
-        <div className="absolute right-1.5 bottom-1 z-10 rounded border border-border/40 bg-background/40 px-1 py-[2px] backdrop-blur-md">
-          <span className="block font-medium font-mono text-[9px] text-muted-foreground/70 leading-none">
-            F
-          </span>
-        </div>
-      </button>
-
-      <button
-        className={cn(
-          'relative flex flex-1 cursor-pointer flex-col items-center justify-center rounded-md py-2 font-medium text-[10px] transition-all duration-200',
-          activeTab === 'zones'
-            ? 'text-foreground'
-            : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
-        )}
-        onClick={() => {
-          setPhase('structure')
-          setStructureLayer('zones')
-        }}
-      >
-        {activeTab === 'zones' && (
-          <motion.div
-            className="absolute inset-0 rounded-md bg-[#3e3e3e] shadow-sm ring-1 ring-border/50"
-            layoutId="layerToggleActiveBg"
-            transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
-          />
-        )}
-        <div className="relative z-10 flex flex-col items-center">
-          <img
-            alt="Zones"
-            className={cn(
-              'mb-1 h-6 w-6 transition-all',
-              activeTab !== 'zones' && 'opacity-50 grayscale',
-            )}
-            src="/icons/kitchen.png"
-          />
-          Zones
-        </div>
-        <div className="absolute right-1.5 bottom-1 z-10 rounded border border-border/40 bg-background/40 px-1 py-[2px] backdrop-blur-md">
-          <span className="block font-medium font-mono text-[9px] text-muted-foreground/70 leading-none">
-            Z
-          </span>
-        </div>
-      </button>
-    </div>
-  )
-}
+// _LayerToggle_DISABLED removed 2026-06-10 — wrapped <div className="hidden">,
+// never rendered (function never called), referenced setPhase/setStructureLayer
+// which were out of scope, and tested phase types ('furnish' / 'zones') that no
+// longer exist in the Phase union. Dead code from an earlier phase-system
+// refactor. Restore from git if a future feature needs the layer toggle UI.
 
 function ZoneItem({ zone, isLast }: { zone: ZoneNode; isLast?: boolean }) {
   const [isEditing, setIsEditing] = useState(false)
@@ -1079,9 +961,10 @@ function ZoneItem({ zone, isLast }: { zone: ZoneNode; isLast?: boolean }) {
         <Popover onOpenChange={setCameraPopoverOpen} open={cameraPopoverOpen}>
           <PopoverTrigger asChild>
             <button
-              className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-black/5 hover:text-foreground group-hover/row:opacity-100 dark:hover:bg-white/10"
               onClick={(e) => e.stopPropagation()}
-              title="Camera snapshot" className="hidden" style={{display:"none"}}
+              title="Camera snapshot"
+              className="hidden"
+              style={{ display: 'none' }}
             >
               <Camera className="h-3 w-3" />
               {zone.camera && (
@@ -1324,14 +1207,10 @@ function BuildingItem({
         >
           <PopoverTrigger asChild>
             <button
-              className={cn(
-                'relative mr-1.5 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md opacity-0 transition-colors group-hover/building:opacity-100',
-                isBuildingActive
-                  ? 'text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-              )}
               onClick={(e) => e.stopPropagation()}
-              title="Camera snapshot" className="hidden" style={{display:"none"}}
+              title="Camera snapshot"
+              className="hidden"
+              style={{ display: 'none' }}
             >
               <Camera className="h-4 w-4" />
               {building.camera && (

@@ -154,8 +154,10 @@ export const useKeyboard = () => {
                 end: [w.end[0] + dx, w.end[1] + dz],
               })
             } else if ('position' in node && Array.isArray((node as any).position)) {
-              // Items, doors, windows have position [x, y, z]
-              const pos = (node as any).position as number[]
+              // Items, doors, windows have position [x, y, z] — narrow the cast
+              // so TS knows each index is a real number (was number[] which
+              // tripped strict-index-access null checks).
+              const pos = (node as any).position as [number, number, number]
               useScene.getState().updateNode(nodeId, {
                 position: [pos[0] + dx, pos[1], pos[2] + dz],
               })
