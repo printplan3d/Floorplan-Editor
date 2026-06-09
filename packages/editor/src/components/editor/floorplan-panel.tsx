@@ -3,6 +3,7 @@
 import { Icon } from '@iconify/react'
 import {
   type AnyNodeId,
+  arcMidpoint,
   bulgeFromThreePoints,
   type BuildingNode,
   calculateLevelMiters,
@@ -315,6 +316,22 @@ type WallEndpointDraft = {
   endpoint: WallEndpoint
   start: WallPlanPoint
   end: WallPlanPoint
+}
+
+// Bulge drag — separate state from endpoint drag because the operation
+// modifies a different field (wall.bulge) and the cursor is interpreted as
+// the perpendicular offset midpoint, not a new endpoint. Lives in parallel
+// with WallEndpointDragState so the existing endpoint drag is unchanged.
+type WallBulgeDragState = {
+  pointerId: number
+  wallId: WallNode['id']
+  start: WallPlanPoint
+  end: WallPlanPoint
+}
+
+type WallBulgeDraft = {
+  wallId: WallNode['id']
+  bulge: number
 }
 
 type SlabBoundaryDraft = {
@@ -3175,6 +3192,8 @@ export function FloorplanPanel() {
   const guideInteractionRef = useRef<GuideInteractionState | null>(null)
   const guideTransformDraftRef = useRef<GuideTransformDraft | null>(null)
   const wallEndpointDragRef = useRef<WallEndpointDragState | null>(null)
+  // Bulge handle drag — parallel to endpoint drag (see WallBulgeDragState).
+  const wallBulgeDragRef = useRef<WallBulgeDragState | null>(null)
   const siteBoundaryDraftRef = useRef<SiteBoundaryDraft | null>(null)
   const slabBoundaryDraftRef = useRef<SlabBoundaryDraft | null>(null)
   const zoneBoundaryDraftRef = useRef<ZoneBoundaryDraft | null>(null)
@@ -3382,6 +3401,7 @@ export function FloorplanPanel() {
   const [cursorPoint, setCursorPoint] = useState<WallPlanPoint | null>(null)
   const [floorplanCursorPosition, setFloorplanCursorPosition] = useState<SvgPoint | null>(null)
   const [wallEndpointDraft, setWallEndpointDraft] = useState<WallEndpointDraft | null>(null)
+  const [wallBulgeDraft, setWallBulgeDraft] = useState<WallBulgeDraft | null>(null)
   const [hoveredOpeningId, setHoveredOpeningId] = useState<OpeningNode['id'] | null>(null)
   const [hoveredWallId, setHoveredWallId] = useState<WallNode['id'] | null>(null)
   const [hoveredEndpointId, setHoveredEndpointId] = useState<string | null>(null)
@@ -3586,37 +3606,55 @@ export function FloorplanPanel() {
     [floorplanWalls],
   )
   const displayWallById = useMemo(() => {
-    if (!wallEndpointDraft) {
+    if (!wallEndpointDraft && !wallBulgeDraft) {
       return wallById
     }
 
-    const wall = wallById.get(wallEndpointDraft.wallId)
-    if (!wall) {
-      return wallById
+    let map = wallById
+
+    if (wallEndpointDraft) {
+      const wall = wallById.get(wallEndpointDraft.wallId)
+      if (wall) {
+        const next = new Map(map)
+        next.set(
+          wall.id,
+          buildWallWithUpdatedEndpoints(wall, wallEndpointDraft.start, wallEndpointDraft.end),
+        )
+        map = next
+      }
     }
 
-    const nextWallById = new Map(wallById)
-    nextWallById.set(
-      wall.id,
-      buildWallWithUpdatedEndpoints(wall, wallEndpointDraft.start, wallEndpointDraft.end),
-    )
+    if (wallBulgeDraft) {
+      // Apply live bulge from drag — caller's wall body re-renders with the
+      // arc footprint immediately while the user is dragging the handle.
+      const wall = map.get(wallBulgeDraft.wallId)
+      if (wall) {
+        const next = new Map(map)
+        next.set(wall.id, { ...wall, bulge: wallBulgeDraft.bulge } as WallNode)
+        map = next
+      }
+    }
 
-    return nextWallById
-  }, [wallById, wallEndpointDraft])
+    return map
+  }, [wallBulgeDraft, wallById, wallEndpointDraft])
   const displayFloorplanWallById = useMemo(() => {
-    if (!wallEndpointDraft) {
+    if (!wallEndpointDraft && !wallBulgeDraft) {
       return floorplanWallById
     }
 
-    const previewWall = displayWallById.get(wallEndpointDraft.wallId)
-    if (!previewWall) {
-      return floorplanWallById
-    }
+    let map = floorplanWallById
+    const draftedIds = new Set<string>()
+    if (wallEndpointDraft) draftedIds.add(wallEndpointDraft.wallId)
+    if (wallBulgeDraft) draftedIds.add(wallBulgeDraft.wallId)
 
-    const nextFloorplanWallById = new Map(floorplanWallById)
-    nextFloorplanWallById.set(previewWall.id, getFloorplanWall(previewWall))
-    return nextFloorplanWallById
-  }, [displayWallById, floorplanWallById, wallEndpointDraft])
+    const next = new Map(map)
+    for (const id of draftedIds) {
+      const previewWall = displayWallById.get(id as WallNode['id'])
+      if (previewWall) next.set(previewWall.id, getFloorplanWall(previewWall))
+    }
+    map = next
+    return map
+  }, [displayWallById, floorplanWallById, wallBulgeDraft, wallEndpointDraft])
   // Ritn3D: ghost wall polygons from floor below
   const ghostWallPolygons = useMemo(
     () =>
@@ -3893,6 +3931,25 @@ export function FloorplanPanel() {
     shouldShowPersistentWallEndpointHandles,
     wallEndpointDraft,
   ])
+  // Bulge handles. One per selected wall in 'select' mode — sits at the arc
+  // apex when bulge != 0, at chord midpoint when straight (drag perpendicular
+  // to convert a straight wall into a curve). Hidden during placement modes
+  // and openings to avoid handle clutter.
+  const wallBulgeHandles = useMemo(() => {
+    if (mode !== 'select' || isOpeningPlacementActive || movingNode) return []
+    return displayWallPolygons.flatMap(({ wall }) => {
+      if (!selectedIdSet.has(wall.id)) return []
+      const liveBulge = wallBulgeDraft?.wallId === wall.id ? wallBulgeDraft.bulge : wall.bulge ?? 0
+      const point = arcMidpoint(wall.start, wall.end, liveBulge)
+      return [
+        {
+          wall,
+          point: point as WallPlanPoint,
+          isActive: wallBulgeDraft?.wallId === wall.id,
+        },
+      ]
+    })
+  }, [displayWallPolygons, isOpeningPlacementActive, mode, movingNode, selectedIdSet, wallBulgeDraft])
   const slabVertexHandles = useMemo(() => {
     if (!shouldShowSlabBoundaryHandles) {
       return []
@@ -4788,6 +4845,10 @@ export function FloorplanPanel() {
     setWallEndpointDraft(null)
     setHoveredEndpointId(null)
   }, [])
+  const clearWallBulgeDrag = useCallback(() => {
+    wallBulgeDragRef.current = null
+    setWallBulgeDraft(null)
+  }, [])
   const clearSiteBoundaryInteraction = useCallback(() => {
     setSiteVertexDragState(null)
     setSiteBoundaryDraft(null)
@@ -4944,6 +5005,21 @@ export function FloorplanPanel() {
         return
       }
 
+      // Bulge handle drag: cursor's plan position becomes the new arc apex.
+      // bulgeFromThreePoints derives bulge from (start, end, cursor).
+      const bulgeDrag = wallBulgeDragRef.current
+      if (bulgeDrag && event.pointerId === bulgeDrag.pointerId) {
+        event.preventDefault()
+        const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
+        if (!planPoint) return
+        // No grid snap — bulge is a continuous perpendicular offset; snapping
+        // produces visible "stepping" on shallow curves.
+        const raw = bulgeFromThreePoints(bulgeDrag.start, bulgeDrag.end, planPoint)
+        const next = Math.max(-2, Math.min(2, raw))
+        setWallBulgeDraft({ wallId: bulgeDrag.wallId, bulge: next })
+        return
+      }
+
       const dragState = wallEndpointDragRef.current
       if (!dragState || event.pointerId !== dragState.pointerId) {
         return
@@ -5084,11 +5160,38 @@ export function FloorplanPanel() {
       setCursorPoint(null)
     }
 
+    const commitWallBulgeDrag = (event: PointerEvent) => {
+      const dragState = wallBulgeDragRef.current
+      if (!dragState || event.pointerId !== dragState.pointerId) return
+      const wall = wallById.get(dragState.wallId)
+      // Pull the latest draft bulge from setter to avoid stale closure reads.
+      setWallBulgeDraft((current) => {
+        if (wall && current && current.wallId === wall.id) {
+          // Collapse near-zero bulge back to a clean straight wall on commit.
+          const finalBulge = isStraight(current.bulge) ? 0 : current.bulge
+          if ((wall.bulge ?? 0) !== finalBulge) {
+            updateNode(wall.id, { bulge: finalBulge })
+            sfxEmitter.emit('sfx:structure-build')
+          }
+        }
+        return null
+      })
+      clearWallBulgeDrag()
+    }
+
+    const cancelWallBulgeDrag = (event: PointerEvent) => {
+      const dragState = wallBulgeDragRef.current
+      if (!dragState || event.pointerId !== dragState.pointerId) return
+      clearWallBulgeDrag()
+    }
+
     window.addEventListener('pointermove', handleWindowPointerMove)
     window.addEventListener('pointerup', commitGuideInteraction)
     window.addEventListener('pointercancel', cancelGuideInteraction)
     window.addEventListener('pointerup', commitWallEndpointDrag)
     window.addEventListener('pointercancel', cancelWallEndpointDrag)
+    window.addEventListener('pointerup', commitWallBulgeDrag)
+    window.addEventListener('pointercancel', cancelWallBulgeDrag)
 
     return () => {
       window.removeEventListener('pointermove', handleWindowPointerMove)
@@ -5096,9 +5199,12 @@ export function FloorplanPanel() {
       window.removeEventListener('pointercancel', cancelGuideInteraction)
       window.removeEventListener('pointerup', commitWallEndpointDrag)
       window.removeEventListener('pointercancel', cancelWallEndpointDrag)
+      window.removeEventListener('pointerup', commitWallBulgeDrag)
+      window.removeEventListener('pointercancel', cancelWallBulgeDrag)
     }
   }, [
     clearGuideInteraction,
+    clearWallBulgeDrag,
     clearWallEndpointDrag,
     getSvgPointFromClientPoint,
     guideById,
@@ -6458,6 +6564,29 @@ export function FloorplanPanel() {
       setCursorPoint(movingPoint)
     },
     [clearWallPlacementDraft, handleWallPlacementPoint, handleWallSelect, isWallBuildActive, mode],
+  )
+
+  // Bulge handle pointer-down. Sits at the arc apex (or chord midpoint for
+  // straight walls — drag it perpendicular to bend the wall into a curve).
+  // Only meaningful in 'select' mode; other modes ignore the press so the
+  // user can't accidentally curve a wall while building doors etc.
+  const handleWallBulgePointerDown = useCallback(
+    (wall: WallNode, event: ReactPointerEvent<SVGCircleElement>) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (mode !== 'select') return
+      clearWallPlacementDraft()
+      handleWallSelect(wall)
+      wallBulgeDragRef.current = {
+        pointerId: event.pointerId,
+        wallId: wall.id,
+        start: wall.start,
+        end: wall.end,
+      }
+      setWallBulgeDraft({ wallId: wall.id, bulge: wall.bulge ?? 0 })
+    },
+    [clearWallPlacementDraft, handleWallSelect, mode],
   )
   const handleSlabVertexPointerDown = useCallback(
     (slabId: SlabNode['id'], vertexIndex: number, event: ReactPointerEvent<SVGCircleElement>) => {
@@ -8001,6 +8130,39 @@ export function FloorplanPanel() {
               onWallEndpointPointerDown={handleWallEndpointPointerDown}
               palette={palette}
             />
+
+            {/* Bulge handles: small accent-coloured dot at each selected
+                wall's arc midpoint (or chord midpoint when straight). Drag
+                to bend / re-shape the wall. Rendered AFTER endpoints so the
+                bulge handle wins for clicks at the wall's exact midpoint of
+                a tiny wall — fine for our use. */}
+            {wallBulgeHandles.map(({ wall, point, isActive }) => {
+              const svg = toSvgPoint({ x: point[0], y: point[1] })
+              return (
+                <g key={`bulge-${wall.id}`}>
+                  {/* Soft halo for hit area + visibility against busy plans. */}
+                  <circle
+                    cx={svg.x}
+                    cy={svg.y}
+                    fill={isActive ? palette.selectedFill : 'rgba(120,160,255,0.35)'}
+                    pointerEvents="none"
+                    r={0.16}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <circle
+                    cx={svg.x}
+                    cy={svg.y}
+                    fill={isActive ? '#a3c2ff' : '#7aa3ff'}
+                    onPointerDown={(event) => handleWallBulgePointerDown(wall, event)}
+                    r={0.085}
+                    stroke="#ffffff"
+                    strokeWidth="0.018"
+                    style={{ cursor: 'grab' }}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              )
+            })}
 
             <FloorplanPolygonHandleLayer
               hoveredHandleId={hoveredSlabHandleId}
