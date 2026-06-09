@@ -98,6 +98,7 @@ export function isWallLongEnough(start: WallPlanPoint, end: WallPlanPoint): bool
 export function createWallOnCurrentLevel(
   start: WallPlanPoint,
   end: WallPlanPoint,
+  bulge = 0,
 ): WallNode | null {
   const currentLevelId = useViewer.getState().selection.levelId
   const { createNode, nodes } = useScene.getState()
@@ -109,6 +110,8 @@ export function createWallOnCurrentLevel(
     name: `Wall ${wallCount + 1}`,
     start,
     end,
+    // Default 0 = straight; non-zero on the arc-wall tool path.
+    bulge,
   })
   createNode(wall, currentLevelId)
   sfxEmitter.emit('sfx:structure-build')

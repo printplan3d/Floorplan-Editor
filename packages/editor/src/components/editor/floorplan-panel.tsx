@@ -3,12 +3,14 @@
 import { Icon } from '@iconify/react'
 import {
   type AnyNodeId,
+  bulgeFromThreePoints,
   type BuildingNode,
   calculateLevelMiters,
   DoorNode,
   emitter,
   type GuideNode,
   getWallPlanFootprint,
+  isStraight,
   ItemNode,
   type LevelNode,
   loadAssetUrl,
@@ -42,6 +44,7 @@ import { snapToHalf } from '../tools/item/placement-math'
 import {
   createWallOnCurrentLevel,
   isWallLongEnough,
+  snapPointToGrid,
   snapWallDraftPoint,
   WALL_GRID_STEP,
   type WallPlanPoint,
@@ -1240,7 +1243,12 @@ function getWallHoverSidePaths(polygon: Point2D[], wall: WallNode): [string, str
   ]
 }
 
-function buildDraftWall(levelId: string, start: WallPlanPoint, end: WallPlanPoint): WallNode {
+function buildDraftWall(
+  levelId: string,
+  start: WallPlanPoint,
+  end: WallPlanPoint,
+  bulge = 0,
+): WallNode {
   return {
     object: 'node',
     id: 'wall_draft' as WallNode['id'],
@@ -1252,6 +1260,7 @@ function buildDraftWall(levelId: string, start: WallPlanPoint, end: WallPlanPoin
     children: [],
     start,
     end,
+    bulge,
     frontSide: 'unknown',
     backSide: 'unknown',
   }
@@ -3353,6 +3362,14 @@ export function FloorplanPanel() {
 
   const [draftStart, setDraftStart] = useState<WallPlanPoint | null>(null)
   const [draftEnd, setDraftEnd] = useState<WallPlanPoint | null>(null)
+  // Arc-wall draft state. Three-step machine:
+  //   arcDraftStart=null                         -> phase 0: nothing placed yet
+  //   arcDraftStart set, arcDraftEnd=null        -> phase 1: end-point preview
+  //   arcDraftStart+End set, arcBulgePoint live  -> phase 2: bulge-midpoint preview
+  // Next click in phase 2 commits the arc.
+  const [arcDraftStart, setArcDraftStart] = useState<WallPlanPoint | null>(null)
+  const [arcDraftEnd, setArcDraftEnd] = useState<WallPlanPoint | null>(null)
+  const [arcBulgePoint, setArcBulgePoint] = useState<WallPlanPoint | null>(null)
   const [slabDraftPoints, setSlabDraftPoints] = useState<WallPlanPoint[]>([])
   const [zoneDraftPoints, setZoneDraftPoints] = useState<WallPlanPoint[]>([])
   const [siteBoundaryDraft, setSiteBoundaryDraft] = useState<SiteBoundaryDraft | null>(null)
@@ -3485,7 +3502,12 @@ export function FloorplanPanel() {
     if (!activeFloorplanToolConfig) {
       return null
     }
-
+    // Tools whose icon is inline-SVG (no PNG asset) — e.g. arc-wall — can't
+    // be shown in the asset-only cursor indicator. Falling through to null is
+    // fine: the user still gets the standard editor cursor while drawing.
+    if (!activeFloorplanToolConfig.iconSrc) {
+      return null
+    }
     return {
       kind: 'asset',
       iconSrc: activeFloorplanToolConfig.iconSrc,
@@ -3757,6 +3779,8 @@ export function FloorplanPanel() {
 
   const isSiteEditActive = phase === 'site' && mode === 'edit'
   const isWallBuildActive = phase === 'structure' && mode === 'build' && tool === 'wall'
+  // Arc-wall tool: 3-step state machine (start → end → bulge midpoint).
+  const isArcWallBuildActive = phase === 'structure' && mode === 'build' && tool === 'arc-wall'
   const isSlabBuildActive = phase === 'structure' && mode === 'build' && tool === 'slab'
   const isZoneBuildActive = phase === 'structure' && mode === 'build' && tool === 'zone'
   const isDoorBuildActive = phase === 'structure' && mode === 'build' && tool === 'door'
@@ -3964,6 +3988,25 @@ export function FloorplanPanel() {
   }, [selectedZoneEntry, shouldShowZoneBoundaryHandles, zoneVertexDragState])
 
   const draftPolygon = useMemo(() => {
+    // Arc-wall draft preview. Phase 1: straight preview start->cursor (no
+    // bulge yet). Phase 2: actual curved preview with live bulge derived from
+    // the cursor's perpendicular offset to the chord.
+    if (levelId && arcDraftStart) {
+      const previewEnd = arcDraftEnd ?? cursorPoint ?? arcDraftStart
+      if (!isWallLongEnough(arcDraftStart, previewEnd)) {
+        return null
+      }
+      let previewBulge = 0
+      if (arcDraftEnd && arcBulgePoint) {
+        const raw = bulgeFromThreePoints(arcDraftStart, arcDraftEnd, arcBulgePoint)
+        previewBulge = Math.max(-2, Math.min(2, raw))
+      }
+      const draftWall = getFloorplanWall(
+        buildDraftWall(levelId, arcDraftStart, previewEnd, previewBulge),
+      )
+      return getWallPlanFootprint(draftWall, EMPTY_WALL_MITER_DATA)
+    }
+
     if (!(levelId && draftStart && draftEnd && isWallLongEnough(draftStart, draftEnd))) {
       return null
     }
@@ -3971,7 +4014,7 @@ export function FloorplanPanel() {
     const draftWall = getFloorplanWall(buildDraftWall(levelId, draftStart, draftEnd))
     // Keep the live draft preview cheap; full level-wide mitering here runs on every mouse move.
     return getWallPlanFootprint(draftWall, EMPTY_WALL_MITER_DATA)
-  }, [draftEnd, draftStart, levelId])
+  }, [arcBulgePoint, arcDraftEnd, arcDraftStart, cursorPoint, draftEnd, draftStart, levelId])
   const draftPolygonPoints = useMemo(
     () => (draftPolygon ? formatPolygonPoints(draftPolygon) : null),
     [draftPolygon],
@@ -4727,6 +4770,11 @@ export function FloorplanPanel() {
   const clearWallPlacementDraft = useCallback(() => {
     setDraftStart(null)
     setDraftEnd(null)
+    // Arc-wall draft shares the "wall placement" lifecycle — same Escape /
+    // tool-switch / commit semantics, so we clear it in the same callback.
+    setArcDraftStart(null)
+    setArcDraftEnd(null)
+    setArcBulgePoint(null)
   }, [])
   const clearSlabPlacementDraft = useCallback(() => {
     setSlabDraftPoints([])
@@ -5537,6 +5585,35 @@ export function FloorplanPanel() {
         return
       }
 
+      // Arc-wall pointer move: phase 1 updates the end-preview the same way
+      // a straight wall does; phase 2 updates the bulge midpoint (no grid snap
+      // here — the bulge is a free perpendicular offset, snapping would feel
+      // sticky and ugly on shallow curves).
+      if (isArcWallBuildActive) {
+        if (!arcDraftStart) {
+          // Phase 0: just show the cursor at the snapped grid point.
+          const cursor = snapPointToGrid(planPoint)
+          setCursorPoint(cursor)
+          return
+        }
+        if (!arcDraftEnd) {
+          // Phase 1: live straight-line preview from start to cursor.
+          const cursor = snapWallDraftPoint({
+            point: planPoint,
+            walls,
+            start: arcDraftStart,
+            angleSnap: !shiftPressed,
+          })
+          setCursorPoint(cursor)
+          return
+        }
+        // Phase 2: cursor drives the bulge midpoint. No grid snap (continuous
+        // adjustment); no SFX (would fire on every pixel).
+        setArcBulgePoint(planPoint)
+        setCursorPoint(planPoint)
+        return
+      }
+
       if (!isWallBuildActive) {
         setCursorPoint(null)
         return
@@ -5568,12 +5645,15 @@ export function FloorplanPanel() {
       })
     },
     [
+      arcDraftEnd,
+      arcDraftStart,
       draftStart,
       emitFloorplanWallLeave,
       floorplanOpeningLocalY,
       fittedViewport,
       getPlanPointFromClientPoint,
       activePolygonDraftPoints,
+      isArcWallBuildActive,
       isOpeningPlacementActive,
       isPolygonBuildActive,
       isWallBuildActive,
@@ -5701,6 +5781,46 @@ export function FloorplanPanel() {
     [clearDraft, draftStart],
   )
 
+  // Arc-wall: 3-step placement. Click 1 sets start, click 2 sets end (with
+  // straight preview during phase 1), click 3 commits the arc whose bulge was
+  // tracked by the cursor during phase 2 (see handleSvgPointerMove).
+  // - Phase 1->2: end snapped, switch to bulge-picking mode.
+  // - Phase 2 commit: derive bulge from (start, end, current bulge midpoint),
+  //   write the wall with that bulge, clear state.
+  const handleArcWallPlacementPoint = useCallback(
+    (point: WallPlanPoint) => {
+      if (!arcDraftStart) {
+        // Phase 0 -> Phase 1
+        setArcDraftStart(point)
+        setArcDraftEnd(point)
+        setArcBulgePoint(null)
+        setCursorPoint(point)
+        return
+      }
+      if (!arcDraftEnd || arcDraftStart === arcDraftEnd || pointsEqual(arcDraftStart, arcDraftEnd)) {
+        // Phase 1 -> Phase 2: lock the end. Use the freshly clicked point
+        // (already snapped by caller). Don't commit yet — wait for the user
+        // to drag-then-click the bulge midpoint.
+        if (!isWallLongEnough(arcDraftStart, point)) return
+        setArcDraftEnd(point)
+        setArcBulgePoint(point) // initial bulge midpoint = end (zero bulge until cursor moves)
+        return
+      }
+      // Phase 2 commit. Read the current bulge midpoint from cursor.
+      const midpoint = arcBulgePoint ?? point
+      const bulge = bulgeFromThreePoints(arcDraftStart, arcDraftEnd, midpoint)
+      // Cap bulge into [-2, 2] — beyond that it's > full semicircle and
+      // visually doesn't help; keeps the arc math well-behaved.
+      const safeBulge = Math.max(-2, Math.min(2, bulge))
+      // If user gave essentially zero bulge, fall back to a straight wall —
+      // less surprising than an "arc" with bulge ≈ 0 cluttering the scene.
+      const finalBulge = isStraight(safeBulge) ? 0 : safeBulge
+      createWallOnCurrentLevel(arcDraftStart, arcDraftEnd, finalBulge)
+      clearDraft()
+    },
+    [arcBulgePoint, arcDraftEnd, arcDraftStart, clearDraft],
+  )
+
   const handleBackgroundClick = useCallback(
     (event: ReactMouseEvent<SVGSVGElement>) => {
       if (isPolygonBuildActive && event.detail >= 2) {
@@ -5757,6 +5877,23 @@ export function FloorplanPanel() {
         }
       }
 
+      // Arc-wall tool: 3-step placement. Phase 0/1 use the same snap as the
+      // straight wall tool; phase 2 (bulge) does NOT angle-snap because the
+      // arc midpoint isn't directional, just an offset.
+      if (isArcWallBuildActive) {
+        const inPhase2 = Boolean(arcDraftStart && arcDraftEnd)
+        const snappedPoint = inPhase2
+          ? snapPointToGrid(planPoint)
+          : snapWallDraftPoint({
+              point: planPoint,
+              walls,
+              start: arcDraftStart ?? undefined,
+              angleSnap: Boolean(arcDraftStart) && !shiftPressed,
+            })
+        handleArcWallPlacementPoint(snappedPoint)
+        return
+      }
+
       if (!isWallBuildActive) {
         if (structureLayer === 'zones') {
           setSelectedReferenceId(null)
@@ -5778,14 +5915,18 @@ export function FloorplanPanel() {
       handleWallPlacementPoint(snappedPoint)
     },
     [
+      arcDraftEnd,
+      arcDraftStart,
       draftStart,
       floorplanOpeningLocalY,
       getPlanPointFromClientPoint,
       activePolygonDraftPoints,
       canSelectFloorplanZones,
+      handleArcWallPlacementPoint,
       handleSlabPlacementPoint,
       handleZonePlacementPoint,
       handleWallPlacementPoint,
+      isArcWallBuildActive,
       isOpeningPlacementActive,
       isPolygonBuildActive,
       isWallBuildActive,
