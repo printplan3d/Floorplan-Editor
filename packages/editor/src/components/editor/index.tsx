@@ -415,18 +415,14 @@ export default function Editor({
           </div>
         )}
 
-        {!showLoader && isCameraControlsHintVisible ? (
-          <ViewerCanvasControlsHint
-            isPreviewMode={isPreviewMode}
-            onDismiss={dismissCameraControlsHint}
-          />
-        ) : null}
+        {/* Ritn3D: camera controls hint hidden — 2D mode */}
 
         {!isLoading && isPreviewMode ? (
           <ViewerOverlay onBack={() => useEditor.getState().setPreviewMode(false)} />
         ) : (
           <>
-            <ActionMenu />
+            {/* Ritn3D: floating toolbar moved to sidebar */}
+            {!isFloorplanOpen && <ActionMenu />}
             <PanelManager />
             {isFloorplanOpen && <FloorplanPanel />}
             <HelperManager />
@@ -443,7 +439,8 @@ export default function Editor({
         )}
 
         <ErrorBoundary fallback={<EditorSceneCrashFallback />}>
-          <div className="h-full w-full">
+          {/* Ritn3D: 3D canvas hidden but still mounted when 2D floorplan is open (tools need it) */}
+          <div className="h-full w-full" style={isFloorplanOpen ? { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0, pointerEvents: 'none' } : undefined}>
             <SelectionPersistenceManager enabled={hasLoadedInitialScene && !showLoader} />
             <Viewer selectionManager={isPreviewMode ? 'default' : 'custom'}>
               {!isPreviewMode && <SelectionManager />}

@@ -37,7 +37,7 @@ const allModes: ModeConfig[] = [
   {
     id: 'build',
     imageSrc: '/icons/build.png',
-    label: 'Build',
+    label: 'Draw',
     shortcut: 'B',
     color: 'hover:bg-green-500/20 hover:text-green-400',
     activeColor: 'bg-green-500/20 text-green-400',

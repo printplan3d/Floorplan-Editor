@@ -78,8 +78,8 @@ const useViewer = create<ViewerState>()(
       hoveredId: null,
       setHoveredId: (id) => set({ hoveredId: id }),
 
-      cameraMode: 'perspective',
-      setCameraMode: (mode) => set({ cameraMode: mode }),
+      cameraMode: 'orthographic',
+      setCameraMode: (_mode) => set({ cameraMode: 'orthographic' }), // Ritn3D: locked to 2D top-down
 
       theme: 'light',
       setTheme: (theme) => set({ theme }),
@@ -90,8 +90,8 @@ const useViewer = create<ViewerState>()(
       levelMode: 'stacked',
       setLevelMode: (mode) => set({ levelMode: mode }),
 
-      wallMode: 'up',
-      setWallMode: (mode) => set({ wallMode: mode }),
+      wallMode: 'down',
+      setWallMode: (_mode) => set({ wallMode: 'down' }), // Ritn3D: 2D floor plan view
 
       showScans: true,
       setShowScans: (show) =>

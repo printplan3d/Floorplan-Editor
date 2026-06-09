@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600">
+  <!-- Deck area -->
+  <rect x="0" y="0" width="1000" height="600" fill="#f5f0e8" stroke="black" stroke-width="6"/>
+  <!-- Plank lines (horizontal boards) -->
+  <line x1="0" y1="60" x2="1000" y2="60" stroke="#c0b8a0" stroke-width="2"/>
+  <line x1="0" y1="120" x2="1000" y2="120" stroke="#c0b8a0" stroke-width="2"/>
+  <line x1="0" y1="180" x2="1000" y2="180" stroke="#c0b8a0" stroke-width="2"/>
+  <line x1="0" y1="240" x2="1000" y2="240" stroke="#c0b8a0" stroke-width="2"/>
+  <line x1="0" y1="300" x2="1000" y2="300" stroke="#c0b8a0" stroke-width="2"/>
+  <line x1="0" y1="360" x2="1000" y2="360" stroke="#c0b8a0" stroke-width="2"/>
+  <line x1="0" y1="420" x2="1000" y2="420" stroke="#c0b8a0" stroke-width="2"/>
+  <line x1="0" y1="480" x2="1000" y2="480" stroke="#c0b8a0" stroke-width="2"/>
+  <line x1="0" y1="540" x2="1000" y2="540" stroke="#c0b8a0" stroke-width="2"/>
+  <!-- Step indicator at bottom -->
+  <rect x="350" y="580" width="300" height="20" fill="none" stroke="black" stroke-width="3"/>
+  <rect x="320" y="600" width="360" height="0" fill="none" stroke="black" stroke-width="3"/>
+</svg>

@@ -106,7 +106,7 @@ export const DEFAULT_PERSISTED_EDITOR_UI_STATE: PersistedEditorUiState = {
   tool: null,
   structureLayer: 'elements',
   catalogCategory: null,
-  isFloorplanOpen: false,
+  isFloorplanOpen: true,
 }
 
 function normalizeModeForPhase(phase: Phase, mode: Mode | undefined): Mode {

@@ -69,7 +69,7 @@ const PANEL_DEFAULT_WIDTH = 560
 const PANEL_DEFAULT_HEIGHT = 360
 const PANEL_MARGIN = 16
 const PANEL_DEFAULT_BOTTOM_OFFSET = 96
-const MIN_GRID_SCREEN_SPACING = 12
+const MIN_GRID_SCREEN_SPACING = 8
 const GRID_COORDINATE_PRECISION = 6
 const MAJOR_GRID_STEP = WALL_GRID_STEP * 2
 const FLOORPLAN_WALL_THICKNESS_SCALE = 1.18
@@ -94,17 +94,41 @@ const FLOORPLAN_ENDPOINT_HIT_STROKE_WIDTH = 18
 const FLOORPLAN_ENDPOINT_HOVER_GLOW_STROKE_WIDTH = 16
 const FLOORPLAN_ENDPOINT_HOVER_RING_STROKE_WIDTH = 7
 const FLOORPLAN_MARQUEE_DRAG_THRESHOLD_PX = 4
-const FLOORPLAN_MEASUREMENT_OFFSET = 0.46
-const FLOORPLAN_MEASUREMENT_EXTENSION_OVERSHOOT = 0.08
-const FLOORPLAN_MEASUREMENT_LINE_WIDTH = 1.2
-const FLOORPLAN_MEASUREMENT_LINE_OUTLINE_WIDTH = 2.8
-const FLOORPLAN_MEASUREMENT_LINE_OPACITY = 0.72
-const FLOORPLAN_MEASUREMENT_LINE_OUTLINE_OPACITY = 0.9
-const FLOORPLAN_MEASUREMENT_LABEL_FONT_SIZE = 0.15
-const FLOORPLAN_MEASUREMENT_LABEL_OPACITY = 0.82
-const FLOORPLAN_MEASUREMENT_LABEL_STROKE_WIDTH = 0.05
-const FLOORPLAN_MEASUREMENT_LABEL_GAP = 0.56
-const FLOORPLAN_MEASUREMENT_LABEL_LINE_PADDING = 0.14
+// Measurement sizing scales with viewport — larger canvas = bigger labels
+// Base values for a ~10m viewport, scaled by viewWidth/10
+let _measureScale = 1
+function setMeasureScale(viewBoxWidth: number) {
+  _measureScale = Math.max(0.5, Math.min(3, viewBoxWidth / 10))
+}
+const FLOORPLAN_MEASUREMENT_OFFSET_BASE = 0.46
+const FLOORPLAN_MEASUREMENT_EXTENSION_OVERSHOOT_BASE = 0.08
+const FLOORPLAN_MEASUREMENT_LABEL_GAP_BASE = 0.56
+const FLOORPLAN_MEASUREMENT_LABEL_LINE_PADDING_BASE = 0.14
+const FLOORPLAN_MEASUREMENT_LABEL_FONT_SIZE_BASE = 0.17
+const FLOORPLAN_MEASUREMENT_LABEL_STROKE_WIDTH_BASE = 0.06
+
+// Dynamic getters
+function getMeasureOffset() { return FLOORPLAN_MEASUREMENT_OFFSET_BASE * _measureScale }
+function getMeasureExtOvershoot() { return FLOORPLAN_MEASUREMENT_EXTENSION_OVERSHOOT_BASE * _measureScale }
+function getMeasureLabelGap() { return FLOORPLAN_MEASUREMENT_LABEL_GAP_BASE * _measureScale }
+function getMeasureLabelLinePadding() { return FLOORPLAN_MEASUREMENT_LABEL_LINE_PADDING_BASE * _measureScale }
+function getMeasureLabelFontSize() { return FLOORPLAN_MEASUREMENT_LABEL_FONT_SIZE_BASE * _measureScale }
+function getMeasureLabelStrokeWidth() { return FLOORPLAN_MEASUREMENT_LABEL_STROKE_WIDTH_BASE * _measureScale }
+
+// Fixed (pixel-based via vectorEffect, no scaling needed)
+const FLOORPLAN_MEASUREMENT_LINE_WIDTH = 2.0
+const FLOORPLAN_MEASUREMENT_LINE_OUTLINE_WIDTH = 4.0
+const FLOORPLAN_MEASUREMENT_LINE_OPACITY = 0.9
+const FLOORPLAN_MEASUREMENT_LINE_OUTLINE_OPACITY = 1.0
+const FLOORPLAN_MEASUREMENT_LABEL_OPACITY = 0.95
+
+// Compat aliases for code that still uses the old constants
+const FLOORPLAN_MEASUREMENT_OFFSET = FLOORPLAN_MEASUREMENT_OFFSET_BASE
+const FLOORPLAN_MEASUREMENT_EXTENSION_OVERSHOOT = FLOORPLAN_MEASUREMENT_EXTENSION_OVERSHOOT_BASE
+const FLOORPLAN_MEASUREMENT_LABEL_FONT_SIZE = FLOORPLAN_MEASUREMENT_LABEL_FONT_SIZE_BASE
+const FLOORPLAN_MEASUREMENT_LABEL_STROKE_WIDTH = FLOORPLAN_MEASUREMENT_LABEL_STROKE_WIDTH_BASE
+const FLOORPLAN_MEASUREMENT_LABEL_GAP = FLOORPLAN_MEASUREMENT_LABEL_GAP_BASE
+const FLOORPLAN_MEASUREMENT_LABEL_LINE_PADDING = FLOORPLAN_MEASUREMENT_LABEL_LINE_PADDING_BASE
 const FLOORPLAN_ACTION_MENU_HORIZONTAL_PADDING = 60
 const FLOORPLAN_ACTION_MENU_MIN_ANCHOR_Y = 56
 const FLOORPLAN_ACTION_MENU_OFFSET_Y = 10
@@ -373,6 +397,10 @@ type FloorplanPalette = {
   anchor: string
   openingFill: string
   openingStroke: string
+  doorFill: string
+  doorStroke: string
+  windowFill: string
+  windowStroke: string
   measurementStroke: string
   endpointHandleFill: string
   endpointHandleStroke: string
@@ -1440,37 +1468,27 @@ function getWallMeasurementOverlay(
   const outX = dot >= 0 ? nx : -nx
   const outZ = dot >= 0 ? nz : -nz
   const label = formatMeasurement(length, unit)
+  const mOffset = getMeasureOffset()
+  const mOvershoot = getMeasureExtOvershoot()
   const dimensionLine = {
-    x1: toSvgX(wall.start[0] + outX * FLOORPLAN_MEASUREMENT_OFFSET),
-    y1: toSvgY(wall.start[1] + outZ * FLOORPLAN_MEASUREMENT_OFFSET),
-    x2: toSvgX(wall.end[0] + outX * FLOORPLAN_MEASUREMENT_OFFSET),
-    y2: toSvgY(wall.end[1] + outZ * FLOORPLAN_MEASUREMENT_OFFSET),
+    x1: toSvgX(wall.start[0] + outX * mOffset),
+    y1: toSvgY(wall.start[1] + outZ * mOffset),
+    x2: toSvgX(wall.end[0] + outX * mOffset),
+    y2: toSvgY(wall.end[1] + outZ * mOffset),
   }
 
   const extensionStart = {
     x1: toSvgX(wall.start[0]),
     y1: toSvgY(wall.start[1]),
-    x2: toSvgX(
-      wall.start[0] +
-        outX * (FLOORPLAN_MEASUREMENT_OFFSET + FLOORPLAN_MEASUREMENT_EXTENSION_OVERSHOOT),
-    ),
-    y2: toSvgY(
-      wall.start[1] +
-        outZ * (FLOORPLAN_MEASUREMENT_OFFSET + FLOORPLAN_MEASUREMENT_EXTENSION_OVERSHOOT),
-    ),
+    x2: toSvgX(wall.start[0] + outX * (mOffset + mOvershoot)),
+    y2: toSvgY(wall.start[1] + outZ * (mOffset + mOvershoot)),
   }
 
   const extensionEnd = {
     x1: toSvgX(wall.end[0]),
     y1: toSvgY(wall.end[1]),
-    x2: toSvgX(
-      wall.end[0] +
-        outX * (FLOORPLAN_MEASUREMENT_OFFSET + FLOORPLAN_MEASUREMENT_EXTENSION_OVERSHOOT),
-    ),
-    y2: toSvgY(
-      wall.end[1] +
-        outZ * (FLOORPLAN_MEASUREMENT_OFFSET + FLOORPLAN_MEASUREMENT_EXTENSION_OVERSHOOT),
-    ),
+    x2: toSvgX(wall.end[0] + outX * (mOffset + mOvershoot)),
+    y2: toSvgY(wall.end[1] + outZ * (mOffset + mOvershoot)),
   }
 
   const svgDx = dimensionLine.x2 - dimensionLine.x1
@@ -1491,8 +1509,8 @@ function getWallMeasurementOverlay(
   const dirSvgX = svgDx / svgLength
   const dirSvgY = svgDy / svgLength
   const labelGapHalf = Math.min(
-    FLOORPLAN_MEASUREMENT_LABEL_GAP / 2,
-    Math.max(0, svgLength / 2 - FLOORPLAN_MEASUREMENT_LABEL_LINE_PADDING),
+    getMeasureLabelGap() / 2,
+    Math.max(0, svgLength / 2 - getMeasureLabelLinePadding()),
   )
   const labelX = (dimensionLine.x1 + dimensionLine.x2) / 2
   const labelY = (dimensionLine.y1 + dimensionLine.y2) / 2
@@ -1590,7 +1608,8 @@ function isGridAligned(value: number, step: number): boolean {
   return Math.abs(normalizedValue - Math.round(normalizedValue)) < 1e-4
 }
 
-// Keep visible grid spacing above a minimum pixel size so zooming stays evenly distributed.
+// Keep visible grid spacing above a minimum pixel size.
+// Uses 1-2-5 sequence for smooth zoom transitions (like engineering graph paper).
 function getVisibleGridSteps(
   viewportWidth: number,
   surfaceWidth: number,
@@ -1601,13 +1620,22 @@ function getVisibleGridSteps(
   const pixelsPerUnit = surfaceWidth / Math.max(viewportWidth, Number.EPSILON)
   let minorStep = WALL_GRID_STEP
 
-  while (minorStep * pixelsPerUnit < MIN_GRID_SCREEN_SPACING) {
-    minorStep *= 2
+  // 1-2-5 sequence: 0.5 → 1.0 → 2.5 → 5.0 → 10 → 25 → ...
+  const multipliers = [1, 2, 5]
+  let scale = 1
+  let mIdx = 0
+  while (WALL_GRID_STEP * scale * multipliers[mIdx]! * pixelsPerUnit < MIN_GRID_SCREEN_SPACING) {
+    mIdx++
+    if (mIdx >= multipliers.length) {
+      mIdx = 0
+      scale *= 10
+    }
   }
+  minorStep = WALL_GRID_STEP * scale * multipliers[mIdx]!
 
   return {
     minorStep,
-    majorStep: Math.max(MAJOR_GRID_STEP, minorStep * 2),
+    majorStep: Math.max(MAJOR_GRID_STEP, minorStep * 5),
   }
 }
 
@@ -1868,21 +1896,19 @@ const FloorplanGridLayer = memo(function FloorplanGridLayer({
       <path
         d={minorGridPath}
         fill="none"
-        opacity={palette.minorGridOpacity}
+        opacity={0.2}
         shapeRendering="crispEdges"
         stroke={palette.minorGrid}
-        strokeWidth="0.02"
-        vectorEffect="non-scaling-stroke"
+        strokeWidth="0.015"
       />
 
       <path
         d={majorGridPath}
         fill="none"
-        opacity={palette.majorGridOpacity}
+        opacity={0.45}
         shapeRendering="crispEdges"
         stroke={palette.majorGrid}
-        strokeWidth="0.04"
-        vectorEffect="non-scaling-stroke"
+        strokeWidth="0.03"
       />
     </>
   )
@@ -2180,14 +2206,14 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 dominantBaseline="central"
                 fill={palette.measurementStroke}
                 fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
-                fontSize={FLOORPLAN_MEASUREMENT_LABEL_FONT_SIZE}
+                fontSize={getMeasureLabelFontSize()}
                 fontWeight="600"
                 paintOrder="stroke"
                 pointerEvents="none"
                 stroke={palette.surface}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeWidth={FLOORPLAN_MEASUREMENT_LABEL_STROKE_WIDTH}
+                strokeWidth={getMeasureLabelStrokeWidth()}
                 style={{ userSelect: 'none' }}
                 textAnchor="middle"
                 x={toSvgX(centroid.x)}
@@ -2305,6 +2331,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               />
             )}
             <polygon
+              data-element="wall"
               fill={isSelected ? palette.selectedFill : palette.wallFill}
               onClick={
                 canSelectGeometry
@@ -2421,14 +2448,15 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 vectorEffect="non-scaling-stroke"
               />
               <polygon
-                fill={palette.openingFill}
+                data-element="window"
+                fill={palette.windowFill}
                 points={points}
-                stroke={isSelected ? palette.selectedStroke : palette.openingStroke}
+                stroke={isSelected ? palette.selectedStroke : palette.windowStroke}
                 strokeOpacity={1}
                 strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
               />
               <line
-                stroke={isSelected ? palette.selectedStroke : detailStroke}
+                stroke={isSelected ? palette.selectedStroke : palette.windowStroke}
                 strokeWidth={FLOORPLAN_OPENING_DETAIL_STROKE_WIDTH}
                 x1={windowLineStartX}
                 x2={windowLineEndX}
@@ -2552,14 +2580,15 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 vectorEffect="non-scaling-stroke"
               />
               <polygon
-                fill={palette.openingFill}
+                data-element="door"
+                fill={palette.doorFill}
                 points={points}
-                stroke={isSelected ? palette.selectedStroke : palette.openingStroke}
+                stroke={isSelected ? palette.selectedStroke : palette.doorStroke}
                 strokeOpacity={1}
                 strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
               />
               <line
-                stroke={isSelected ? palette.selectedStroke : detailStroke}
+                stroke={isSelected ? palette.selectedStroke : palette.doorStroke}
                 strokeWidth={FLOORPLAN_OPENING_DETAIL_STROKE_WIDTH}
                 x1={hx}
                 x2={ox}
@@ -2569,7 +2598,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               <path
                 d={`M ${ox} ${oy} A ${width} ${width} 0 0 ${sweepFlag} ${ox2} ${oy2}`}
                 fill="none"
-                stroke={isSelected ? palette.selectedStroke : detailStroke}
+                stroke={isSelected ? palette.selectedStroke : palette.doorStroke}
                 strokeDasharray="0.1 0.1"
                 strokeWidth={FLOORPLAN_OPENING_DASHED_STROKE_WIDTH}
               />
@@ -2616,14 +2645,14 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 : FLOORPLAN_MEASUREMENT_LABEL_OPACITY * 0.4
             }
             fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
-            fontSize={FLOORPLAN_MEASUREMENT_LABEL_FONT_SIZE}
+            fontSize={getMeasureLabelFontSize()}
             fontWeight="600"
             paintOrder="stroke"
             stroke={palette.surface}
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeOpacity={measurement.isSelected ? 1 : 0.4}
-            strokeWidth={FLOORPLAN_MEASUREMENT_LABEL_STROKE_WIDTH}
+            strokeWidth={getMeasureLabelStrokeWidth()}
             textAnchor="middle"
             transform={`rotate(${measurement.labelAngleDeg} ${measurement.labelX} ${measurement.labelY}) translate(0, -0.04)`}
             x={measurement.labelX}
@@ -2640,27 +2669,100 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
 const FloorplanSiteLayer = memo(function FloorplanSiteLayer({
   isEditing,
   sitePolygon,
+  unit,
+  showDimensions = true,
 }: {
   isEditing: boolean
   sitePolygon: SitePolygonEntry | null
+  unit: 'metric' | 'imperial'
+  showDimensions?: boolean
 }) {
   if (!sitePolygon) {
     return null
   }
 
+  const polygon = sitePolygon.polygon
+  const { area, centroid } = getPolygonAreaAndCentroid(polygon)
+
+  // Compute edge midpoints, lengths, and label offsets
+  const edges = polygon.map((p1, i) => {
+    const p2 = polygon[(i + 1) % polygon.length]!
+    const dx = p2.x - p1.x
+    const dy = p2.y - p1.y
+    const length = Math.sqrt(dx * dx + dy * dy)
+    const midX = (p1.x + p2.x) / 2
+    const midY = (p1.y + p2.y) / 2
+    // Offset label outward from polygon center
+    const nx = -(p2.y - p1.y) / length
+    const ny = (p2.x - p1.x) / length
+    // Push label away from centroid
+    const toCenterX = centroid.x - midX
+    const toCenterY = centroid.y - midY
+    const dot = nx * toCenterX + ny * toCenterY
+    const sign = dot > 0 ? -1 : 1
+    const offset = Math.max(0.35, Math.sqrt(area) * 0.05)
+    return {
+      length,
+      labelX: toSvgX(midX + nx * offset * sign),
+      labelY: toSvgY(midY + ny * offset * sign),
+      label: formatMeasurement(length, unit),
+    }
+  })
+
+  // Scale font size based on site size — larger sites get bigger labels
+  const siteSpan = Math.sqrt(area)
+  const edgeFontSize = Math.max(0.2, Math.min(1.2, siteSpan * 0.04))
+  const areaFontSize = edgeFontSize * 1.4
+  const labelOffset = Math.max(0.35, siteSpan * 0.05)
+
   return (
-    <polygon
-      fill={FLOORPLAN_SITE_COLOR}
-      fillOpacity={isEditing ? 0.12 : 0.08}
-      pointerEvents="none"
-      points={sitePolygon.points}
-      stroke={FLOORPLAN_SITE_COLOR}
-      strokeDasharray={isEditing ? '0.16 0.1' : undefined}
-      strokeLinejoin="round"
-      strokeOpacity={isEditing ? 0.92 : 0.72}
-      strokeWidth={isEditing ? '0.08' : '0.06'}
-      vectorEffect="non-scaling-stroke"
-    />
+    <>
+      <polygon
+        fill={FLOORPLAN_SITE_COLOR}
+        fillOpacity={isEditing ? 0.12 : 0.08}
+        pointerEvents="none"
+        points={sitePolygon.points}
+        stroke={FLOORPLAN_SITE_COLOR}
+        strokeDasharray={isEditing ? '0.16 0.1' : undefined}
+        strokeLinejoin="round"
+        strokeOpacity={isEditing ? 0.92 : 0.72}
+        strokeWidth={isEditing ? '0.08' : '0.06'}
+        vectorEffect="non-scaling-stroke"
+      />
+
+      {/* Edge dimensions — only in site edit mode */}
+      {showDimensions && edges.map((edge, i) => (
+        <text
+          key={`site-edge-${i}`}
+          dominantBaseline="central"
+          fill={FLOORPLAN_SITE_COLOR}
+          fillOpacity={0.9}
+          fontSize={edgeFontSize}
+          fontWeight="700"
+          pointerEvents="none"
+          textAnchor="middle"
+          x={edge.labelX}
+          y={edge.labelY}
+        >
+          {edge.label}
+        </text>
+      ))}
+
+      {/* Total area at centroid — only in site edit mode */}
+      {showDimensions && <text
+        dominantBaseline="central"
+        fill={FLOORPLAN_SITE_COLOR}
+        fillOpacity={0.75}
+        fontSize={areaFontSize}
+        fontWeight="800"
+        pointerEvents="none"
+        textAnchor="middle"
+        x={toSvgX(centroid.x)}
+        y={toSvgY(centroid.y)}
+      >
+        {formatArea(area, unit)}
+      </text>}
+    </>
   )
 })
 
@@ -2670,31 +2772,68 @@ const FloorplanZoneLayer = memo(function FloorplanZoneLayer({
   palette,
   selectedZoneId,
   zonePolygons,
+  unit,
 }: {
   canSelectZones: boolean
   onZoneSelect: (zoneId: ZoneNodeType['id'], event: ReactMouseEvent<SVGElement>) => void
   palette: FloorplanPalette
   selectedZoneId: ZoneNodeType['id'] | null
   zonePolygons: ZonePolygonEntry[]
+  unit: 'metric' | 'imperial'
 }) {
   return (
     <>
-      {zonePolygons.map(({ zone, points }) => {
+      {zonePolygons.map(({ zone, polygon, points }) => {
         const isSelected = selectedZoneId === zone.id
+        const { area, centroid } = getPolygonAreaAndCentroid(polygon)
+        const label = zone.name || 'Room'
+        const labelFontSize = Math.max(0.15, Math.min(0.4, Math.sqrt(area) * 0.08))
 
         return (
           <g key={zone.id}>
             <polygon
-              fill={zone.color}
-              fillOpacity={isSelected ? 0.28 : 0.16}
+              fill="none"
               pointerEvents="none"
               points={points}
               stroke={isSelected ? palette.selectedStroke : zone.color}
               strokeLinejoin="round"
-              strokeOpacity={isSelected ? 0.96 : 0.72}
-              strokeWidth={isSelected ? '0.08' : '0.05'}
+              strokeOpacity={isSelected ? 0.7 : 0}
+              strokeWidth={isSelected ? '0.06' : '0'}
               vectorEffect="non-scaling-stroke"
             />
+
+            {/* Room label */}
+            {area > 0.1 && (
+              <>
+                <text
+                  dominantBaseline="central"
+                  fill={zone.color}
+                  fillOpacity={0.9}
+                  fontSize={labelFontSize}
+                  fontWeight="700"
+                  pointerEvents="none"
+                  textAnchor="middle"
+                  x={toSvgX(centroid.x)}
+                  y={toSvgY(centroid.y) - labelFontSize * 0.7}
+                >
+                  {label}
+                </text>
+                <text
+                  dominantBaseline="central"
+                  fill={zone.color}
+                  fillOpacity={0.6}
+                  fontSize={labelFontSize * 0.75}
+                  fontWeight="500"
+                  pointerEvents="none"
+                  textAnchor="middle"
+                  x={toSvgX(centroid.x)}
+                  y={toSvgY(centroid.y) + labelFontSize * 0.5}
+                >
+                  {formatArea(area, unit)}
+                </text>
+              </>
+            )}
+
             {canSelectZones && (
               <polygon
                 fill="none"
@@ -3110,7 +3249,7 @@ export function FloorplanPanel() {
 
       return nextLevelNode.children
         .map((childId) => state.nodes[childId])
-        .filter((node): node is WallNode => node?.type === 'wall')
+        .filter((node): node is WallNode => node?.type === 'wall' && node.visible !== false)
     }),
   )
   const openings = useScene(
@@ -3131,10 +3270,36 @@ export function FloorplanPanel() {
       return nextWalls.flatMap((wall) =>
         wall.children
           .map((childId) => state.nodes[childId])
-          .filter((node): node is OpeningNode => node?.type === 'window' || node?.type === 'door'),
+          .filter((node): node is OpeningNode => (node?.type === 'window' || node?.type === 'door') && node.visible !== false),
       )
     }),
   )
+  // Ritn3D: ghost walls from the level below for multi-floor alignment
+  const ghostWalls = useScene(
+    useShallow((state) => {
+      if (!levelId || !currentBuildingId) return [] as WallNode[]
+
+      const building = state.nodes[currentBuildingId]
+      if (!building || building.type !== 'building') return [] as WallNode[]
+
+      const currentLevel = state.nodes[levelId]
+      if (!currentLevel || currentLevel.type !== 'level') return [] as WallNode[]
+      const currentLevelNum = currentLevel.level ?? 0
+      if (currentLevelNum === 0) return [] as WallNode[] // Ground floor has no floor below
+
+      // Find the level below
+      const levelBelow = building.children
+        .map((childId) => state.nodes[childId])
+        .find((node): node is LevelNode => node?.type === 'level' && (node.level ?? 0) === currentLevelNum - 1)
+
+      if (!levelBelow) return [] as WallNode[]
+
+      return levelBelow.children
+        .map((childId) => state.nodes[childId])
+        .filter((node): node is WallNode => node?.type === 'wall' && node.visible !== false)
+    }),
+  )
+
   const slabs = useScene(
     useShallow((state) => {
       if (!levelId) {
@@ -3207,6 +3372,25 @@ export function FloorplanPanel() {
   const [hoveredGuideCorner, setHoveredGuideCorner] = useState<GuideCorner | null>(null)
   const [floorplanSelectionTool, setFloorplanSelectionTool] =
     useState<FloorplanSelectionTool>('click')
+
+  // Ritn3D: listen for marquee toggle from sidebar + broadcast state back
+  useEffect(() => {
+    const handler = () => {
+      setFloorplanSelectionTool((prev) => {
+        const next = prev === 'click' ? 'marquee' : 'click'
+        emitter.emit('floorplan:marquee-state' as any, { active: next === 'marquee' })
+        return next
+      })
+    }
+    emitter.on('floorplan:toggle-marquee' as any, handler)
+    return () => { emitter.off('floorplan:toggle-marquee' as any, handler) }
+  }, [])
+
+  // Broadcast initial state
+  useEffect(() => {
+    emitter.emit('floorplan:marquee-state' as any, { active: floorplanSelectionTool === 'marquee' })
+  }, [floorplanSelectionTool])
+
   const [floorplanMarqueeState, setFloorplanMarqueeState] = useState<FloorplanMarqueeState | null>(
     null,
   )
@@ -3409,6 +3593,16 @@ export function FloorplanPanel() {
     nextFloorplanWallById.set(previewWall.id, getFloorplanWall(previewWall))
     return nextFloorplanWallById
   }, [displayWallById, floorplanWallById, wallEndpointDraft])
+  // Ritn3D: ghost wall polygons from floor below
+  const ghostWallPolygons = useMemo(
+    () =>
+      ghostWalls.map((wall) => {
+        const polygon = getWallPlanFootprint(getFloorplanWall(wall), EMPTY_WALL_MITER_DATA)
+        return { points: formatPolygonPoints(polygon), wall }
+      }),
+    [ghostWalls],
+  )
+
   const wallPolygons = useMemo(
     () =>
       walls.map((wall) => {
@@ -3587,14 +3781,15 @@ export function FloorplanPanel() {
     !movingNode &&
     structureLayer !== 'zones'
   const canSelectElementFloorplanGeometry =
-    mode === 'select' && floorplanSelectionTool === 'click' && !movingNode
+    (mode === 'select' || mode === 'delete') && floorplanSelectionTool === 'click' && !movingNode
   const canInteractWithGuides = showGuides && canSelectElementFloorplanGeometry
   const canSelectFloorplanZones =
     mode === 'select' &&
     floorplanSelectionTool === 'click' &&
     !movingNode &&
     structureLayer === 'zones'
-  const visibleSitePolygon = phase === 'site' ? displaySitePolygon : null
+  // Ritn3D: always show site boundary so users can see plot while drawing
+  const visibleSitePolygon = displaySitePolygon
   const shouldShowSiteBoundaryHandles = isSiteEditActive && visibleSitePolygon !== null
   const shouldShowPersistentWallEndpointHandles = mode === 'select' && !movingNode
   const shouldShowSlabBoundaryHandles =
@@ -3603,8 +3798,8 @@ export function FloorplanPanel() {
     floorplanSelectionTool === 'click' &&
     selectedSlabEntry !== null
   const shouldShowZoneBoundaryHandles = canSelectFloorplanZones && selectedZoneEntry !== null
-  const showZonePolygons =
-    phase === 'structure' && (structureLayer === 'zones' || isZoneBuildActive)
+  // Ritn3D: always show room/zone labels for context
+  const showZonePolygons = phase === 'structure'
   const visibleZonePolygons = useMemo(
     () => (showZonePolygons ? displayZonePolygons : []),
     [displayZonePolygons, showZonePolygons],
@@ -3946,6 +4141,13 @@ export function FloorplanPanel() {
     }
   }, [fittedViewport, levelId])
 
+  // Ritn3D: listen for reset view event from sidebar
+  useEffect(() => {
+    const handler = () => setViewport(fittedViewport)
+    emitter.on('floorplan:reset-view' as any, handler)
+    return () => { emitter.off('floorplan:reset-view' as any, handler) }
+  }, [fittedViewport])
+
   useEffect(() => {
     if (!(phase === 'site' && levelNode?.type === 'level' && levelNode.level > 0)) {
       return
@@ -3966,6 +4168,10 @@ export function FloorplanPanel() {
       height,
     }
   }, [fittedViewport, svgAspectRatio, viewport])
+
+  // Ritn3D: update measurement scale based on visible area
+  setMeasureScale(viewBox.width)
+
   const floorplanWorldUnitsPerPixel = useMemo(() => {
     const widthUnitsPerPixel = viewBox.width / Math.max(surfaceSize.width, 1)
     const heightUnitsPerPixel = viewBox.height / Math.max(surfaceSize.height, 1)
@@ -4146,6 +4352,10 @@ export function FloorplanPanel() {
             anchor: '#818cf8',
             openingFill: '#0a0e1b',
             openingStroke: '#fafafa',
+            doorFill: '#1a0e2e',
+            doorStroke: '#f59e0b',
+            windowFill: '#0a1e2e',
+            windowStroke: '#38bdf8',
             endpointHandleFill: '#09090b',
             endpointHandleStroke: '#a1a1aa',
             endpointHandleHoverStroke: '#d4d4d8',
@@ -4174,6 +4384,10 @@ export function FloorplanPanel() {
             anchor: '#4338ca',
             openingFill: '#ffffff',
             openingStroke: '#171717',
+            doorFill: '#fef3c7',
+            doorStroke: '#d97706',
+            windowFill: '#e0f2fe',
+            windowStroke: '#0284c7',
             endpointHandleFill: '#ffffff',
             endpointHandleStroke: '#71717a',
             endpointHandleHoverStroke: '#52525b',
@@ -5755,6 +5969,12 @@ export function FloorplanPanel() {
 
   const handleWallSelect = useCallback(
     (wall: WallNode) => {
+      // Ritn3D: delete mode — delete wall on click
+      if (useEditor.getState().mode === 'delete') {
+        sfxEmitter.emit('sfx:structure-delete')
+        useScene.getState().deleteNode(wall.id as AnyNodeId)
+        return
+      }
       commitFloorplanSelection([wall.id])
     },
     [commitFloorplanSelection],
@@ -5762,6 +5982,14 @@ export function FloorplanPanel() {
 
   const handleWallClick = useCallback(
     (wall: WallNode, event: ReactMouseEvent<SVGElement>) => {
+      // Ritn3D: delete mode — delete wall on click
+      if (useEditor.getState().mode === 'delete') {
+        event.stopPropagation()
+        sfxEmitter.emit('sfx:structure-delete')
+        useScene.getState().deleteNode(wall.id as AnyNodeId)
+        return
+      }
+
       const centerX = (wall.start[0] + wall.end[0]) / 2
       const centerZ = (wall.start[1] + wall.end[1]) / 2
       const halfLength = Math.hypot(wall.end[0] - wall.start[0], wall.end[1] - wall.start[1]) / 2
@@ -5811,6 +6039,15 @@ export function FloorplanPanel() {
             node.type === 'zone')
         )
       ) {
+        return
+      }
+
+      // Ritn3D: delete mode — delete node on click
+      if (useEditor.getState().mode === 'delete') {
+        sfxEmitter.emit('sfx:structure-delete')
+        const parentId = node.parentId
+        useScene.getState().deleteNode(nodeId as AnyNodeId)
+        if (parentId) useScene.getState().dirtyNodes.add(parentId as AnyNodeId)
         return
       }
 
@@ -6048,6 +6285,12 @@ export function FloorplanPanel() {
 
       if (isWallBuildActive) {
         handleWallPlacementPoint(movingPoint)
+        return
+      }
+
+      if (mode === 'delete') {
+        sfxEmitter.emit('sfx:structure-delete')
+        useScene.getState().deleteNode(wall.id as AnyNodeId)
         return
       }
 
@@ -6543,7 +6786,18 @@ export function FloorplanPanel() {
         const hitId = getFloorplanHitIdAtPoint(endPlanPoint)
 
         if (hitId) {
-          toggleFloorplanSelection(hitId, modifierKeys)
+          // Ritn3D: delete mode — delete clicked node directly
+          if (useEditor.getState().mode === 'delete') {
+            const node = useScene.getState().nodes[hitId as AnyNodeId]
+            if (node) {
+              sfxEmitter.emit('sfx:structure-delete')
+              const parentId = node.parentId
+              useScene.getState().deleteNode(hitId as AnyNodeId)
+              if (parentId) useScene.getState().dirtyNodes.add(parentId as AnyNodeId)
+            }
+          } else {
+            toggleFloorplanSelection(hitId, modifierKeys)
+          }
         } else if (!(modifierKeys.meta || modifierKeys.ctrl)) {
           commitFloorplanSelection([])
         }
@@ -6819,7 +7073,7 @@ export function FloorplanPanel() {
 
   return (
     <div
-      className="pointer-events-auto fixed z-50 flex flex-col overflow-hidden rounded-smooth-xl bg-background/95 shadow-[0_24px_48px_rgba(15,23,42,0.16),0_8px_20px_rgba(15,23,42,0.08)] ring-1 ring-border/35 backdrop-blur-md"
+      className="pointer-events-auto fixed z-10 flex flex-col overflow-hidden bg-background"
       onPointerEnter={() => setFloorplanHovered(true)}
       onPointerLeave={() => {
         setFloorplanHovered(false)
@@ -6827,14 +7081,12 @@ export function FloorplanPanel() {
       }}
       style={{
         cursor: activeResizeDirection ? resizeCursorByDirection[activeResizeDirection] : undefined,
-        height: panelRect.height,
-        left: panelRect.x,
-        top: panelRect.y,
+        inset: 0,
         visibility: isPanelReady ? 'visible' : 'hidden',
-        width: panelRect.width,
       }}
     >
-      {resizeHandleConfigurations.map((handle) => (
+      {/* Ritn3D: resize handles hidden — fullscreen mode */}
+      {false && resizeHandleConfigurations.map((handle) => (
         <div
           aria-hidden="true"
           className={handle.className}
@@ -6843,11 +7095,9 @@ export function FloorplanPanel() {
         />
       ))}
 
+      {/* Ritn3D: top bar hidden — fullscreen 2D mode, tools in bottom toolbar */}
       <div
-        className={cn(
-          'flex h-11 shrink-0 select-none items-center justify-between border-border/20 border-b bg-background/80 px-3',
-          isDraggingPanel ? 'cursor-grabbing' : 'cursor-grab',
-        )}
+        className="hidden"
         onPointerDown={handlePanelDragStart}
       >
         <div className="flex min-w-0 items-center pr-3">
@@ -7210,6 +7460,16 @@ export function FloorplanPanel() {
       </div>
 
       <div className="relative min-h-0 flex-1" ref={viewportHostRef}>
+        {/* True North compass */}
+        <div className="absolute top-3 right-3 z-20 pointer-events-none flex flex-col items-center" style={{ opacity: 0.6 }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+            <polygon points="12,2 15,10 12,8 9,10" fill="#ef4444" />
+            <polygon points="12,22 9,14 12,16 15,14" fill="#94a3b8" />
+            <line x1="12" y1="2" x2="12" y2="22" stroke="#64748b" strokeWidth="0.5" />
+          </svg>
+          <span style={{ fontSize: '8px', fontWeight: 700, color: '#ef4444', marginTop: '1px', letterSpacing: '0.5px' }}>N</span>
+        </div>
+
         {activeFloorplanCursorIndicator && floorplanCursorPosition && !isPanning && (
           <div
             aria-hidden="true"
@@ -7265,13 +7525,14 @@ export function FloorplanPanel() {
           </div>
         )}
 
-        {!levelNode || levelNode.type !== 'level' ? (
+        {!levelNode && phase !== 'site' ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-muted-foreground text-sm">
             Switch to a building level to view and edit the floorplan.
           </div>
         ) : (
           <svg
             className="h-full w-full touch-none"
+            data-floorplan-svg="true"
             onClick={isMarqueeSelectionToolActive ? undefined : handleBackgroundClick}
             onContextMenu={(event) => event.preventDefault()}
             onDoubleClick={isMarqueeSelectionToolActive ? undefined : handleBackgroundDoubleClick}
@@ -7299,6 +7560,25 @@ export function FloorplanPanel() {
               showGrid={showGrid}
             />
 
+            {/* Ritn3D: Ghost floor below — faint dashed walls from level below */}
+            {ghostWallPolygons.length > 0 && (
+              <g opacity={0.4} pointerEvents="none">
+                {ghostWallPolygons.map(({ wall, points }) => (
+                  <polygon
+                    key={wall.id}
+                    fill="#6366f1"
+                    fillOpacity={0.12}
+                    points={points}
+                    stroke="#6366f1"
+                    strokeDasharray="0.15 0.08"
+                    strokeLinejoin="round"
+                    strokeOpacity={0.7}
+                    strokeWidth="0.04"
+                  />
+                ))}
+              </g>
+            )}
+
             <FloorplanGuideLayer
               activeGuideInteractionGuideId={activeGuideInteractionGuideId}
               activeGuideInteractionMode={activeGuideInteractionMode}
@@ -7309,7 +7589,7 @@ export function FloorplanPanel() {
               selectedGuideId={selectedGuideId}
             />
 
-            <FloorplanSiteLayer isEditing={isSiteEditActive} sitePolygon={visibleSitePolygon} />
+            <FloorplanSiteLayer isEditing={isSiteEditActive} sitePolygon={visibleSitePolygon} unit={unit} showDimensions={isSiteEditActive} />
 
             <FloorplanGeometryLayer
               canSelectGeometry={canSelectElementFloorplanGeometry}
@@ -7337,6 +7617,7 @@ export function FloorplanPanel() {
               onZoneSelect={handleZoneSelect}
               palette={palette}
               selectedZoneId={selectedZoneId}
+              unit={unit}
               zonePolygons={visibleZonePolygons}
             />
 
@@ -7397,15 +7678,47 @@ export function FloorplanPanel() {
             )}
 
             {draftPolygon && (
-              <polygon
-                fill={palette.draftFill}
-                fillOpacity={0.35}
-                points={draftPolygonPoints ?? undefined}
-                stroke={palette.draftStroke}
-                strokeDasharray="0.24 0.12"
-                strokeWidth="0.07"
-                vectorEffect="non-scaling-stroke"
-              />
+              <>
+                <polygon
+                  fill={palette.draftFill}
+                  fillOpacity={0.35}
+                  points={draftPolygonPoints ?? undefined}
+                  stroke={palette.draftStroke}
+                  strokeDasharray="0.24 0.12"
+                  strokeWidth="0.07"
+                  vectorEffect="non-scaling-stroke"
+                />
+                {/* Ritn3D: angle + length label while drawing */}
+                {draftStart && draftEnd && (() => {
+                  const dx = draftEnd[0] - draftStart[0]
+                  const dz = draftEnd[1] - draftStart[1]
+                  const length = Math.hypot(dx, dz)
+                  if (length < 0.1) return null
+                  const angleDeg = ((Math.atan2(-dz, dx) * 180) / Math.PI + 360) % 360
+                  const displayAngle = angleDeg > 180 ? angleDeg - 360 : angleDeg
+                  const midX = toSvgX((draftStart[0] + draftEnd[0]) / 2)
+                  const midY = toSvgY((draftStart[1] + draftEnd[1]) / 2)
+                  const fontSize = getMeasureLabelFontSize()
+                  const nx = -(-dz / length)
+                  const ny = -(dx / length)
+                  const offset = fontSize * 2.5
+                  return (
+                    <text
+                      dominantBaseline="central"
+                      fill={palette.draftStroke}
+                      fillOpacity={0.9}
+                      fontSize={fontSize}
+                      fontWeight="700"
+                      pointerEvents="none"
+                      textAnchor="middle"
+                      x={midX + nx * offset}
+                      y={midY + ny * offset}
+                    >
+                      {formatMeasurement(length, unit)} · {Math.abs(Math.round(displayAngle))}°
+                    </text>
+                  )
+                })()}
+              </>
             )}
 
             {polygonDraftPolygonPoints && (
@@ -7541,6 +7854,7 @@ export function FloorplanPanel() {
             )}
           </svg>
         )}
+
       </div>
     </div>
   )

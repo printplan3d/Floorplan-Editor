@@ -3,6 +3,7 @@ import {
   type AnyNodeId,
   type BuildingNode,
   emitter,
+  generateId,
   type GuideNode,
   LevelNode,
   type ScanNode,
@@ -246,7 +247,7 @@ function CameraPopover({
             buttonClassName,
           )}
           onClick={(e) => e.stopPropagation()}
-          title="Camera snapshot"
+          title="Camera snapshot" className="hidden" style={{display:"none"}}
         >
           <Camera className="h-3.5 w-3.5" />
           {hasCamera && (
@@ -419,11 +420,8 @@ function LevelReferences({
     if (!file) return
     e.target.value = ''
 
-    if (!projectId) {
-      useUploadStore.getState().startUpload(levelId, 'scan', file.name)
-      useUploadStore.getState().setError(levelId, 'No active project. Please open a project first.')
-      return
-    }
+    // Ritn3D: allow local uploads without a cloud project ID
+    const effectiveProjectId = projectId || 'local'
 
     if (file.size > MAX_FILE_SIZE) {
       useUploadStore.getState().startUpload(levelId, 'scan', file.name)
@@ -452,7 +450,30 @@ function LevelReferences({
     const type = isScan ? 'scan' : 'guide'
 
     clearUpload(levelId)
-    onUploadAsset?.(projectId, levelId, file, type)
+
+    // Local guide creation: read image as data URL and add as GuideNode
+    if (isImage) {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result as string
+        const guideNode = {
+          id: generateId('guide'),
+          type: 'guide' as const,
+          parentId: levelId,
+          visible: true,
+          url: dataUrl,
+          position: [0, 0, 0] as [number, number, number],
+          rotation: [0, 0, 0] as [number, number, number],
+          scale: 5,
+          opacity: 40,
+        }
+        useScene.getState().createNode(guideNode as any, levelId as any)
+      }
+      reader.readAsDataURL(file)
+      return
+    }
+
+    onUploadAsset?.(effectiveProjectId, levelId, file, type)
   }
 
   const handleDelete = async (nodeId: string, e: React.MouseEvent) => {
@@ -501,26 +522,7 @@ function LevelReferences({
                 style={{ left: 45, width: 8 }}
               />
 
-              <button
-                className="flex h-8 w-full cursor-pointer select-none items-center gap-2 py-0 pr-2 pl-[60px] text-left text-muted-foreground text-xs transition-colors hover:bg-accent/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={uploading}
-                onClick={() => scanInputRef.current?.click()}
-              >
-                {uploading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Plus className="h-3.5 w-3.5" />
-                )}
-                {uploading ? `Uploading ${uploadingType}... ${progress}%` : 'Upload scan/floorplan'}
-              </button>
-
-              <input
-                accept=".glb,.gltf,image/jpeg,image/png,image/webp,image/gif"
-                className="hidden"
-                onChange={handleAddAsset}
-                ref={scanInputRef}
-                type="file"
-              />
+              {/* Ritn3D: upload scan/floorplan removed */}
             </div>
           )
         }
@@ -675,7 +677,7 @@ function LevelItem({
                   : 'text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
               onClick={(e) => e.stopPropagation()}
-              title="Camera snapshot"
+              title="Camera snapshot" className="hidden" style={{display:"none"}}
             >
               <Camera className="h-3.5 w-3.5" />
               {level.camera && (
@@ -860,22 +862,15 @@ function LevelsSection({
 }
 
 function LayerToggle() {
-  const structureLayer = useEditor((state) => state.structureLayer)
-  const setStructureLayer = useEditor((state) => state.setStructureLayer)
-  const phase = useEditor((state) => state.phase)
-  const setPhase = useEditor((state) => state.setPhase)
+  // Ritn3D: locked to structure/elements — no furnish or zones tabs
+  return null
+}
 
-  const activeTab =
-    phase === 'structure' && structureLayer === 'elements'
-      ? 'structure'
-      : phase === 'furnish'
-        ? 'furnish'
-        : phase === 'structure' && structureLayer === 'zones'
-          ? 'zones'
-          : 'none'
-
+function _LayerToggle_DISABLED() {
+  // Original code preserved but unused
+  const activeTab = 'structure' as const
   return (
-    <div className="relative flex items-center gap-1 border-border/50 border-b bg-[#2C2C2E] p-1">
+    <div className="hidden">
       <button
         className={cn(
           'relative flex flex-1 cursor-pointer flex-col items-center justify-center rounded-md py-2 font-medium text-[10px] transition-all duration-200',
@@ -1086,7 +1081,7 @@ function ZoneItem({ zone, isLast }: { zone: ZoneNode; isLast?: boolean }) {
             <button
               className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-black/5 hover:text-foreground group-hover/row:opacity-100 dark:hover:bg-white/10"
               onClick={(e) => e.stopPropagation()}
-              title="Camera snapshot"
+              title="Camera snapshot" className="hidden" style={{display:"none"}}
             >
               <Camera className="h-3 w-3" />
               {zone.camera && (
@@ -1336,7 +1331,7 @@ function BuildingItem({
                   : 'text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
               onClick={(e) => e.stopPropagation()}
-              title="Camera snapshot"
+              title="Camera snapshot" className="hidden" style={{display:"none"}}
             >
               <Camera className="h-4 w-4" />
               {building.camera && (
@@ -1438,6 +1433,8 @@ export function SitePanel({ projectId, onUploadAsset, onDeleteAsset }: SitePanel
   const setSelection = useViewer((state) => state.setSelection)
   const phase = useEditor((state) => state.phase)
   const setPhase = useEditor((state) => state.setPhase)
+  const mode = useEditor((state) => state.mode)
+  const setMode = useEditor((state) => state.setMode)
 
   const [siteCameraOpen, setSiteCameraOpen] = useState(false)
   const [buildingCameraOpen, setBuildingCameraOpen] = useState<string | null>(null)
@@ -1476,16 +1473,42 @@ export function SitePanel({ projectId, onUploadAsset, onDeleteAsset }: SitePanel
               />
               <span className="font-medium text-sm">{siteNode.name || 'Site'}</span>
             </div>
-            <CameraPopover
-              buttonClassName={cn(
-                'transition-colors',
-                phase === 'site' ? 'hover:bg-black/5 dark:hover:bg-white/10' : 'hover:bg-accent',
+            <button
+              className={cn(
+                'flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors',
+                phase === 'site' && mode === 'edit'
+                  ? 'bg-indigo-500/20 text-indigo-300'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
-              hasCamera={!!siteNode.camera}
-              nodeId={siteNode.id as AnyNodeId}
-              onOpenChange={setSiteCameraOpen}
-              open={siteCameraOpen}
-            />
+              onClick={(e) => {
+                e.stopPropagation()
+                if (phase === 'site' && mode === 'edit') {
+                  setPhase('structure')
+                  useEditor.getState().setStructureLayer('elements')
+                  setMode('select')
+                } else {
+                  // Ensure a level is selected
+                  const { levelId: lid, buildingId: bid } = useViewer.getState().selection
+                  if (!lid && bid) {
+                    const ns = useScene.getState().nodes
+                    const b = ns[bid as any]
+                    if (b?.type === 'building' && (b as any).children?.length > 0) {
+                      const fl = (b as any).children.map((id: string) => ns[id as any]).find((n: any) => n?.type === 'level')
+                      if (fl) useViewer.getState().setSelection({ levelId: fl.id })
+                    }
+                  }
+                  setPhase('site')
+                  setMode('edit')
+                }
+              }}
+              type="button"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              {phase === 'site' && mode === 'edit' ? 'Done' : 'Edit'}
+            </button>
           </motion.div>
         )}
 

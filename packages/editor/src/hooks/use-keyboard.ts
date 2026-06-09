@@ -35,29 +35,7 @@ export const useKeyboard = () => {
           useViewer.getState().setSelection({ selectedIds: [], zoneId: null })
           useEditor.getState().setSelectedReferenceId(null)
         }
-      } else if (e.key === '1' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault()
-        useEditor.getState().setPhase('site')
-        useEditor.getState().setMode('select')
-      } else if (e.key === '2' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault()
-        useEditor.getState().setPhase('structure')
-        useEditor.getState().setMode('select')
-      } else if (e.key === '3' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault()
-        useEditor.getState().setPhase('furnish')
-        useEditor.getState().setMode('select')
-      } else if (e.key === 's' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault()
-        useEditor.getState().setPhase('structure')
-        useEditor.getState().setStructureLayer('elements')
-      } else if (e.key === 'f' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault()
-        useEditor.getState().setPhase('furnish')
-      } else if (e.key === 'z' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault()
-        useEditor.getState().setPhase('structure')
-        useEditor.getState().setStructureLayer('zones')
+      // Ritn3D: locked to structure phase — no phase switching
       }
       if (e.key === 'v' && !e.metaKey && !e.ctrlKey) {
         e.preventDefault()
@@ -150,6 +128,38 @@ export const useKeyboard = () => {
               })
             }
             sfxEmitter.emit('sfx:item-rotate')
+          }
+        }
+      } else if (
+        (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+        && !e.metaKey && !e.ctrlKey
+      ) {
+        // Nudge selected nodes with arrow keys
+        const selectedNodeIds = useViewer.getState().selection.selectedIds as AnyNodeId[]
+        if (selectedNodeIds.length > 0) {
+          e.preventDefault()
+          const step = e.shiftKey ? 0.1 : 0.01 // Shift = 10cm, default = 1cm
+          const dx = e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0
+          const dz = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+
+          for (const nodeId of selectedNodeIds) {
+            const node = useScene.getState().nodes[nodeId]
+            if (!node) continue
+
+            if (node.type === 'wall') {
+              // Walls have start/end [x, z] tuples
+              const w = node as any
+              useScene.getState().updateNode(nodeId, {
+                start: [w.start[0] + dx, w.start[1] + dz],
+                end: [w.end[0] + dx, w.end[1] + dz],
+              })
+            } else if ('position' in node && Array.isArray((node as any).position)) {
+              // Items, doors, windows have position [x, y, z]
+              const pos = (node as any).position as number[]
+              useScene.getState().updateNode(nodeId, {
+                position: [pos[0] + dx, pos[1], pos[2] + dz],
+              })
+            }
           }
         }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
