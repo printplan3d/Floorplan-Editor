@@ -41,6 +41,7 @@ export {
   bulgeFromThreePoints,
   isStraight,
   type Point2,
+  pointAndTangentAtT,
   STRAIGHT_BULGE_EPSILON,
   tangentAtEnd,
   tangentAtStart,

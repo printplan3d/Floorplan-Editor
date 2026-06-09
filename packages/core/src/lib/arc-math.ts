@@ -228,6 +228,47 @@ export function tessellateArc(
 }
 
 /**
+ * Point on the arc + unit tangent at parametric arc-length t (0 = start,
+ * 1 = end). For a straight wall this is just linear interpolation along the
+ * chord. Used to render and place doors / windows on curved walls — the
+ * opening's `position` along the wall is in arc-length units, and the
+ * tangent gives the local "wall direction" so the opening rectangle stays
+ * perpendicular to the wall.
+ */
+export function pointAndTangentAtT(
+  start: Point2,
+  end: Point2,
+  bulge: number,
+  t: number,
+): { point: Point2; tangent: Point2 } {
+  const clampedT = Math.max(0, Math.min(1, t))
+  if (isStraight(bulge)) {
+    const point: Point2 = [
+      start[0] + (end[0] - start[0]) * clampedT,
+      start[1] + (end[1] - start[1]) * clampedT,
+    ]
+    const chord = dist(start, end)
+    const tangent: Point2 = chord === 0
+      ? [1, 0]
+      : [(end[0] - start[0]) / chord, (end[1] - start[1]) / chord]
+    return { point, tangent }
+  }
+  const p = arcParamsFromBulge(start, end, bulge)
+  if (!p) {
+    return { point: start, tangent: [1, 0] }
+  }
+  const angle = p.startAngle + p.sweepAngle * clampedT
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const point: Point2 = [p.center[0] + p.radius * cos, p.center[1] + p.radius * sin]
+  // Tangent: perpendicular to the radial direction (cos, sin), rotated in
+  // the sweep direction.
+  const sign = p.ccw ? 1 : -1
+  const tangent: Point2 = [-sign * sin, sign * cos]
+  return { point, tangent }
+}
+
+/**
  * Unit tangent direction at the start of the wall (points INTO the wall from
  * `start`). For a straight wall this is just normalize(end - start). For an
  * arc it's the tangent of the circle at the start point. Used by the mitering

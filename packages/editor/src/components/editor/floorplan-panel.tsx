@@ -3,6 +3,7 @@
 import { Icon } from '@iconify/react'
 import {
   type AnyNodeId,
+  arcLength,
   arcMidpoint,
   bulgeFromThreePoints,
   type BuildingNode,
@@ -13,6 +14,8 @@ import {
   getWallPlanFootprint,
   isStraight,
   ItemNode,
+  pointAndTangentAtT,
+  tessellateArc,
   type LevelNode,
   loadAssetUrl,
   type Point2D,
@@ -1569,32 +1572,30 @@ function getWallMeasurementOverlay(
 }
 
 function getOpeningFootprint(wall: WallNode, node: WindowNode | DoorNode): Point2D[] {
-  const [x1, z1] = wall.start
-  const [x2, z2] = wall.end
-
-  const dx = x2 - x1
-  const dz = z2 - z1
-  const length = Math.sqrt(dx * dx + dz * dz)
-
-  if (length < 1e-9) {
-    return []
-  }
-
-  const dirX = dx / length
-  const dirZ = dz / length
-
-  const perpX = -dirZ
-  const perpZ = dirX
-
-  const distance = node.position[0]
   const width = node.width
   const depth = wall.thickness ?? 0.1
-
-  const cx = x1 + dirX * distance
-  const cz = z1 + dirZ * distance
-
   const halfWidth = width / 2
   const halfDepth = depth / 2
+
+  // Position is distance along the wall from start. For straight walls that's
+  // chord distance; for arcs it's arc length. arcLength() collapses to chord
+  // length when bulge == 0, so both cases go through the same formula.
+  const bulge = wall.bulge ?? 0
+  const totalLen = arcLength(wall.start, wall.end, bulge)
+  if (totalLen < 1e-9) return []
+
+  // Normalize position into [0, 1] parametric arc length so we can ask the
+  // arc helper for (point, tangent) at that t. For straight walls this gives
+  // exactly the legacy result (linear interpolation along chord).
+  const t = Math.max(0, Math.min(1, node.position[0] / totalLen))
+  const { point, tangent } = pointAndTangentAtT(wall.start, wall.end, bulge, t)
+
+  const dirX = tangent[0]
+  const dirZ = tangent[1]
+  const perpX = -dirZ
+  const perpZ = dirX
+  const cx = point[0]
+  const cz = point[1]
 
   return [
     { x: cx - dirX * halfWidth + perpX * halfDepth, y: cz - dirZ * halfWidth + perpZ * halfDepth },
@@ -1728,24 +1729,61 @@ function findClosestWallPoint(
   let bestDistSq = maxDistance * maxDistance
 
   for (const wall of walls) {
-    const [x1, z1] = wall.start
-    const [x2, z2] = wall.end
-    const dx = x2 - x1
-    const dz = z2 - z1
-    const lengthSq = dx * dx + dz * dz
-    if (lengthSq < 1e-9) continue
+    const bulge = wall.bulge ?? 0
+    if (isStraight(bulge)) {
+      // Straight wall — original fast chord projection.
+      const [x1, z1] = wall.start
+      const [x2, z2] = wall.end
+      const dx = x2 - x1
+      const dz = z2 - z1
+      const lengthSq = dx * dx + dz * dz
+      if (lengthSq < 1e-9) continue
+      let t = ((point[0] - x1) * dx + (point[1] - z1) * dz) / lengthSq
+      t = Math.max(0, Math.min(1, t))
+      const px = x1 + t * dx
+      const pz = z1 + t * dz
+      const distSq = (point[0] - px) ** 2 + (point[1] - pz) ** 2
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq
+        best = { wall, point: [px, pz], t, normal: [0, 0, 1] }
+      }
+      continue
+    }
 
-    let t = ((point[0] - x1) * dx + (point[1] - z1) * dz) / lengthSq
-    t = Math.max(0, Math.min(1, t))
-
-    const px = x1 + t * dx
-    const pz = z1 + t * dz
-
-    const distSq = (point[0] - px) ** 2 + (point[1] - pz) ** 2
-    if (distSq < bestDistSq) {
-      bestDistSq = distSq
-      // Provide an arbitrary front-facing normal so the tool knows it's a valid wall side
-      best = { wall, point: [px, pz], t, normal: [0, 0, 1] }
+    // Curved wall — tessellate the arc, find closest point on the polyline.
+    // `t` returned is arc-length-parametric (cumulative segment length /
+    // total) — same semantic the rendering / placement code expects. Slower
+    // than the chord projection (O(segments) per wall) but only runs while
+    // a placement tool is hovering; furniture catalogs hover-test elsewhere.
+    const samples = tessellateArc(wall.start, wall.end, bulge)
+    if (samples.length < 2) continue
+    // Pre-compute cumulative segment lengths for t-parameter mapping.
+    const cum: number[] = [0]
+    for (let i = 1; i < samples.length; i++) {
+      const a = samples[i - 1]!
+      const b = samples[i]!
+      cum.push(cum[i - 1]! + Math.hypot(b[0] - a[0], b[1] - a[1]))
+    }
+    const totalLen = cum[cum.length - 1]!
+    if (totalLen < 1e-9) continue
+    for (let i = 1; i < samples.length; i++) {
+      const a = samples[i - 1]!
+      const b = samples[i]!
+      const sx = b[0] - a[0]
+      const sz = b[1] - a[1]
+      const segLenSq = sx * sx + sz * sz
+      if (segLenSq < 1e-12) continue
+      let segT = ((point[0] - a[0]) * sx + (point[1] - a[1]) * sz) / segLenSq
+      segT = Math.max(0, Math.min(1, segT))
+      const px = a[0] + segT * sx
+      const pz = a[1] + segT * sz
+      const distSq = (point[0] - px) ** 2 + (point[1] - pz) ** 2
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq
+        const arcLenAtHit = cum[i - 1]! + segT * Math.sqrt(segLenSq)
+        const t = arcLenAtHit / totalLen
+        best = { wall, point: [px, pz], t, normal: [0, 0, 1] }
+      }
     }
   }
 
@@ -5662,9 +5700,11 @@ export function FloorplanPanel() {
       if (isOpeningPlacementActive) {
         const closest = findClosestWallPoint(planPoint, walls)
         if (closest) {
-          const dx = closest.wall.end[0] - closest.wall.start[0]
-          const dz = closest.wall.end[1] - closest.wall.start[1]
-          const length = Math.sqrt(dx * dx + dz * dz)
+          // Arc-aware: closest.t is arc-length-parametric (0..1) per
+          // findClosestWallPoint, and the wall's effective length is arc
+          // length. For straight walls bulge=0 -> arcLength collapses to the
+          // chord, byte-identical to the legacy path.
+          const length = arcLength(closest.wall.start, closest.wall.end, closest.wall.bulge ?? 0)
           const distance = closest.t * length
 
           const wallEvent = {
@@ -5941,9 +5981,11 @@ export function FloorplanPanel() {
       if (isOpeningPlacementActive) {
         const closest = findClosestWallPoint(planPoint, walls)
         if (closest) {
-          const dx = closest.wall.end[0] - closest.wall.start[0]
-          const dz = closest.wall.end[1] - closest.wall.start[1]
-          const length = Math.sqrt(dx * dx + dz * dz)
+          // Arc-aware: closest.t is arc-length-parametric (0..1) per
+          // findClosestWallPoint, and the wall's effective length is arc
+          // length. For straight walls bulge=0 -> arcLength collapses to the
+          // chord, byte-identical to the legacy path.
+          const length = arcLength(closest.wall.start, closest.wall.end, closest.wall.bulge ?? 0)
           const distance = closest.t * length
 
           emitter.emit('wall:click', {
