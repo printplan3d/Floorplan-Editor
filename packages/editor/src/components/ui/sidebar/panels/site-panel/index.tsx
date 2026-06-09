@@ -413,6 +413,23 @@ function LevelReferences({
       (node.type === 'scan' || node.type === 'guide') && node.parentId === levelId,
   )
 
+  // Build + commit the GuideNode from a data URL. Shared by the image and PDF
+  // paths so they produce identical scene-graph nodes.
+  const createGuideFromDataUrl = (dataUrl: string) => {
+    const guideNode = {
+      id: generateId('guide'),
+      type: 'guide' as const,
+      parentId: levelId,
+      visible: true,
+      url: dataUrl,
+      position: [0, 0, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: 5,
+      opacity: 40,
+    }
+    useScene.getState().createNode(guideNode as any, levelId as any)
+  }
+
   const handleAddAsset = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -432,16 +449,21 @@ function LevelReferences({
       return
     }
 
-    // Auto-detect type based on file extension/mime type
+    // Auto-detect type based on file extension/mime type.
+    // `isScan` (.glb/.gltf) is dead in our setup — the file input no longer
+    // accepts those — but we keep the branch so the rest of Pascal's upload
+    // store machinery stays untouched. Strip during the cleanup pass.
     const isScan =
       file.name.toLowerCase().endsWith('.glb') || file.name.toLowerCase().endsWith('.gltf')
     const isImage = file.type.startsWith('image/')
+    const isPdf =
+      file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
 
-    if (!(isScan || isImage)) {
+    if (!(isScan || isImage || isPdf)) {
       useUploadStore.getState().startUpload(levelId, 'scan', file.name)
       useUploadStore
         .getState()
-        .setError(levelId, 'Invalid file type. Please upload a .glb/.gltf scan or an image.')
+        .setError(levelId, 'Invalid file type. Please upload an image (JPG/PNG) or a PDF.')
       return
     }
 
@@ -449,23 +471,39 @@ function LevelReferences({
 
     clearUpload(levelId)
 
+    // PDF: render page 1 of the PDF to a PNG data URL, then drop it into the
+    // scene as a GuideNode (same as the image path below). Wrapped in the
+    // upload-store progress UI so the user sees "Uploading…" feedback while
+    // pdf.js does its (potentially multi-second) decode + render.
+    if (isPdf) {
+      useUploadStore.getState().startUpload(levelId, 'guide', file.name)
+      ;(async () => {
+        try {
+          const { pdfFileToImageDataUrl } = await import('./../../../../../lib/pdf-to-image')
+          const { dataUrl, totalPages } = await pdfFileToImageDataUrl(file)
+          if (totalPages > 1) {
+            // No page picker yet — log so the user/dev can see what happened.
+            console.info(
+              `[ritn3d] PDF has ${totalPages} pages; rendered page 1 only. ` +
+                'Page picker is a planned follow-up.',
+            )
+          }
+          createGuideFromDataUrl(dataUrl)
+          clearUpload(levelId)
+        } catch (err) {
+          useUploadStore
+            .getState()
+            .setError(levelId, (err as Error)?.message || 'Could not open the PDF.')
+        }
+      })()
+      return
+    }
+
     // Local guide creation: read image as data URL and add as GuideNode
     if (isImage) {
       const reader = new FileReader()
       reader.onload = () => {
-        const dataUrl = reader.result as string
-        const guideNode = {
-          id: generateId('guide'),
-          type: 'guide' as const,
-          parentId: levelId,
-          visible: true,
-          url: dataUrl,
-          position: [0, 0, 0] as [number, number, number],
-          rotation: [0, 0, 0] as [number, number, number],
-          scale: 5,
-          opacity: 40,
-        }
-        useScene.getState().createNode(guideNode as any, levelId as any)
+        createGuideFromDataUrl(reader.result as string)
       }
       reader.readAsDataURL(file)
       return
@@ -520,7 +558,52 @@ function LevelReferences({
                 style={{ left: 45, width: 8 }}
               />
 
-              {/* Ritn3D: upload scan/floorplan removed */}
+              {/* Ritn3D: floor-plan upload. Accepts:
+                    - Images (JPG/PNG/etc.) — read directly as a data URL,
+                      committed as a GuideNode.
+                    - PDFs — pdf.js renders page 1 to a canvas, then committed
+                      as a GuideNode the same way. Multi-page PDFs are
+                      truncated to page 1 with a console hint (page picker
+                      is a follow-up).
+                  In both cases the user can then trace walls/doors/windows
+                  on top of the overlay and tune opacity/scale/position via
+                  the ReferencePanel. .glb/.gltf is Pascal's 3D scan feature
+                  — intentionally left out of accept. */}
+              <input
+                ref={scanInputRef}
+                type="file"
+                accept="image/*,application/pdf,.pdf"
+                className="hidden"
+                onChange={handleAddAsset}
+                disabled={uploading}
+              />
+              <button
+                type="button"
+                onClick={() => scanInputRef.current?.click()}
+                disabled={uploading}
+                title="Upload a floor plan (JPG / PNG / PDF) to trace over"
+                className="relative flex min-h-8 w-full select-none items-center gap-2 py-1 pr-2 pl-[60px] text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <svg
+                  className="h-3.5 w-3.5 shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                <span className="truncate">
+                  {uploading
+                    ? `Uploading… ${progress}%`
+                    : 'Add floor plan to trace'}
+                </span>
+              </button>
             </div>
           )
         }
