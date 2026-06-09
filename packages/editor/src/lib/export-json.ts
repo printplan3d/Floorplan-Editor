@@ -1,4 +1,4 @@
-import { type AnyNodeId, type DoorNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@pascal-app/core'
+import { type AnyNodeId, arcLength, type DoorNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 
 /**
@@ -33,6 +33,10 @@ export function exportFloorPlanJSON(): object {
           thickness: w.thickness ?? 0.15,
           height: w.height ?? 2.5,
           type: w.frontSide === 'exterior' || w.backSide === 'exterior' ? 'exterior' : 'interior',
+          // Ritn3D arc walls (DXF bulge: tan(arc_angle/4); 0 = straight).
+          // Omitted from JSON when bulge is 0 so the Blender pipeline can
+          // keep a simpler straight-wall code path for legacy plans.
+          ...(w.bulge && w.bulge !== 0 ? { bulge: w.bulge } : {}),
         }
         levelWalls.push(wallExport)
 
@@ -42,7 +46,10 @@ export function exportFloorPlanJSON(): object {
           if (!wc) continue  // .filter(Boolean) doesn't narrow the TS type
           if (wc.type === 'door') {
             const d = wc as DoorNode
-            const wallLen = Math.hypot(w.end[0] - w.start[0], w.end[1] - w.start[1])
+            // For curved walls, "position_along_wall" is parametric over arc
+            // length, not chord. For straight walls bulge=0 so arcLength
+            // collapses to chord length — same answer as before.
+            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
             levelDoors.push({
               id: d.id,
               wall_id: w.id,
@@ -55,7 +62,10 @@ export function exportFloorPlanJSON(): object {
           }
           if (wc.type === 'window') {
             const win = wc as WindowNode
-            const wallLen = Math.hypot(w.end[0] - w.start[0], w.end[1] - w.start[1])
+            // For curved walls, "position_along_wall" is parametric over arc
+            // length, not chord. For straight walls bulge=0 so arcLength
+            // collapses to chord length — same answer as before.
+            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
             const sillHeight = Math.max(0, (win.position[1] ?? 0) - (win.height ?? 1.5) / 2)
             levelWindows.push({
               id: win.id,
@@ -132,13 +142,17 @@ export function exportFloorPlanJSON(): object {
           thickness: w.thickness ?? 0.15,
           height: w.height ?? 2.5,
           type: 'interior',
+          ...(w.bulge && w.bulge !== 0 ? { bulge: w.bulge } : {}),
         })
         const wallChildren = (w.children || []).map((id: string) => nodes[id as AnyNodeId]).filter(Boolean)
         for (const wc of wallChildren) {
           if (!wc) continue  // .filter(Boolean) doesn't narrow the TS type
           if (wc.type === 'door') {
             const d = wc as DoorNode
-            const wallLen = Math.hypot(w.end[0] - w.start[0], w.end[1] - w.start[1])
+            // For curved walls, "position_along_wall" is parametric over arc
+            // length, not chord. For straight walls bulge=0 so arcLength
+            // collapses to chord length — same answer as before.
+            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
             allDoors.push({
               id: d.id, wall_id: w.id,
               position_along_wall: wallLen > 0 ? d.position[0] / wallLen : 0.5,
@@ -148,7 +162,10 @@ export function exportFloorPlanJSON(): object {
           }
           if (wc.type === 'window') {
             const win = wc as WindowNode
-            const wallLen = Math.hypot(w.end[0] - w.start[0], w.end[1] - w.start[1])
+            // For curved walls, "position_along_wall" is parametric over arc
+            // length, not chord. For straight walls bulge=0 so arcLength
+            // collapses to chord length — same answer as before.
+            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
             allWindows.push({
               id: win.id, wall_id: w.id,
               position_along_wall: wallLen > 0 ? win.position[0] / wallLen : 0.5,
