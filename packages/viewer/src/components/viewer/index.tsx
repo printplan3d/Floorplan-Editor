@@ -17,7 +17,8 @@ import useViewer from '../../store/use-viewer'
 import { GuideSystem } from '../../systems/guide/guide-system'
 import { ItemLightSystem } from '../../systems/item-light/item-light-system'
 import { LevelSystem } from '../../systems/level/level-system'
-import { ScanSystem } from '../../systems/scan/scan-system'
+// ScanSystem removed 2026-06-10 (Ritn3D cleanup): Pascal's 3D-scan import
+// feature (LiDAR/photogrammetry GLB overlay), unused here.
 import { WallCutout } from '../../systems/wall/wall-cutout'
 import { ZoneSystem } from '../../systems/zone/zone-system'
 import { SceneRenderer } from '../renderers/scene-renderer'
@@ -133,7 +134,6 @@ const Viewer: React.FC<ViewerProps> = ({
       {/* Default Systems */}
       <LevelSystem />
       <GuideSystem />
-      <ScanSystem />
       <WallCutout />
       {/* Core systems */}
       <CeilingSystem />

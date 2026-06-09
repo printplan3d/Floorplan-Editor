@@ -1,6 +1,6 @@
 'use client'
 
-import { type AnyNode, type GuideNode, type ScanNode, useScene } from '@pascal-app/core'
+import { type AnyNode, type GuideNode, useScene } from '@pascal-app/core'
 import { Box, Image as ImageIcon } from 'lucide-react'
 import { useCallback } from 'react'
 import useEditor from '../../../store/use-editor'
@@ -10,7 +10,10 @@ import { PanelSection } from '../controls/panel-section'
 import { SliderControl } from '../controls/slider-control'
 import { PanelWrapper } from './panel-wrapper'
 
-type ReferenceNode = ScanNode | GuideNode
+// Ritn3D cleanup 2026-06-10: ScanNode removed; only GuideNode remains as a
+// reference asset (image/PDF overlay for tracing). `isScan` branches kept
+// as `false` literals for now so the diff stays minimal — they tree-shake.
+type ReferenceNode = GuideNode
 
 export function ReferencePanel() {
   const selectedReferenceId = useEditor((s) => s.selectedReferenceId)
@@ -34,9 +37,13 @@ export function ReferencePanel() {
     setSelectedReferenceId(null)
   }, [setSelectedReferenceId])
 
-  if (!node || (node.type !== 'scan' && node.type !== 'guide')) return null
+  if (!node || node.type !== 'guide') return null
 
-  const isScan = node.type === 'scan'
+  // Ritn3D cleanup 2026-06-10: scans removed. `isScan` always false now —
+  // kept as a literal so the conditional rendering below works unchanged
+  // and a future ScanNode re-introduction is a one-line tweak. Tree-shakes
+  // the unused branches.
+  const isScan = false
 
   return (
     <PanelWrapper

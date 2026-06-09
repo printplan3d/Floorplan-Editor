@@ -9,7 +9,7 @@ import { ItemRenderer } from './item/item-renderer'
 import { LevelRenderer } from './level/level-renderer'
 import { RoofRenderer } from './roof/roof-renderer'
 import { RoofSegmentRenderer } from './roof-segment/roof-segment-renderer'
-import { ScanRenderer } from './scan/scan-renderer'
+// ScanRenderer removed 2026-06-10 (Ritn3D cleanup).
 import { SiteRenderer } from './site/site-renderer'
 import { SlabRenderer } from './slab/slab-renderer'
 import { WallRenderer } from './wall/wall-renderer'
@@ -35,7 +35,7 @@ export const NodeRenderer = ({ nodeId }: { nodeId: AnyNode['id'] }) => {
       {node.type === 'zone' && <ZoneRenderer node={node} />}
       {node.type === 'roof' && <RoofRenderer node={node} />}
       {node.type === 'roof-segment' && <RoofSegmentRenderer node={node} />}
-      {node.type === 'scan' && <ScanRenderer node={node} />}
+      {/* scan node type removed in Ritn3D cleanup */}
       {node.type === 'guide' && <GuideRenderer node={node} />}
     </>
   )

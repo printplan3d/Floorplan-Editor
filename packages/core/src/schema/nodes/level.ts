@@ -4,7 +4,6 @@ import { BaseNode, nodeType, objectId } from '../base'
 import { CeilingNode } from './ceiling'
 import { GuideNode } from './guide'
 import { RoofNode } from './roof'
-import { ScanNode } from './scan'
 import { SlabNode } from './slab'
 import { WallNode } from './wall'
 import { ZoneNode } from './zone'
@@ -20,7 +19,9 @@ export const LevelNode = BaseNode.extend({
         SlabNode.shape.id,
         CeilingNode.shape.id,
         RoofNode.shape.id,
-        ScanNode.shape.id,
+        // ScanNode removed 2026-06-10 (Ritn3D cleanup): 3D-scan reference
+        // (LiDAR/photogrammetry GLB) was Pascal's BIM feature, irrelevant
+        // for floor-plan tracing. GuideNode (image overlay) is what we use.
         GuideNode.shape.id,
       ]),
     )

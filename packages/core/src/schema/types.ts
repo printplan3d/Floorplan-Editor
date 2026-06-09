@@ -7,7 +7,6 @@ import { ItemNode } from './nodes/item'
 import { LevelNode } from './nodes/level'
 import { RoofNode } from './nodes/roof'
 import { RoofSegmentNode } from './nodes/roof-segment'
-import { ScanNode } from './nodes/scan'
 import { SiteNode } from './nodes/site'
 import { SlabNode } from './nodes/slab'
 import { WallNode } from './nodes/wall'
@@ -25,7 +24,7 @@ export const AnyNode = z.discriminatedUnion('type', [
   CeilingNode,
   RoofNode,
   RoofSegmentNode,
-  ScanNode,
+  // ScanNode removed 2026-06-10 (Ritn3D cleanup).
   GuideNode,
   WindowNode,
   DoorNode,

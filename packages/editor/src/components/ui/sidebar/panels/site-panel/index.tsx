@@ -6,7 +6,6 @@ import {
   generateId,
   type GuideNode,
   LevelNode,
-  type ScanNode,
   type SiteNode,
   useScene,
   type ZoneNode,
@@ -309,7 +308,7 @@ function ReferenceItem({
   setSelectedReferenceId,
   handleDelete,
 }: {
-  refNode: ScanNode | GuideNode
+  refNode: GuideNode
   isLastRow: boolean
   setSelectedReferenceId: (id: string) => void
   handleDelete: (id: string, e: React.MouseEvent) => void
@@ -342,21 +341,13 @@ function ReferenceItem({
       />
 
       <div className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 py-0 pl-[60px] text-muted-foreground group-hover/ref:text-foreground">
-        {refNode.type === 'scan' ? (
-          <img
-            alt="Scan"
-            className="h-3.5 w-3.5 shrink-0 object-contain opacity-70 transition-opacity group-hover/ref:opacity-100"
-            src="/icons/mesh.png"
-          />
-        ) : (
-          <img
-            alt="Guide"
-            className="h-3.5 w-3.5 shrink-0 object-contain opacity-70 transition-opacity group-hover/ref:opacity-100"
-            src="/icons/floorplan.png"
-          />
-        )}
+        <img
+          alt="Guide"
+          className="h-3.5 w-3.5 shrink-0 object-contain opacity-70 transition-opacity group-hover/ref:opacity-100"
+          src="/icons/floorplan.png"
+        />
         <InlineRenameInput
-          defaultName={refNode.type === 'scan' ? '3D Scan' : 'Guide Image'}
+          defaultName="Guide Image"
           isEditing={isEditing}
           node={refNode}
           onStartEditing={() => setIsEditing(true)}
@@ -381,7 +372,8 @@ interface LevelReferencesProps {
   levelId: string
   isLastLevel?: boolean
   projectId?: string
-  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'scan' | 'guide') => void
+  // Ritn3D 2026-06-10: cloud upload narrowed to 'guide' only after scan strip.
+  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'guide') => void
   onDeleteAsset?: (projectId: string, url: string) => void
 }
 
@@ -409,8 +401,8 @@ function LevelReferences({
   const scanInputRef = useRef<HTMLInputElement>(null)
 
   const references = Object.values(nodes).filter(
-    (node): node is ScanNode | GuideNode =>
-      (node.type === 'scan' || node.type === 'guide') && node.parentId === levelId,
+    (node): node is GuideNode =>
+      node.type === 'guide' && node.parentId === levelId,
   )
 
   // Build + commit the GuideNode from a data URL. Shared by the image and PDF
@@ -449,25 +441,19 @@ function LevelReferences({
       return
     }
 
-    // Auto-detect type based on file extension/mime type.
-    // `isScan` (.glb/.gltf) is dead in our setup — the file input no longer
-    // accepts those — but we keep the branch so the rest of Pascal's upload
-    // store machinery stays untouched. Strip during the cleanup pass.
-    const isScan =
-      file.name.toLowerCase().endsWith('.glb') || file.name.toLowerCase().endsWith('.gltf')
+    // Ritn3D 2026-06-10: Pascal's .glb/.gltf "scan" branch removed in the
+    // cleanup pass; we only accept floor-plan images and PDFs.
     const isImage = file.type.startsWith('image/')
     const isPdf =
       file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
 
-    if (!(isScan || isImage || isPdf)) {
-      useUploadStore.getState().startUpload(levelId, 'scan', file.name)
+    if (!(isImage || isPdf)) {
+      useUploadStore.getState().startUpload(levelId, 'guide', file.name)
       useUploadStore
         .getState()
         .setError(levelId, 'Invalid file type. Please upload an image (JPG/PNG) or a PDF.')
       return
     }
-
-    const type = isScan ? 'scan' : 'guide'
 
     clearUpload(levelId)
 
@@ -509,12 +495,13 @@ function LevelReferences({
       return
     }
 
-    onUploadAsset?.(effectiveProjectId, levelId, file, type)
+    // Unreachable: the isImage/isPdf gate above either handles or rejects.
+    // Pascal's cloud onUploadAsset path is dead in our local-only setup.
   }
 
   const handleDelete = async (nodeId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    const refNode = nodes[nodeId as AnyNodeId] as ScanNode | GuideNode | undefined
+    const refNode = nodes[nodeId as AnyNodeId] as GuideNode | undefined
 
     if (
       projectId &&
@@ -608,7 +595,7 @@ function LevelReferences({
           )
         }
 
-        const ref = row.data as ScanNode | GuideNode
+        const ref = row.data as GuideNode
         return (
           <ReferenceItem
             handleDelete={handleDelete}
@@ -649,7 +636,8 @@ function LevelItem({
   updateNode: (id: AnyNodeId, updates: Partial<AnyNode>) => void
   isLast?: boolean
   projectId?: string
-  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'scan' | 'guide') => void
+  // Ritn3D 2026-06-10: cloud upload narrowed to 'guide' only after scan strip.
+  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'guide') => void
   onDeleteAsset?: (projectId: string, url: string) => void
 }) {
   const [cameraPopoverOpen, setCameraPopoverOpen] = useState(false)
@@ -865,7 +853,8 @@ function LevelsSection({
   onDeleteAsset,
 }: {
   projectId?: string
-  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'scan' | 'guide') => void
+  // Ritn3D 2026-06-10: cloud upload narrowed to 'guide' only after scan strip.
+  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'guide') => void
   onDeleteAsset?: (projectId: string, url: string) => void
 } = {}) {
   const nodes = useScene((state) => state.nodes)
@@ -1229,7 +1218,8 @@ function BuildingItem({
   buildingCameraOpen: string | null
   setBuildingCameraOpen: (id: string | null) => void
   projectId?: string
-  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'scan' | 'guide') => void
+  // Ritn3D 2026-06-10: cloud upload narrowed to 'guide' only after scan strip.
+  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'guide') => void
   onDeleteAsset?: (projectId: string, url: string) => void
 }) {
   const setSelection = useViewer((state) => state.setSelection)
@@ -1383,7 +1373,8 @@ function BuildingItem({
 
 export interface SitePanelProps {
   projectId?: string
-  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'scan' | 'guide') => void
+  // Ritn3D 2026-06-10: cloud upload narrowed to 'guide' only after scan strip.
+  onUploadAsset?: (projectId: string, levelId: string, file: File, type: 'guide') => void
   onDeleteAsset?: (projectId: string, url: string) => void
 }
 

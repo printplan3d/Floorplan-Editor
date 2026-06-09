@@ -24,7 +24,7 @@ export { getScaledDimensions, ItemNode } from './nodes/item'
 export { LevelNode } from './nodes/level'
 export { RoofNode } from './nodes/roof'
 export { RoofSegmentNode, RoofType } from './nodes/roof-segment'
-export { ScanNode } from './nodes/scan'
+// ScanNode removed 2026-06-10 (Ritn3D cleanup).
 // Nodes
 export { SiteNode } from './nodes/site'
 export { SlabNode } from './nodes/slab'
