@@ -17,7 +17,7 @@ export function getWallPlanFootprint(wallNode: WallNode, miterData: WallMiterDat
   // Straight-wall code path below is byte-identical to the original Pascal
   // version, so existing scenes round-trip exactly.
   if (!isStraight(wallNode.bulge)) {
-    return getArcWallPlanFootprint(wallNode)
+    return getArcWallPlanFootprint(wallNode, miterData)
   }
 
   const { junctionData } = miterData
@@ -83,23 +83,24 @@ export function getWallPlanFootprint(wallNode: WallNode, miterData: WallMiterDat
  * is invisible at the segment lengths we use (default 0.1 m, so the angle
  * error between segment normal and true radial is well under a degree).
  *
- * No junction-mitering here yet — the start/end caps just sit perpendicular
- * to the local tangent. Mitering for arc joins is Phase 4.
+ * Phase 4 (tangent-approximation mitering):
+ *   When the arc wall meets another wall at start or end, wall-mitering
+ *   already computed the offset-line intersection point using each wall's
+ *   local tangent at the junction. We just overwrite the first/last outer
+ *   and inner polygon vertices with those miter points so the arc's body
+ *   seamlessly joins the adjacent wall's body. The tessellated middle of
+ *   the arc is untouched (the curve still bends through its actual radius).
  */
-function getArcWallPlanFootprint(wallNode: WallNode): Point2D[] {
+function getArcWallPlanFootprint(wallNode: WallNode, miterData: WallMiterData): Point2D[] {
   const start: readonly [number, number] = wallNode.start
   const end: readonly [number, number] = wallNode.end
   const halfT = getWallThickness(wallNode) / 2
 
-  // Centerline tessellation. tessellateArc returns [start, ..., end] with
-  // segment length tuned for visual smoothness; on a 5 m wall with bulge 0.5
-  // we get ~50 segments — overkill for 2D SVG but cheap.
+  // Centerline tessellation.
   const centerline = tessellateArc(start, end, wallNode.bulge)
   if (centerline.length < 2) return []
 
-  // Compute outer/inner offset for every centerline vertex. Normal at vertex
-  // i uses the segment direction to vertex i+1 for interior vertices, and the
-  // previous segment for the last vertex.
+  // Compute outer/inner offset for every centerline vertex.
   const outer: Point2D[] = []
   const inner: Point2D[] = []
   for (let i = 0; i < centerline.length; i++) {
@@ -117,6 +118,22 @@ function getArcWallPlanFootprint(wallNode: WallNode): Point2D[] {
     outer.push({ x: here[0] + nx * halfT, y: here[1] + ny * halfT })
     inner.push({ x: here[0] - nx * halfT, y: here[1] - ny * halfT })
   }
+  if (outer.length === 0) return []
+
+  // Apply mitering at endpoints. The junction "left"/"right" naming is in the
+  // OUTGOING direction at that endpoint — at `end` the outgoing direction is
+  // reversed relative to the wall, so left/right swap. (Mirrors the
+  // straight-wall code path's swap.)
+  const wallStartPt: Point2D = { x: start[0], y: start[1] }
+  const wallEndPt: Point2D = { x: end[0], y: end[1] }
+  const keyStart = pointToKey(wallStartPt)
+  const keyEnd = pointToKey(wallEndPt)
+  const startJunction = miterData.junctionData.get(keyStart)?.get(wallNode.id)
+  const endJunction = miterData.junctionData.get(keyEnd)?.get(wallNode.id)
+  if (startJunction?.left) outer[0] = startJunction.left
+  if (startJunction?.right) inner[0] = startJunction.right
+  if (endJunction?.right) outer[outer.length - 1] = endJunction.right
+  if (endJunction?.left) inner[inner.length - 1] = endJunction.left
 
   // Build closed polygon: outer forward + inner reverse.
   const polygon: Point2D[] = [...outer]

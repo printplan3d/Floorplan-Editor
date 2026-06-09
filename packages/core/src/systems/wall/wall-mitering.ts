@@ -1,3 +1,4 @@
+import { isStraight, tangentAtEnd, tangentAtStart } from '../../lib/arc-math'
 import type { WallNode } from '../../schema'
 
 // ============================================================================
@@ -170,11 +171,38 @@ function calculateJunctionIntersections(
         processedWalls.push({ wallId: wall.id, angle, edgeA, edgeB, isPassthrough: true })
       }
     } else {
-      // Normal wall endpoint (start or end)
-      const v =
-        endType === 'start'
-          ? { x: wall.end[0] - wall.start[0], y: wall.end[1] - wall.start[1] }
-          : { x: wall.start[0] - wall.end[0], y: wall.start[1] - wall.end[1] }
+      // Normal wall endpoint (start or end).
+      //
+      // Ritn3D curved-wall mitering: `v` is the wall's OUTGOING direction at
+      // the junction (pointing FROM the meeting point INTO the wall). For
+      // straight walls that's just (end - start) or (start - end). For arc
+      // walls the local tangent at the junction endpoint is what matters —
+      // this is the "tangent approximation" used by SVG stroke joins,
+      // Illustrator, Inkscape, Figma, and most 2D CAD when geometric
+      // exactness isn't critical. Worst-case visual error scales with
+      // thickness / radius — sub-pixel for any realistic floor plan
+      // (0.1 m walls, 0.5 m+ radius curves).
+      //
+      // Once `v` is set, the rest of the algorithm (offset line, sort by
+      // angle, line-line intersection) runs verbatim — no new geometry to
+      // debug, zero risk to straight-wall corners.
+      const bulge = wall.bulge ?? 0
+      let v: Point2D
+      if (isStraight(bulge)) {
+        v =
+          endType === 'start'
+            ? { x: wall.end[0] - wall.start[0], y: wall.end[1] - wall.start[1] }
+            : { x: wall.start[0] - wall.end[0], y: wall.start[1] - wall.end[1] }
+      } else if (endType === 'start') {
+        // tangentAtStart already points away from `start` INTO the wall.
+        const [tx, ty] = tangentAtStart(wall.start, wall.end, bulge)
+        v = { x: tx, y: ty }
+      } else {
+        // tangentAtEnd points OUT of the wall past `end`. Negate so it points
+        // away from the junction INTO the wall.
+        const [tx, ty] = tangentAtEnd(wall.start, wall.end, bulge)
+        v = { x: -tx, y: -ty }
+      }
 
       const L = Math.sqrt(v.x * v.x + v.y * v.y)
       if (L < 1e-9) continue
