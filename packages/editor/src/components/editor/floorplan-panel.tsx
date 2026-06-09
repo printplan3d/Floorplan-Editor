@@ -9,6 +9,7 @@ import {
   emitter,
   type GuideNode,
   getWallPlanFootprint,
+  ItemNode,
   type LevelNode,
   loadAssetUrl,
   type Point2D,
@@ -36,6 +37,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { sfxEmitter } from '../../lib/sfx-bus'
 import { cn } from '../../lib/utils'
 import useEditor from '../../store/use-editor'
+import { FLOORPLAN_SYMBOL_MIME } from '../ui/symbol-catalog'
 import { snapToHalf } from '../tools/item/placement-math'
 import {
   createWallOnCurrentLevel,
@@ -6720,6 +6722,85 @@ export function FloorplanPanel() {
     [getPlanPointFromClientPoint],
   )
 
+  // ── Symbol drag-and-drop (from sidebar SymbolCatalog) ──
+  // The SVG canvas accepts drops carrying FLOORPLAN_SYMBOL_MIME. Each drop
+  // creates a real ItemNode in the current level so it shows up in the export
+  // JSON's `furniture[]` and behaves like any other selectable scene element.
+  // Sensible per-category default dimensions; user can resize via the existing
+  // item controls. y=0 = floor level (Pascal's level frame is X-Z, Y-up).
+  const handleSymbolDragOver = useCallback(
+    (event: React.DragEvent<SVGSVGElement>) => {
+      if (event.dataTransfer.types.includes(FLOORPLAN_SYMBOL_MIME)) {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }
+    },
+    [],
+  )
+
+  const handleSymbolDrop = useCallback(
+    (event: React.DragEvent<SVGSVGElement>) => {
+      const raw = event.dataTransfer.getData(FLOORPLAN_SYMBOL_MIME)
+      if (!raw) return
+      event.preventDefault()
+
+      type SymbolPayload = { id: string; label: string; src: string; category?: string }
+      let dropped: SymbolPayload
+      try {
+        dropped = JSON.parse(raw) as SymbolPayload
+      } catch {
+        return
+      }
+      if (!dropped?.src) return
+
+      if (!levelId) {
+        // No active level selected — can't attach. Silent no-op.
+        return
+      }
+
+      const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
+      if (!planPoint) return
+
+      // Per-category default dimensions [w, h, d] in meters. Furniture-shaped
+      // averages; user resizes after dropping. Outliers (toilet, lamp) will
+      // need per-symbol overrides once we have GLBs to anchor real sizes.
+      const DEFAULT_DIMS: Record<string, [number, number, number]> = {
+        bathroom: [0.7, 0.9, 0.6],
+        kitchen: [0.6, 0.9, 0.6],
+        bedroom: [1.6, 1.0, 2.0],
+        dining: [1.6, 0.75, 0.9],
+        living: [1.8, 0.85, 0.9],
+        office: [1.4, 0.75, 0.7],
+        outdoor: [2.0, 1.0, 1.0],
+        stairs: [1.2, 2.5, 2.5],
+      }
+      const dims = DEFAULT_DIMS[dropped.category ?? ''] ?? [0.8, 0.8, 0.8]
+
+      try {
+        const itemNode = ItemNode.parse({
+          parentId: levelId,
+          position: [planPoint[0], 0, planPoint[1]],
+          asset: {
+            id: dropped.id,
+            category: dropped.category ?? 'symbol',
+            name: dropped.label,
+            thumbnail: dropped.src,
+            // No GLB yet — Pascal's item-renderer falls back to a placeholder
+            // mesh; the SVG src is here for the future furniture-pipeline step.
+            src: dropped.src,
+            dimensions: dims,
+          },
+        })
+        useScene.getState().createNode(itemNode, levelId as AnyNodeId)
+      } catch (err) {
+        // ItemNode.parse can throw on schema mismatch — surface in console,
+        // never crash the editor.
+        console.warn('[floorplan] symbol drop failed:', err)
+      }
+    },
+    [getPlanPointFromClientPoint, levelId],
+  )
+
   const handleMarqueePointerMove = useCallback(
     (event: ReactPointerEvent<SVGRectElement>) => {
       const rect = svgRef.current?.getBoundingClientRect()
@@ -7536,6 +7617,8 @@ export function FloorplanPanel() {
             onClick={isMarqueeSelectionToolActive ? undefined : handleBackgroundClick}
             onContextMenu={(event) => event.preventDefault()}
             onDoubleClick={isMarqueeSelectionToolActive ? undefined : handleBackgroundDoubleClick}
+            onDragOver={handleSymbolDragOver}
+            onDrop={handleSymbolDrop}
             onPointerCancel={endPanning}
             onPointerDown={handlePointerDown}
             onPointerLeave={handleSvgPointerLeave}

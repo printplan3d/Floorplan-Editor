@@ -3,6 +3,11 @@
 import { useState } from 'react'
 import { cn } from '../../lib/utils'
 
+// Drop handler in floorplan-panel.tsx looks for this exact MIME type.
+// Keep them in sync — duplicated rather than imported to keep this leaf module
+// dependency-free.
+export const FLOORPLAN_SYMBOL_MIME = 'application/x-floorplan-symbol'
+
 type Symbol = {
   id: string
   label: string
@@ -140,7 +145,13 @@ export function SymbolCatalog() {
                     draggable
                     onDragStart={(e) => {
                       setDragSymbol(symbol)
-                      e.dataTransfer.setData('text/plain', JSON.stringify(symbol))
+                      // Carry the group's category id so the drop handler can
+                      // pick sensible default dimensions per category.
+                      const payload = JSON.stringify({ ...symbol, category: group.id })
+                      // Custom MIME isolates this drag from generic text drops.
+                      // text/plain mirror = accessibility / fallback for older browsers.
+                      e.dataTransfer.setData(FLOORPLAN_SYMBOL_MIME, payload)
+                      e.dataTransfer.setData('text/plain', payload)
                       e.dataTransfer.effectAllowed = 'copy'
                     }}
                     onDragEnd={() => setDragSymbol(null)}
