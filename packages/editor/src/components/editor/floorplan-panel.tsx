@@ -4090,12 +4090,18 @@ export function FloorplanPanel() {
     shouldShowPersistentWallEndpointHandles,
     wallEndpointDraft,
   ])
-  // Bulge handles. One per selected wall in 'select' mode — sits at the arc
-  // apex when bulge != 0, at chord midpoint when straight (drag perpendicular
-  // to convert a straight wall into a curve). Hidden during placement modes
-  // and openings to avoid handle clutter.
+  // Bulge handles. One per selected wall. Sits at the arc apex when
+  // bulge != 0, at chord midpoint when straight (drag perpendicular to
+  // convert a straight wall into a curve).
+  //
+  // Visible in: select mode (Pascal default) OR arc-wall build mode (so the
+  // wall the user JUST placed with the Arc Wall tool shows its bulge handle
+  // and they can immediately bend it — the whole point of the redesign).
+  // Hidden during opening placement / moving to avoid handle clutter.
   const wallBulgeHandles = useMemo(() => {
-    if (mode !== 'select' || isOpeningPlacementActive || movingNode) return []
+    if (isOpeningPlacementActive || movingNode) return []
+    const allowed = mode === 'select' || tool === 'arc-wall'
+    if (!allowed) return []
     return displayWallPolygons.flatMap(({ wall }) => {
       if (!selectedIdSet.has(wall.id)) return []
       const liveBulge = wallBulgeDraft?.wallId === wall.id ? wallBulgeDraft.bulge : wall.bulge ?? 0
@@ -4108,7 +4114,15 @@ export function FloorplanPanel() {
         },
       ]
     })
-  }, [displayWallPolygons, isOpeningPlacementActive, mode, movingNode, selectedIdSet, wallBulgeDraft])
+  }, [
+    displayWallPolygons,
+    isOpeningPlacementActive,
+    mode,
+    movingNode,
+    selectedIdSet,
+    tool,
+    wallBulgeDraft,
+  ])
   const slabVertexHandles = useMemo(() => {
     if (!shouldShowSlabBoundaryHandles) {
       return []
@@ -6813,7 +6827,10 @@ export function FloorplanPanel() {
       if (event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
-      if (mode !== 'select') return
+      // Allow in select mode OR while the arc-wall tool is active. Both paths
+      // expose the handle (see wallBulgeHandles useMemo); both must allow
+      // the drag too.
+      if (mode !== 'select' && tool !== 'arc-wall') return
       clearWallPlacementDraft()
       handleWallSelect(wall)
       wallBulgeDragRef.current = {
@@ -6824,7 +6841,7 @@ export function FloorplanPanel() {
       }
       setWallBulgeDraft({ wallId: wall.id, bulge: wall.bulge ?? 0 })
     },
-    [clearWallPlacementDraft, handleWallSelect, mode],
+    [clearWallPlacementDraft, handleWallSelect, mode, tool],
   )
   const handleSlabVertexPointerDown = useCallback(
     (slabId: SlabNode['id'], vertexIndex: number, event: ReactPointerEvent<SVGCircleElement>) => {
