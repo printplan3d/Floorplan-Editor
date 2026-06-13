@@ -3838,30 +3838,36 @@ export function FloorplanPanel() {
     [floorplanWallById, wallMiterData, walls],
   )
   const displayWallPolygons = useMemo(() => {
-    if (!wallEndpointDraft) {
+    // Ritn3D 2026-06-13: this used to only check wallEndpointDraft, so live
+    // bulge drags didn't propagate to the rendered polygons — wall stayed
+    // straight visually until commit and then SNAPPED to the curve. That's
+    // why the user said the arc didn't move with the cursor. Fixed by also
+    // re-rendering the polygon for the wall being bulge-drafted; both drafts
+    // are already applied to displayWallById, so we just need to rebuild
+    // both affected polygons.
+    if (!wallEndpointDraft && !wallBulgeDraft) {
       return wallPolygons
     }
 
-    const previewWall = displayWallById.get(wallEndpointDraft.wallId)
-    if (!previewWall) {
-      return wallPolygons
-    }
+    const draftedIds = new Set<string>()
+    if (wallEndpointDraft) draftedIds.add(wallEndpointDraft.wallId)
+    if (wallBulgeDraft) draftedIds.add(wallBulgeDraft.wallId)
 
-    const previewPolygon = getWallPlanFootprint(
-      getFloorplanWall(previewWall),
-      EMPTY_WALL_MITER_DATA,
-    )
-
-    return wallPolygons.map((entry) =>
-      entry.wall.id === previewWall.id
-        ? {
-            wall: previewWall,
-            polygon: previewPolygon,
-            points: formatPolygonPoints(previewPolygon),
-          }
-        : entry,
-    )
-  }, [displayWallById, wallEndpointDraft, wallPolygons])
+    return wallPolygons.map((entry) => {
+      if (!draftedIds.has(entry.wall.id)) return entry
+      const previewWall = displayWallById.get(entry.wall.id as WallNode['id'])
+      if (!previewWall) return entry
+      const previewPolygon = getWallPlanFootprint(
+        getFloorplanWall(previewWall),
+        EMPTY_WALL_MITER_DATA,
+      )
+      return {
+        wall: previewWall,
+        polygon: previewPolygon,
+        points: formatPolygonPoints(previewPolygon),
+      }
+    })
+  }, [displayWallById, wallBulgeDraft, wallEndpointDraft, wallPolygons])
 
   const openingsPolygons = useMemo(
     () =>
