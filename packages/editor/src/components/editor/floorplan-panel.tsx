@@ -5238,8 +5238,6 @@ export function FloorplanPanel() {
         // way around" the chord and visually looks reversed. Floor plans
         // never need >180° curves in practice.
         const next = Math.max(-1, Math.min(1, raw))
-        // eslint-disable-next-line no-console
-        console.log('[bulge] move', { next: next.toFixed(3), planPoint })
         setWallBulgeDraft({ wallId: bulgeDrag.wallId, bulge: next })
         return
       }
