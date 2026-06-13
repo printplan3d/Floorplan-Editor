@@ -6165,10 +6165,21 @@ export function FloorplanPanel() {
       if (wall) {
         queueMicrotask(() => {
           useViewer.getState().setSelection({ selectedIds: [wall.id] })
+          // EXIT the arc-wall tool back to select mode so the next click
+          // doesn't start a new wall. User's complaint: "the cursor goes
+          // back to wall start mode" — that's because tool stayed
+          // 'arc-wall' and any canvas click placed a new start point,
+          // making the bulge handle unreachable in practice. After this:
+          // - Cursor returns to normal pointer
+          // - The bulge handle is the only interactive thing on the wall
+          // - To draw another arc wall, user clicks Arc Wall in the toolbar
+          //   again.
+          setTool(null)
+          setMode('select')
         })
       }
     },
-    [arcDraftStart, clearDraft],
+    [arcDraftStart, clearDraft, setMode, setTool],
   )
 
   const handleBackgroundClick = useCallback(

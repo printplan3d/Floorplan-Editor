@@ -120,20 +120,24 @@ function getArcWallPlanFootprint(wallNode: WallNode, miterData: WallMiterData): 
   }
   if (outer.length === 0) return []
 
-  // Apply mitering at endpoints. The junction "left"/"right" naming is in the
-  // OUTGOING direction at that endpoint — at `end` the outgoing direction is
-  // reversed relative to the wall, so left/right swap. (Mirrors the
-  // straight-wall code path's swap.)
-  const wallStartPt: Point2D = { x: start[0], y: start[1] }
-  const wallEndPt: Point2D = { x: end[0], y: end[1] }
-  const keyStart = pointToKey(wallStartPt)
-  const keyEnd = pointToKey(wallEndPt)
-  const startJunction = miterData.junctionData.get(keyStart)?.get(wallNode.id)
-  const endJunction = miterData.junctionData.get(keyEnd)?.get(wallNode.id)
-  if (startJunction?.left) outer[0] = startJunction.left
-  if (startJunction?.right) inner[0] = startJunction.right
-  if (endJunction?.right) outer[outer.length - 1] = endJunction.right
-  if (endJunction?.left) inner[inner.length - 1] = endJunction.left
+  // Ritn3D 2026-06-13: Pascal-style junction mitering DISABLED for arc walls.
+  // Mitering replaces the first/last outer/inner polygon points with the
+  // junction's tangent-line intersection — that works for straight walls
+  // because their offset IS a line. But an arc's offset is a CIRCLE
+  // concentric with the centerline, and the tangent line + circle diverge
+  // quickly away from the junction. The replacement pushed the polygon's
+  // first vertex onto the tangent line while keeping the next vertices on
+  // the actual arc, producing a self-intersecting polygon that SVG fill
+  // rendered as a solid black blob across half the wall body. (User report
+  // 2026-06-13 with screenshot.)
+  //
+  // Result: arc walls now butt-join at their endpoints. Slightly less clean
+  // at sharp arc-into-straight corners but no rendering corruption. A real
+  // line-arc / arc-arc miter computation is the proper fix (analytic
+  // intersection of the two offset curves) — bigger work, deferred.
+  // `miterData` deliberately unused below; keep the parameter so callers
+  // don't have to special-case.
+  void miterData
 
   // Build closed polygon: outer forward + inner reverse.
   const polygon: Point2D[] = [...outer]
