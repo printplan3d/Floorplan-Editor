@@ -5234,6 +5234,8 @@ export function FloorplanPanel() {
         // produces visible "stepping" on shallow curves.
         const raw = bulgeFromThreePoints(bulgeDrag.start, bulgeDrag.end, planPoint)
         const next = Math.max(-2, Math.min(2, raw))
+        // eslint-disable-next-line no-console
+        if (Math.random() < 0.02) console.log('[bulge] move', { next })
         setWallBulgeDraft({ wallId: bulgeDrag.wallId, bulge: next })
         return
       }
@@ -5382,11 +5384,19 @@ export function FloorplanPanel() {
       const dragState = wallBulgeDragRef.current
       if (!dragState || event.pointerId !== dragState.pointerId) return
       const wall = wallById.get(dragState.wallId)
+      // eslint-disable-next-line no-console
+      console.log('[bulge] commit', { wallId: dragState.wallId, foundWall: !!wall })
       // Pull the latest draft bulge from setter to avoid stale closure reads.
       setWallBulgeDraft((current) => {
         if (wall && current && current.wallId === wall.id) {
           // Collapse near-zero bulge back to a clean straight wall on commit.
           const finalBulge = isStraight(current.bulge) ? 0 : current.bulge
+          // eslint-disable-next-line no-console
+          console.log('[bulge] commit applying', {
+            currentBulge: current.bulge,
+            finalBulge,
+            wallStoredBulge: wall.bulge,
+          })
           if ((wall.bulge ?? 0) !== finalBulge) {
             updateNode(wall.id, { bulge: finalBulge })
             sfxEmitter.emit('sfx:structure-build')
@@ -6127,12 +6137,19 @@ export function FloorplanPanel() {
   // - Phase 1->2: end snapped, switch to bulge-picking mode.
   // - Phase 2 commit: derive bulge from (start, end, current bulge midpoint),
   //   write the wall with that bulge, clear state.
-  // Arc-wall placement: same 2-click flow as the regular Wall tool. The wall
+  // Arc-wall placement: same 2-click flow as the regular Wall tool. Wall
   // commits as STRAIGHT, then is auto-selected so its bulge handle (the
   // accent dot at the midpoint) is immediately visible — user drags it to
   // bend the wall into a curve. Discoverable because they already know the
   // bulge handle from selected walls; no third click, no hidden mode.
-  // Old 3-click flow ("click click drag click") was hard to see — replaced.
+  //
+  // The selection is queued with a microtask (queueMicrotask) instead of
+  // called inline. Inline setSelection mid-tick caused a React warning
+  // "Cannot update a component (PanelManager) while rendering" because
+  // multiple Zustand stores were churning in the same synchronous burst
+  // (createNode → selection → reference reset), and the next pointer event
+  // would land in a stale closure with no listeners. Deferring breaks that
+  // cycle cleanly.
   const handleArcWallPlacementPoint = useCallback(
     (point: WallPlanPoint) => {
       if (!arcDraftStart) {
@@ -6146,9 +6163,9 @@ export function FloorplanPanel() {
       const wall = createWallOnCurrentLevel(arcDraftStart, point, 0)
       clearDraft()
       if (wall) {
-        // Auto-select so the bulge handle appears immediately. User drags
-        // that handle (the existing edit affordance) to add the curve.
-        useViewer.getState().setSelection({ selectedIds: [wall.id] })
+        queueMicrotask(() => {
+          useViewer.getState().setSelection({ selectedIds: [wall.id] })
+        })
       }
     },
     [arcDraftStart, clearDraft],
@@ -6824,15 +6841,38 @@ export function FloorplanPanel() {
   // user can't accidentally curve a wall while building doors etc.
   const handleWallBulgePointerDown = useCallback(
     (wall: WallNode, event: ReactPointerEvent<SVGCircleElement>) => {
+      // eslint-disable-next-line no-console
+      console.log('[bulge] pointerDown', {
+        button: event.button,
+        pointerId: event.pointerId,
+        wallId: wall.id,
+        wallBulge: wall.bulge,
+        mode,
+        tool,
+      })
       if (event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
       // Allow in select mode OR while the arc-wall tool is active. Both paths
       // expose the handle (see wallBulgeHandles useMemo); both must allow
       // the drag too.
-      if (mode !== 'select' && tool !== 'arc-wall') return
+      if (mode !== 'select' && tool !== 'arc-wall') {
+        // eslint-disable-next-line no-console
+        console.log('[bulge] BAIL: mode/tool gate failed')
+        return
+      }
       clearWallPlacementDraft()
-      handleWallSelect(wall)
+      // Only re-select if the wall isn't already selected — avoids a
+      // setState cascade through commitFloorplanSelection →
+      // setSelectedReferenceId(null) that fires the
+      // "Cannot update a component while rendering" React warning and was
+      // breaking the next pointerdown's handlers.
+      const alreadySelected = useViewer
+        .getState()
+        .selection.selectedIds.includes(wall.id)
+      if (!alreadySelected) {
+        handleWallSelect(wall)
+      }
       wallBulgeDragRef.current = {
         pointerId: event.pointerId,
         wallId: wall.id,
@@ -6840,6 +6880,8 @@ export function FloorplanPanel() {
         end: wall.end,
       }
       setWallBulgeDraft({ wallId: wall.id, bulge: wall.bulge ?? 0 })
+      // eslint-disable-next-line no-console
+      console.log('[bulge] drag STARTED', { wallId: wall.id, initialBulge: wall.bulge ?? 0 })
     },
     [clearWallPlacementDraft, handleWallSelect, mode, tool],
   )
