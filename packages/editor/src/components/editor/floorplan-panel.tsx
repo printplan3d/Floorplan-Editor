@@ -5233,9 +5233,13 @@ export function FloorplanPanel() {
         // No grid snap — bulge is a continuous perpendicular offset; snapping
         // produces visible "stepping" on shallow curves.
         const raw = bulgeFromThreePoints(bulgeDrag.start, bulgeDrag.end, planPoint)
-        const next = Math.max(-2, Math.min(2, raw))
+        // Clamp to [-1, 1] (semicircle max). The earlier [-2, 2] cap let
+        // users drag past 180° sweep, at which point the arc goes "the long
+        // way around" the chord and visually looks reversed. Floor plans
+        // never need >180° curves in practice.
+        const next = Math.max(-1, Math.min(1, raw))
         // eslint-disable-next-line no-console
-        if (Math.random() < 0.02) console.log('[bulge] move', { next })
+        console.log('[bulge] move', { next: next.toFixed(3), planPoint })
         setWallBulgeDraft({ wallId: bulgeDrag.wallId, bulge: next })
         return
       }
