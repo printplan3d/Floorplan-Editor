@@ -59,17 +59,37 @@ const BrokenItemFallback = ({ node }: { node: ItemNode }) => {
   )
 }
 
+// Ritn3D: only the .glb / .gltf src paths can be fed to GLTFLoader. Symbol
+// drops from the SVG catalog set `src` to an .svg path (used as the 2D
+// thumbnail in the floor-plan panel) — passing that to useGLTF would
+// JSON.parse the SVG bytes and throw. Detect non-glTF sources here and
+// render the simple PreviewModel box directly. ErrorBoundary still catches
+// any other failure; this just stops the noisy useGLTF reject path.
+function isGltfSrc(src: string | undefined | null): boolean {
+  if (!src) return false
+  const s = src.toLowerCase().split('?')[0]!
+  return s.endsWith('.glb') || s.endsWith('.gltf')
+}
+
 export const ItemRenderer = ({ node }: { node: ItemNode }) => {
   const ref = useRef<Group>(null!)
 
   useRegistry(node.id, node.type, ref)
 
+  const hasGltf = isGltfSrc(node.asset.src)
+
   return (
     <group position={node.position} ref={ref} rotation={node.rotation} visible={node.visible}>
       <ErrorBoundary fallback={<BrokenItemFallback node={node} />}>
-        <Suspense fallback={<PreviewModel node={node} />}>
-          <ModelRenderer node={node} />
-        </Suspense>
+        {hasGltf ? (
+          <Suspense fallback={<PreviewModel node={node} />}>
+            <ModelRenderer node={node} />
+          </Suspense>
+        ) : (
+          // Ritn3D: SVG symbol or other non-glTF asset — just show the
+          // box preview. Floor-plan panel renders the actual look in 2D.
+          <PreviewModel node={node} />
+        )}
       </ErrorBoundary>
       {node.children?.map((childId) => (
         <NodeRenderer key={childId} nodeId={childId} />
