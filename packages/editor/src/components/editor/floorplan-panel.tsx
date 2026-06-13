@@ -6113,38 +6113,31 @@ export function FloorplanPanel() {
   // - Phase 1->2: end snapped, switch to bulge-picking mode.
   // - Phase 2 commit: derive bulge from (start, end, current bulge midpoint),
   //   write the wall with that bulge, clear state.
+  // Arc-wall placement: same 2-click flow as the regular Wall tool. The wall
+  // commits as STRAIGHT, then is auto-selected so its bulge handle (the
+  // accent dot at the midpoint) is immediately visible — user drags it to
+  // bend the wall into a curve. Discoverable because they already know the
+  // bulge handle from selected walls; no third click, no hidden mode.
+  // Old 3-click flow ("click click drag click") was hard to see — replaced.
   const handleArcWallPlacementPoint = useCallback(
     (point: WallPlanPoint) => {
       if (!arcDraftStart) {
-        // Phase 0 -> Phase 1
         setArcDraftStart(point)
         setArcDraftEnd(point)
         setArcBulgePoint(null)
         setCursorPoint(point)
         return
       }
-      if (!arcDraftEnd || arcDraftStart === arcDraftEnd || pointsEqual(arcDraftStart, arcDraftEnd)) {
-        // Phase 1 -> Phase 2: lock the end. Use the freshly clicked point
-        // (already snapped by caller). Don't commit yet — wait for the user
-        // to drag-then-click the bulge midpoint.
-        if (!isWallLongEnough(arcDraftStart, point)) return
-        setArcDraftEnd(point)
-        setArcBulgePoint(point) // initial bulge midpoint = end (zero bulge until cursor moves)
-        return
-      }
-      // Phase 2 commit. Read the current bulge midpoint from cursor.
-      const midpoint = arcBulgePoint ?? point
-      const bulge = bulgeFromThreePoints(arcDraftStart, arcDraftEnd, midpoint)
-      // Cap bulge into [-2, 2] — beyond that it's > full semicircle and
-      // visually doesn't help; keeps the arc math well-behaved.
-      const safeBulge = Math.max(-2, Math.min(2, bulge))
-      // If user gave essentially zero bulge, fall back to a straight wall —
-      // less surprising than an "arc" with bulge ≈ 0 cluttering the scene.
-      const finalBulge = isStraight(safeBulge) ? 0 : safeBulge
-      createWallOnCurrentLevel(arcDraftStart, arcDraftEnd, finalBulge)
+      if (!isWallLongEnough(arcDraftStart, point)) return
+      const wall = createWallOnCurrentLevel(arcDraftStart, point, 0)
       clearDraft()
+      if (wall) {
+        // Auto-select so the bulge handle appears immediately. User drags
+        // that handle (the existing edit affordance) to add the curve.
+        useViewer.getState().setSelection({ selectedIds: [wall.id] })
+      }
     },
-    [arcBulgePoint, arcDraftEnd, arcDraftStart, clearDraft],
+    [arcDraftStart, clearDraft],
   )
 
   const handleBackgroundClick = useCallback(
@@ -7703,6 +7696,26 @@ export function FloorplanPanel() {
         visibility: isPanelReady ? 'visible' : 'hidden',
       }}
     >
+      {/* Arc-wall hint: shown briefly after the user places a straight wall
+          with the Arc Wall tool. Tells them how to bend it. Disappears once
+          they touch the bulge handle or pick another tool. Uses the same
+          visual treatment as the scale-calibration banner. */}
+      {tool === 'arc-wall' && !arcDraftStart && wallBulgeHandles.length > 0 && (
+        <div
+          className="pointer-events-none fixed inset-x-0 top-0 z-40 flex items-center justify-center gap-3 border-b border-sky-500/40 bg-sky-500/15 px-4 py-2.5 text-sky-200 backdrop-blur-md"
+          style={{ paddingLeft: '320px' }}
+        >
+          <svg width="18" height="18" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <path d="M5 22 Q 14 2 23 22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            <circle cx="5" cy="22" r="2.5" fill="currentColor" />
+            <circle cx="23" cy="22" r="2.5" fill="currentColor" />
+          </svg>
+          <span className="font-medium text-sm">
+            Drag the blue dot at the wall's middle to bend it into a curve.
+          </span>
+        </div>
+      )}
+
       {/* Scale calibration banner — visible when calibratingGuideId is set.
           Two-point reference: user clicks two points with a known real-world
           distance, types the distance, scale auto-adjusts. */}
@@ -8596,26 +8609,39 @@ export function FloorplanPanel() {
                 a tiny wall — fine for our use. */}
             {wallBulgeHandles.map(({ wall, point, isActive }) => {
               const svg = toSvgPoint({ x: point[0], y: point[1] })
+              // Bigger handle + larger hit area so it's easy to grab even at
+              // small zoom. Pulsing ring when not actively dragging draws the
+              // eye for users who don't know what it does.
               return (
                 <g key={`bulge-${wall.id}`}>
-                  {/* Soft halo for hit area + visibility against busy plans. */}
+                  {/* Hit / halo circle. */}
                   <circle
                     cx={svg.x}
                     cy={svg.y}
-                    fill={isActive ? palette.selectedFill : 'rgba(120,160,255,0.35)'}
+                    fill={isActive ? palette.selectedFill : 'rgba(108,180,255,0.32)'}
                     pointerEvents="none"
-                    r={0.16}
+                    r={0.28}
                     vectorEffect="non-scaling-stroke"
                   />
+                  {/* Visible body — larger than before so it's findable. */}
                   <circle
                     cx={svg.x}
                     cy={svg.y}
-                    fill={isActive ? '#a3c2ff' : '#7aa3ff'}
+                    fill={isActive ? '#a3c2ff' : '#6cb4ff'}
                     onPointerDown={(event) => handleWallBulgePointerDown(wall, event)}
-                    r={0.085}
+                    r={0.16}
                     stroke="#ffffff"
-                    strokeWidth="0.018"
+                    strokeWidth="0.03"
                     style={{ cursor: 'grab' }}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {/* Hint dot in the centre. */}
+                  <circle
+                    cx={svg.x}
+                    cy={svg.y}
+                    r={0.04}
+                    fill="#ffffff"
+                    pointerEvents="none"
                     vectorEffect="non-scaling-stroke"
                   />
                 </g>
