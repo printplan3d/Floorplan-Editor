@@ -1,6 +1,6 @@
 'use client'
 
-import { emitter, useScene } from '@pascal-app/core'
+import { emitter, generateId, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import NextImage from 'next/image'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
@@ -37,12 +37,52 @@ const MODES: { id: Mode; label: string; shortcut: string; color: string; activeC
   { id: 'delete', label: 'Delete', shortcut: 'D', color: 'hover:bg-red-500/20 hover:text-red-400', activeColor: 'bg-red-500/20 text-red-400' },
 ]
 
-const TOOLS: { id: StructureTool; label: string; icon: string }[] = [
+// Inline arc-wall icon — bright blue arc + two dots so it's unmistakable at
+// the small toolbar size. Drop-in replacement for the missing PNG.
+const ArcWallIconNode = (
+  <svg
+    viewBox="0 0 28 28"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    style={{ width: '100%', height: '100%', display: 'block' }}
+    aria-hidden="true"
+  >
+    <path d="M5 22 Q 14 2 23 22" stroke="#6cb4ff" strokeWidth="3" strokeLinecap="round" fill="none" />
+    <circle cx="5" cy="22" r="3" fill="#6cb4ff" />
+    <circle cx="23" cy="22" r="3" fill="#6cb4ff" />
+  </svg>
+)
+
+const TOOLS: {
+  id: StructureTool
+  label: string
+  icon?: string
+  iconNode?: ReactNode
+}[] = [
   { id: 'wall', label: 'Wall', icon: '/icons/wall.png' },
+  { id: 'arc-wall', label: 'Arc Wall', iconNode: ArcWallIconNode },
   { id: 'door', label: 'Door', icon: '/icons/door.png' },
   { id: 'window', label: 'Window', icon: '/icons/window.png' },
   { id: 'zone', label: 'Room', icon: '/icons/zone.png' },
 ]
+
+// Default to 'select' mode on mount when nothing forces another mode. After
+// removing the mode tabs the user has no way to type their way back to
+// select if they got stuck in 'build' or 'delete' from an old session.
+function ModeDefaultSelectEffect({
+  mode,
+  setMode,
+}: {
+  mode: Mode
+  setMode: (m: Mode) => void
+}) {
+  useEffect(() => {
+    if (mode === 'delete') setMode('select')
+    // intentionally only runs on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return null
+}
 
 function SidebarToolbar() {
   const mode = useEditor((s) => s.mode)
@@ -84,12 +124,14 @@ function SidebarToolbar() {
       const nodes = useScene.getState().nodes
       const levelNode = nodes[levelId as any]
       if (levelNode?.type === 'level') {
+        // Ritn3D 2026-06-13: was filtering to only `type === 'wall'` so
+        // dropped symbols (item), upload guides, zones, slabs, etc. all
+        // survived "clear canvas". Now deletes every level-child node, which
+        // also cascades through walls → their doors/windows because deleteNode
+        // handles children. Selection is cleared after so nothing dangles.
         const childIds = [...((levelNode as any).children || [])]
         for (const childId of childIds) {
-          const child = nodes[childId as any]
-          if (child?.type === 'wall') {
-            useScene.getState().deleteNode(childId as any)
-          }
+          useScene.getState().deleteNode(childId as any)
         }
       }
     }
@@ -97,47 +139,19 @@ function SidebarToolbar() {
     setShowClearModal(false)
   }, [])
 
+  // Ritn3D 2026-06-13: Select / Draw / Delete mode TABS removed — they're
+  // confusing for end users who think of Select / Delete as actions, not
+  // persistent modes. Replaced by:
+  //   - Click on an item → it selects (implicit select)
+  //   - Delete key on selected item → deletes it (works on items + zones +
+  //     walls, see use-keyboard.ts)
+  //   - Picking a Tool (Wall / Arc Wall / Door / etc.) auto-switches to
+  //     'build' mode in the existing tool click handler.
+  // We still need to default the mode to 'select' so clicks default to
+  // selecting rather than building — that's a useEffect below.
   return (
     <div className="border-border/50 border-b px-3 py-2.5 space-y-2.5">
-      {/* Mode buttons */}
-      <div className="flex gap-1">
-        {MODES.map((m) => {
-          const isActive = mode === m.id
-          return (
-            <button
-              key={m.id}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 font-medium text-xs transition-all',
-                isActive ? m.activeColor : 'text-muted-foreground ' + m.color,
-              )}
-              onClick={() => {
-                setMode(m.id)
-                if (m.id === 'build') {
-                  useEditor.getState().setPhase('structure')
-                  useEditor.getState().setStructureLayer('elements')
-                }
-              }}
-              title={`${m.label} (${m.shortcut})`}
-              type="button"
-            >
-              {m.icon ? (
-                <NextImage
-                  alt={m.label}
-                  className={cn('h-4 w-4 object-contain', !isActive && 'opacity-60 grayscale')}
-                  height={16}
-                  src={m.icon}
-                  width={16}
-                />
-              ) : (
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                </svg>
-              )}
-              {m.label}
-            </button>
-          )
-        })}
-      </div>
+      <ModeDefaultSelectEffect mode={mode} setMode={setMode} />
 
       {/* Selection type toggle — only in select mode */}
       {mode === 'select' && (
@@ -185,13 +199,19 @@ function SidebarToolbar() {
                 title={t.label}
                 type="button"
               >
-                <NextImage
-                  alt={t.label}
-                  className="h-5 w-5 object-contain"
-                  height={20}
-                  src={t.icon}
-                  width={20}
-                />
+                {t.icon ? (
+                  <NextImage
+                    alt={t.label}
+                    className="h-5 w-5 object-contain"
+                    height={20}
+                    src={t.icon}
+                    width={20}
+                  />
+                ) : (
+                  <span aria-label={t.label} className="block h-5 w-5">
+                    {t.iconNode}
+                  </span>
+                )}
                 <span className="text-[10px] font-medium">{t.label}</span>
               </button>
             )
@@ -200,6 +220,12 @@ function SidebarToolbar() {
       )}
 
 
+
+      {/* Upload trace (image or PDF) — creates a GuideNode on the active level
+          so the user can trace walls/doors on top of it. Mirrors the handler
+          in site-panel/index.tsx so the upload is reachable from this default
+          sidebar view too (previously only inside the Site tab). */}
+      <UploadTraceButton />
 
       {/* Symbol Catalog — grouped fixtures & furniture */}
       <div className="space-y-0.5">
@@ -368,6 +394,102 @@ function SidebarToolbar() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Upload-trace button. Self-contained: hidden file input + button + handler.
+// Image: read as data URL. PDF: dynamic-import pdf-to-image helper (keeps
+// pdf.js out of the initial bundle). Both routes commit a GuideNode on the
+// active level — same shape produced by the Site-panel upload flow.
+function UploadTraceButton() {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setErr(null)
+
+    const levelId = useViewer.getState().selection.levelId
+    if (!levelId) {
+      setErr('Select a level in the tree first.')
+      return
+    }
+
+    const isImage = file.type.startsWith('image/')
+    const isPdf =
+      file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    if (!(isImage || isPdf)) {
+      setErr('Use a JPG / PNG / PDF.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      const dataUrl = isPdf
+        ? (await (await import('./../../../lib/pdf-to-image')).pdfFileToImageDataUrl(file)).dataUrl
+        : await new Promise<string>((resolve, reject) => {
+            const r = new FileReader()
+            r.onload = () => resolve(r.result as string)
+            r.onerror = () => reject(r.error)
+            r.readAsDataURL(file)
+          })
+
+      const guideNode = {
+        id: generateId('guide'),
+        type: 'guide' as const,
+        parentId: levelId,
+        visible: true,
+        url: dataUrl,
+        position: [0, 0, 0] as [number, number, number],
+        rotation: [0, 0, 0] as [number, number, number],
+        scale: 5,
+        opacity: 40,
+      }
+      useScene.getState().createNode(guideNode as any, levelId as any)
+      // Auto-trigger scale calibration immediately after upload — without it
+      // the guide renders at default scale=5 and walls measure garbage.
+      // FloorplanPanel listens for this event.
+      emitter.emit('floorplan:calibrate-scale' as any, { guideId: guideNode.id })
+    } catch (e2) {
+      setErr((e2 as Error)?.message || 'Could not open the file.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*,application/pdf,.pdf"
+        className="hidden"
+        onChange={onFile}
+        disabled={busy}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        title="Upload an image or PDF of an existing floor plan to trace over"
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border/40 bg-accent/30 px-2 py-2 font-medium text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        {busy ? 'Loading…' : 'Upload floor plan to trace'}
+      </button>
+      {err && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-[10px] text-destructive">
+          {err}
         </div>
       )}
     </div>

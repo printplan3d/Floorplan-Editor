@@ -218,20 +218,26 @@ type FloorplanCursorIndicator =
       icon: string
     }
 
-const FLOORPLAN_QUICK_BUILD_TOOL_IDS = ['wall', 'door', 'window', 'slab', 'zone'] as const
+// Ritn3D: 'arc-wall' added to the floor-plan toolbar. The structureTools
+// entry uses iconNode (inline SVG) since we don't have a PNG for the arc
+// wall yet — the render below conditionally uses iconNode when iconSrc is
+// missing.
+const FLOORPLAN_QUICK_BUILD_TOOL_IDS = ['wall', 'arc-wall', 'door', 'window', 'slab', 'zone'] as const
 
 type FloorplanQuickBuildTool = (typeof FLOORPLAN_QUICK_BUILD_TOOL_IDS)[number]
 
 const FLOORPLAN_QUICK_BUILD_TOOL_LABELS: Record<FloorplanQuickBuildTool, string> = {
   wall: 'Wall',
+  'arc-wall': 'Arc Wall',
   door: 'Door',
   window: 'Window',
   slab: 'Floor',
   zone: 'Zone',
 }
 
-const FLOORPLAN_QUICK_BUILD_TOOL_FALLBACK_ICONS: Record<FloorplanQuickBuildTool, string> = {
+const FLOORPLAN_QUICK_BUILD_TOOL_FALLBACK_ICONS: Record<FloorplanQuickBuildTool, string | undefined> = {
   wall: '/icons/wall.png',
+  'arc-wall': undefined, // uses iconNode from structureTools
   door: '/icons/door.png',
   window: '/icons/window.png',
   slab: '/icons/floor.png',
@@ -244,6 +250,7 @@ const FLOORPLAN_QUICK_BUILD_TOOLS = FLOORPLAN_QUICK_BUILD_TOOL_IDS.map((id) => {
   return {
     id,
     iconSrc: toolConfig?.iconSrc ?? FLOORPLAN_QUICK_BUILD_TOOL_FALLBACK_ICONS[id],
+    iconNode: toolConfig?.iconNode,
     label: FLOORPLAN_QUICK_BUILD_TOOL_LABELS[id],
   }
 })
@@ -3232,6 +3239,22 @@ export function FloorplanPanel() {
   const wallEndpointDragRef = useRef<WallEndpointDragState | null>(null)
   // Bulge handle drag — parallel to endpoint drag (see WallBulgeDragState).
   const wallBulgeDragRef = useRef<WallBulgeDragState | null>(null)
+  // Item move/rotate drag — stored as a ref since intra-drag updates don't
+  // require React re-renders (we mutate the node directly each pointer-move
+  // event and the scene store re-renders the affected SVG element).
+  const itemMoveDragRef = useRef<{
+    pointerId: number
+    itemId: string
+    startPlan: [number, number]
+    initialPos: [number, number, number]
+  } | null>(null)
+  const itemRotateDragRef = useRef<{
+    pointerId: number
+    itemId: string
+    centerPlan: [number, number]
+    initialRotY: number
+    startAngleFromCenter: number
+  } | null>(null)
   const siteBoundaryDraftRef = useRef<SiteBoundaryDraft | null>(null)
   const slabBoundaryDraftRef = useRef<SlabBoundaryDraft | null>(null)
   const zoneBoundaryDraftRef = useRef<ZoneBoundaryDraft | null>(null)
@@ -3342,6 +3365,21 @@ export function FloorplanPanel() {
       )
     }),
   )
+  // Ritn3D: items (furniture / symbols) on the active level. Floor-plan
+  // panel renders these as a flat top-down image with rotation; Pascal's
+  // 3D ItemRenderer is dead code for us (no live R3F canvas), so this is
+  // the ONLY surface where dropped symbols become visible.
+  const levelItems = useScene(
+    useShallow((state) => {
+      if (!levelId) return [] as ItemNode[]
+      const lvl = state.nodes[levelId]
+      if (!lvl || lvl.type !== 'level') return [] as ItemNode[]
+      return lvl.children
+        .map((childId) => state.nodes[childId])
+        .filter((n): n is ItemNode => n?.type === 'item' && n.visible !== false)
+    }),
+  )
+
   // Ritn3D: ghost walls from the level below for multi-floor alignment
   const ghostWalls = useScene(
     useShallow((state) => {
@@ -3417,6 +3455,17 @@ export function FloorplanPanel() {
     }),
   )
 
+  // Trace-plan scale calibration. Two-point reference method (standard CAD
+  // pattern used by AutoCAD/Bluebeam/Acrobat): user clicks two points on the
+  // uploaded plan with a known real-world distance, types the distance, and
+  // we adjust guide.scale so plan units match reality. Without this an
+  // imported floor plan has arbitrary scale (default 5) and walls measure
+  // garbage like 150 m.
+  const [calibratingGuideId, setCalibratingGuideId] = useState<string | null>(null)
+  const [calibrationP1, setCalibrationP1] = useState<WallPlanPoint | null>(null)
+  const [calibrationP2, setCalibrationP2] = useState<WallPlanPoint | null>(null)
+  const [calibrationInput, setCalibrationInput] = useState('')
+  const [calibrationUnit, setCalibrationUnit] = useState<'m' | 'ft'>('m')
   const [draftStart, setDraftStart] = useState<WallPlanPoint | null>(null)
   const [draftEnd, setDraftEnd] = useState<WallPlanPoint | null>(null)
   // Arc-wall draft state. Three-step machine:
@@ -3467,6 +3516,78 @@ export function FloorplanPanel() {
   useEffect(() => {
     emitter.emit('floorplan:marquee-state' as any, { active: floorplanSelectionTool === 'marquee' })
   }, [floorplanSelectionTool])
+
+  // Scale-calibration trigger: `floorplan:calibrate-scale` event with the
+  // guideId starts the 2-point flow. Emitted from the Upload Trace button
+  // (auto-start on upload) and the ReferencePanel re-calibrate button.
+  useEffect(() => {
+    const handler = (data: { guideId: string }) => {
+      setCalibratingGuideId(data.guideId)
+      setCalibrationP1(null)
+      setCalibrationP2(null)
+      setCalibrationInput('')
+    }
+    emitter.on('floorplan:calibrate-scale' as any, handler)
+    return () => { emitter.off('floorplan:calibrate-scale' as any, handler) }
+  }, [])
+
+  // ESC cancels the calibration flow without applying.
+  useEffect(() => {
+    if (!calibratingGuideId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setCalibratingGuideId(null)
+        setCalibrationP1(null)
+        setCalibrationP2(null)
+        setCalibrationInput('')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [calibratingGuideId])
+
+  // Apply the typed real-world distance to the guide's scale.
+  //   observed = current plan distance between the two clicked points
+  //   real     = user-entered distance in METERS (ft is converted)
+  //   newScale = currentScale × (real / observed)
+  // This linearity holds because guide width is FLOORPLAN_GUIDE_BASE_WIDTH × scale,
+  // and plan coordinates inside the guide scale proportionally.
+  const applyCalibration = useCallback(() => {
+    if (!(calibratingGuideId && calibrationP1 && calibrationP2)) return
+    const raw = calibrationInput.trim()
+    if (!raw) return
+    const parsed = parseFloat(raw)
+    if (!Number.isFinite(parsed) || parsed <= 0) return
+    const realMeters = calibrationUnit === 'ft' ? parsed * 0.3048 : parsed
+
+    const dxObs = calibrationP2[0] - calibrationP1[0]
+    const dyObs = calibrationP2[1] - calibrationP1[1]
+    const observed = Math.hypot(dxObs, dyObs)
+    if (observed < 1e-6) return
+
+    const guide = useScene
+      .getState()
+      .nodes[calibratingGuideId as AnyNodeId] as GuideNode | undefined
+    if (!guide) return
+
+    const currentScale = guide.scale ?? 1
+    const ratio = realMeters / observed
+    const newScale = currentScale * ratio
+    updateNode(calibratingGuideId as AnyNodeId, { scale: newScale })
+
+    // Exit calibration.
+    setCalibratingGuideId(null)
+    setCalibrationP1(null)
+    setCalibrationP2(null)
+    setCalibrationInput('')
+  }, [
+    calibratingGuideId,
+    calibrationP1,
+    calibrationP2,
+    calibrationInput,
+    calibrationUnit,
+    updateNode,
+  ])
 
   const [floorplanMarqueeState, setFloorplanMarqueeState] = useState<FloorplanMarqueeState | null>(
     null,
@@ -5043,6 +5164,51 @@ export function FloorplanPanel() {
         return
       }
 
+      // Item move drag — translate node position by the plan-coord delta
+      // since pointerdown. Snap to half-meter (matches wall snap) so dropping
+      // items at clean coordinates is the default.
+      const itemMove = itemMoveDragRef.current
+      if (itemMove && event.pointerId === itemMove.pointerId) {
+        event.preventDefault()
+        const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
+        if (!planPoint) return
+        const dx = planPoint[0] - itemMove.startPlan[0]
+        const dz = planPoint[1] - itemMove.startPlan[1]
+        const nx = snapToHalf(itemMove.initialPos[0] + dx)
+        const nz = snapToHalf(itemMove.initialPos[2] + dz)
+        updateNode(itemMove.itemId as AnyNodeId, {
+          position: [nx, itemMove.initialPos[1], nz],
+        })
+        return
+      }
+
+      // Item rotation drag — angle from item center to cursor.
+      const itemRot = itemRotateDragRef.current
+      if (itemRot && event.pointerId === itemRot.pointerId) {
+        event.preventDefault()
+        const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
+        if (!planPoint) return
+        const dx = planPoint[0] - itemRot.centerPlan[0]
+        const dz = planPoint[1] - itemRot.centerPlan[1]
+        const currentAngle = Math.atan2(dz, dx)
+        let nextRotY =
+          itemRot.initialRotY + (currentAngle - itemRot.startAngleFromCenter)
+        // Shift = snap to 15°.
+        if (shiftPressed) {
+          const step = Math.PI / 12 // 15°
+          nextRotY = Math.round(nextRotY / step) * step
+        }
+        const node = useScene.getState().nodes[itemRot.itemId as AnyNodeId] as
+          | ItemNode
+          | undefined
+        if (!node) return
+        const [rx, , rz] = node.rotation
+        updateNode(itemRot.itemId as AnyNodeId, {
+          rotation: [rx, nextRotY, rz],
+        })
+        return
+      }
+
       // Bulge handle drag: cursor's plan position becomes the new arc apex.
       // bulgeFromThreePoints derives bulge from (start, end, cursor).
       const bulgeDrag = wallBulgeDragRef.current
@@ -5223,6 +5389,16 @@ export function FloorplanPanel() {
       clearWallBulgeDrag()
     }
 
+    // Item move + rotate drag cleanup. Position/rotation are already updated
+    // live in the move handler; this just clears the drag state so the next
+    // pointer events go through the normal selection/click path.
+    const clearItemMoveOrRotate = (event: PointerEvent) => {
+      const m = itemMoveDragRef.current
+      if (m && event.pointerId === m.pointerId) itemMoveDragRef.current = null
+      const r = itemRotateDragRef.current
+      if (r && event.pointerId === r.pointerId) itemRotateDragRef.current = null
+    }
+
     window.addEventListener('pointermove', handleWindowPointerMove)
     window.addEventListener('pointerup', commitGuideInteraction)
     window.addEventListener('pointercancel', cancelGuideInteraction)
@@ -5230,6 +5406,8 @@ export function FloorplanPanel() {
     window.addEventListener('pointercancel', cancelWallEndpointDrag)
     window.addEventListener('pointerup', commitWallBulgeDrag)
     window.addEventListener('pointercancel', cancelWallBulgeDrag)
+    window.addEventListener('pointerup', clearItemMoveOrRotate)
+    window.addEventListener('pointercancel', clearItemMoveOrRotate)
 
     return () => {
       window.removeEventListener('pointermove', handleWindowPointerMove)
@@ -5239,6 +5417,8 @@ export function FloorplanPanel() {
       window.removeEventListener('pointercancel', cancelWallEndpointDrag)
       window.removeEventListener('pointerup', commitWallBulgeDrag)
       window.removeEventListener('pointercancel', cancelWallBulgeDrag)
+      window.removeEventListener('pointerup', clearItemMoveOrRotate)
+      window.removeEventListener('pointercancel', clearItemMoveOrRotate)
     }
   }, [
     clearGuideInteraction,
@@ -5978,6 +6158,26 @@ export function FloorplanPanel() {
         return
       }
 
+      // Trace-scale calibration: clicks become reference-line points instead
+      // of tool actions. First click sets P1, second sets P2 and surfaces the
+      // distance input. A third click after P2 is set restarts (drop both,
+      // start over) — convenient if the user mis-clicked.
+      if (calibratingGuideId) {
+        event.preventDefault?.()
+        if (!calibrationP1) {
+          setCalibrationP1(planPoint)
+          return
+        }
+        if (!calibrationP2) {
+          setCalibrationP2(planPoint)
+          return
+        }
+        // Both already set — restart.
+        setCalibrationP1(planPoint)
+        setCalibrationP2(null)
+        return
+      }
+
       if (isOpeningPlacementActive) {
         const closest = findClosestWallPoint(planPoint, walls)
         if (closest) {
@@ -6065,6 +6265,9 @@ export function FloorplanPanel() {
     [
       arcDraftEnd,
       arcDraftStart,
+      calibratingGuideId,
+      calibrationP1,
+      calibrationP2,
       draftStart,
       floorplanOpeningLocalY,
       getPlanPointFromClientPoint,
@@ -7052,26 +7255,48 @@ export function FloorplanPanel() {
 
   const handleSymbolDrop = useCallback(
     (event: React.DragEvent<SVGSVGElement>) => {
+      // Diagnostic: every drop reports what stage it reached. Remove once
+      // drag-drop is confirmed working end-to-end.
+      const _dbg = (stage: string, extra?: unknown) =>
+        // eslint-disable-next-line no-console
+        console.log('[symbol-drop]', stage, extra ?? '')
+
       const raw = event.dataTransfer.getData(FLOORPLAN_SYMBOL_MIME)
-      if (!raw) return
+      const types = Array.from(event.dataTransfer.types)
+      _dbg('fired', { mimeTypes: types, hasFloorplanMime: !!raw })
+      if (!raw) {
+        _dbg('bailed: no FLOORPLAN_SYMBOL_MIME payload (drag source mismatch?)')
+        return
+      }
       event.preventDefault()
 
       type SymbolPayload = { id: string; label: string; src: string; category?: string }
       let dropped: SymbolPayload
       try {
         dropped = JSON.parse(raw) as SymbolPayload
-      } catch {
+      } catch (err) {
+        _dbg('bailed: JSON parse failed', err)
         return
       }
-      if (!dropped?.src) return
+      if (!dropped?.src) {
+        _dbg('bailed: payload missing src', dropped)
+        return
+      }
 
       if (!levelId) {
-        // No active level selected — can't attach. Silent no-op.
+        _dbg('bailed: no active levelId — select a level in the sidebar tree first')
         return
       }
 
       const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
-      if (!planPoint) return
+      if (!planPoint) {
+        _dbg('bailed: getPlanPointFromClientPoint returned null', {
+          x: event.clientX,
+          y: event.clientY,
+        })
+        return
+      }
+      _dbg('proceeding', { levelId, planPoint, category: dropped.category, id: dropped.id })
 
       // Per-category default dimensions [w, h, d] in meters. Furniture-shaped
       // averages; user resizes after dropping. Outliers (toilet, lamp) will
@@ -7104,9 +7329,9 @@ export function FloorplanPanel() {
           },
         })
         useScene.getState().createNode(itemNode, levelId as AnyNodeId)
+        _dbg('CREATED item node', { id: itemNode.id })
       } catch (err) {
-        // ItemNode.parse can throw on schema mismatch — surface in console,
-        // never crash the editor.
+        _dbg('CREATE FAILED', err)
         console.warn('[floorplan] symbol drop failed:', err)
       }
     },
@@ -7478,6 +7703,78 @@ export function FloorplanPanel() {
         visibility: isPanelReady ? 'visible' : 'hidden',
       }}
     >
+      {/* Scale calibration banner — visible when calibratingGuideId is set.
+          Two-point reference: user clicks two points with a known real-world
+          distance, types the distance, scale auto-adjusts. */}
+      {calibratingGuideId && (
+        <div
+          className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 border-b border-amber-500/40 bg-amber-500/15 px-4 py-2.5 text-amber-200 backdrop-blur-md"
+          style={{ paddingLeft: '320px' }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 21h18" />
+            <path d="M6 18 L 18 6" />
+            <path d="M5 17 l 2 2 M 9 13 l 2 2 M 13 9 l 2 2 M 17 5 l 2 2" />
+          </svg>
+          <span className="font-medium text-sm">
+            {!calibrationP1 && 'Set scale: click the first endpoint of a known wall on the plan.'}
+            {calibrationP1 && !calibrationP2 && 'Now click the second endpoint.'}
+            {calibrationP1 && calibrationP2 && 'Enter the real distance to finish — or click again to redo.'}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setCalibratingGuideId(null)
+              setCalibrationP1(null)
+              setCalibrationP2(null)
+              setCalibrationInput('')
+            }}
+            className="ml-2 text-xs text-amber-300/80 hover:text-amber-100 underline-offset-2 hover:underline"
+          >
+            Skip (Esc)
+          </button>
+        </div>
+      )}
+
+      {/* Canvas scale bar — fixed overlay at bottom-left. Picks the nearest
+          "nice" length (1, 2, 5, 10, 20, 50, 100 m, etc.) that maps to
+          roughly 80-150 screen pixels at the current zoom. Updates live
+          with zoom/pan. */}
+      {surfaceSize.width > 0 && (() => {
+        const pixelsPerMeter = surfaceSize.width / viewBox.width
+        if (!Number.isFinite(pixelsPerMeter) || pixelsPerMeter <= 0) return null
+        const TARGET_PX = 100
+        // Round to a 1-2-5 sequence (architectural / map convention).
+        const rawMeters = TARGET_PX / pixelsPerMeter
+        const pow10 = Math.pow(10, Math.floor(Math.log10(rawMeters)))
+        const mantissa = rawMeters / pow10
+        const niceMantissa = mantissa < 1.5 ? 1 : mantissa < 3.5 ? 2 : mantissa < 7.5 ? 5 : 10
+        const lengthMeters = niceMantissa * pow10
+        const widthPx = lengthMeters * pixelsPerMeter
+        const isImperial = unit === 'imperial'
+        const labelValue = isImperial ? lengthMeters * 3.28084 : lengthMeters
+        const labelDigits = labelValue >= 10 ? 0 : 1
+        const label = `${labelValue.toFixed(labelDigits)} ${isImperial ? 'ft' : 'm'}`
+        return (
+          <div
+            className="pointer-events-none absolute z-30 flex flex-col items-start"
+            style={{ left: 16, bottom: 16 }}
+          >
+            <div
+              className="flex h-3 items-end justify-between rounded-sm bg-background/85 px-1 ring-1 ring-border/60 backdrop-blur-sm"
+              style={{ width: widthPx }}
+            >
+              <span className="block h-2 w-0.5 bg-foreground/85" />
+              <span className="block h-1.5 w-0.5 bg-foreground/55" />
+              <span className="block h-2 w-0.5 bg-foreground/85" />
+            </div>
+            <span className="mt-0.5 rounded-sm bg-background/85 px-1 font-mono text-[10px] text-foreground/85 ring-1 ring-border/60 backdrop-blur-sm">
+              {label}
+            </span>
+          </div>
+        )
+      })()}
+
       {/* Ritn3D: resize handles hidden — fullscreen mode */}
       {false && resizeHandleConfigurations.map((handle) => (
         <div
@@ -7757,12 +8054,18 @@ export function FloorplanPanel() {
                       onClick={() => handleQuickBuildToolSelect(quickTool.id)}
                       type="button"
                     >
-                      <img
-                        alt=""
-                        aria-hidden="true"
-                        className="h-4.5 w-4.5 object-contain"
-                        src={quickTool.iconSrc}
-                      />
+                      {quickTool.iconSrc ? (
+                        <img
+                          alt=""
+                          aria-hidden="true"
+                          className="h-4.5 w-4.5 object-contain"
+                          src={quickTool.iconSrc}
+                        />
+                      ) : (
+                        <span aria-hidden="true" className="block h-4.5 w-4.5">
+                          {quickTool.iconNode}
+                        </span>
+                      )}
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" sideOffset={8}>
@@ -8165,6 +8468,119 @@ export function FloorplanPanel() {
               />
             ))}
 
+            {/* Ritn3D items (symbols / furniture). Renders the SVG thumbnail
+                as a top-down image sized by (dimensions.x × dimensions.z),
+                rotated by item.rotation[1] (the Y-axis spin, which is the
+                plan-view rotation). Plan-coordinate space units = SVG units
+                in this viewBox, so the math is a direct map. */}
+            {levelItems.map((item) => {
+              const [w, , d] = item.asset.dimensions
+              const px = item.position[0]
+              const pz = item.position[2]
+              const yRotRad = item.rotation[1] ?? 0
+              const yRotDeg = (yRotRad * 180) / Math.PI
+              const svgC = toSvgPoint({ x: px, y: pz })
+              const halfW = w / 2
+              const halfD = d / 2
+              const isSelected = selectedIdSet.has(item.id)
+              return (
+                <g
+                  key={item.id}
+                  transform={`rotate(${yRotDeg} ${svgC.x} ${svgC.y})`}
+                >
+                  <rect
+                    x={svgC.x - halfW}
+                    y={svgC.y - halfD}
+                    width={w}
+                    height={d}
+                    fill="#f3f4f6"
+                    stroke={isSelected ? '#3b82f6' : 'rgba(120,140,200,0.7)'}
+                    strokeWidth={isSelected ? '0.05' : '0.03'}
+                    vectorEffect="non-scaling-stroke"
+                    style={{ cursor: 'move' }}
+                    onPointerDown={(event) => {
+                      if (event.button !== 0) return
+                      event.stopPropagation()
+                      // Select the item (replaces selection).
+                      setSelection({ selectedIds: [item.id] })
+                      // Start move drag.
+                      const planPoint = getPlanPointFromClientPoint(
+                        event.clientX,
+                        event.clientY,
+                      )
+                      if (!planPoint) return
+                      itemMoveDragRef.current = {
+                        pointerId: event.pointerId,
+                        itemId: item.id,
+                        startPlan: planPoint,
+                        initialPos: [...item.position] as [number, number, number],
+                      }
+                      ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
+                    }}
+                  />
+                  {item.asset.thumbnail && (
+                    <image
+                      href={item.asset.thumbnail}
+                      x={svgC.x - halfW}
+                      y={svgC.y - halfD}
+                      width={w}
+                      height={d}
+                      preserveAspectRatio="xMidYMid meet"
+                      pointerEvents="none"
+                    />
+                  )}
+                  {/* Selection accents + rotation handle. Rotation handle sits
+                      above the item's "north" edge (in local frame), connected
+                      by a thin line — the standard CAD convention. Hold Shift
+                      while rotating to snap to 15°. */}
+                  {isSelected && (
+                    <>
+                      <line
+                        x1={svgC.x}
+                        y1={svgC.y - halfD}
+                        x2={svgC.x}
+                        y2={svgC.y - halfD - 0.4}
+                        stroke="#3b82f6"
+                        strokeWidth="0.03"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <circle
+                        cx={svgC.x}
+                        cy={svgC.y - halfD - 0.4}
+                        r="0.13"
+                        fill="#3b82f6"
+                        stroke="#fff"
+                        strokeWidth="0.03"
+                        vectorEffect="non-scaling-stroke"
+                        style={{ cursor: 'grab' }}
+                        onPointerDown={(event) => {
+                          if (event.button !== 0) return
+                          event.stopPropagation()
+                          const planPoint = getPlanPointFromClientPoint(
+                            event.clientX,
+                            event.clientY,
+                          )
+                          if (!planPoint) return
+                          const dx = planPoint[0] - px
+                          const dz = planPoint[1] - pz
+                          itemRotateDragRef.current = {
+                            pointerId: event.pointerId,
+                            itemId: item.id,
+                            centerPlan: [px, pz],
+                            initialRotY: yRotRad,
+                            startAngleFromCenter: Math.atan2(dz, dx),
+                          }
+                          ;(event.currentTarget as Element).setPointerCapture?.(
+                            event.pointerId,
+                          )
+                        }}
+                      />
+                    </>
+                  )}
+                </g>
+              )
+            })}
+
             <FloorplanWallEndpointLayer
               endpointHandles={wallEndpointHandles}
               hoveredEndpointId={hoveredEndpointId}
@@ -8280,7 +8696,89 @@ export function FloorplanPanel() {
                 vectorEffect="non-scaling-stroke"
               />
             )}
+
+            {/* Scale-calibration overlay: dots at P1/P2 + line between them.
+                Drawn last so it's on top of everything. */}
+            {calibratingGuideId && calibrationP1 && (() => {
+              const a = toSvgPoint({ x: calibrationP1[0], y: calibrationP1[1] })
+              const b = calibrationP2
+                ? toSvgPoint({ x: calibrationP2[0], y: calibrationP2[1] })
+                : null
+              return (
+                <g key="calibration-overlay">
+                  {b && (
+                    <line
+                      x1={a.x}
+                      y1={a.y}
+                      x2={b.x}
+                      y2={b.y}
+                      stroke="#fbbf24"
+                      strokeWidth="0.06"
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
+                  <circle cx={a.x} cy={a.y} r="0.14" fill="#fbbf24" stroke="#000" strokeWidth="0.025" vectorEffect="non-scaling-stroke" />
+                  {b && (
+                    <circle cx={b.x} cy={b.y} r="0.14" fill="#fbbf24" stroke="#000" strokeWidth="0.025" vectorEffect="non-scaling-stroke" />
+                  )}
+                </g>
+              )
+            })()}
           </svg>
+        )}
+
+        {/* Scale-calibration input panel — appears once both points are set.
+            HTML overlay (NOT inside the SVG) so the <input> is a real text
+            field with full keyboard handling. Positioned near the bottom of
+            the canvas as a small floating card. */}
+        {calibratingGuideId && calibrationP1 && calibrationP2 && (
+          <div
+            className="pointer-events-auto fixed bottom-10 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-amber-500/40 bg-background/95 px-3 py-2.5 shadow-2xl backdrop-blur-md"
+          >
+            <span className="text-amber-200 text-xs font-medium">Real distance:</span>
+            <input
+              autoFocus
+              type="text"
+              inputMode="decimal"
+              value={calibrationInput}
+              onChange={(e) => setCalibrationInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applyCalibration()
+              }}
+              placeholder="e.g. 3.6"
+              className="w-24 rounded-md border border-border bg-background/60 px-2 py-1 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+            />
+            <div className="flex overflow-hidden rounded-md border border-border">
+              <button
+                type="button"
+                onClick={() => setCalibrationUnit('m')}
+                className={cn(
+                  'px-2 py-1 text-xs font-medium',
+                  calibrationUnit === 'm' ? 'bg-amber-500/30 text-amber-100' : 'text-muted-foreground hover:bg-accent',
+                )}
+              >
+                m
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalibrationUnit('ft')}
+                className={cn(
+                  'px-2 py-1 text-xs font-medium',
+                  calibrationUnit === 'ft' ? 'bg-amber-500/30 text-amber-100' : 'text-muted-foreground hover:bg-accent',
+                )}
+              >
+                ft
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={applyCalibration}
+              className="rounded-md bg-amber-500/80 px-3 py-1 text-xs font-semibold text-amber-950 hover:bg-amber-500"
+            >
+              Apply
+            </button>
+          </div>
         )}
 
       </div>

@@ -23,25 +23,28 @@ export type ToolConfig = {
   catalogCategory?: CatalogCategory
 }
 
-// Inline arc-wall icon — a single arc with two endpoint dots. Keeps the tool
-// shipping without a new PNG asset; replace with a real icon when designed.
+// Inline arc-wall icon — a high-contrast arc + two endpoint dots. Was using
+// currentColor + thin stroke and disappeared into the dark toolbar at the 18px
+// rendered size; hard-coded #6cb4ff (matches the bulge handle's accent) +
+// thicker stroke + bigger dots so it's unmistakable. Replace with a designed
+// PNG when we get one.
 const ArcWallIcon = (
   <svg
     viewBox="0 0 28 28"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
-    style={{ width: '100%', height: '100%' }}
+    style={{ width: '100%', height: '100%', display: 'block' }}
     aria-hidden="true"
   >
     <path
-      d="M5 20 Q 14 4 23 20"
-      stroke="currentColor"
-      strokeWidth="2.5"
+      d="M5 22 Q 14 2 23 22"
+      stroke="#6cb4ff"
+      strokeWidth="3"
       strokeLinecap="round"
       fill="none"
     />
-    <circle cx="5" cy="20" r="2.4" fill="currentColor" />
-    <circle cx="23" cy="20" r="2.4" fill="currentColor" />
+    <circle cx="5" cy="22" r="3" fill="#6cb4ff" />
+    <circle cx="23" cy="22" r="3" fill="#6cb4ff" />
   </svg>
 )
 

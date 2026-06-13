@@ -158,13 +158,18 @@ export function SymbolCatalog() {
                     title={`Drag "${symbol.label}" onto the canvas`}
                     type="button"
                   >
-                    <div className="flex h-8 w-8 items-center justify-center">
+                    {/* Symbols are drawn black-on-light (architectural
+                        convention). The old `filter: invert(0.8)` washed every
+                        symbol into the same washed-out gray silhouette and
+                        ate detail (toilet tank, stove burners, bed pillows…).
+                        Render the SVG on a near-white tile so its native
+                        contrast shows. */}
+                    <div className="flex h-9 w-9 items-center justify-center rounded-sm bg-[#f3f4f6]">
                       <img
                         alt={symbol.label}
-                        className="max-h-8 max-w-8 object-contain"
+                        className="h-8 w-8 object-contain"
                         draggable={false}
                         src={symbol.src}
-                        style={{ filter: 'invert(0.8)' }}
                       />
                     </div>
                     <span className="text-[8px] text-muted-foreground/70 leading-tight text-center truncate w-full">

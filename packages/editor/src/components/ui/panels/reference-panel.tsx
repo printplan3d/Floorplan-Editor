@@ -1,6 +1,6 @@
 'use client'
 
-import { type AnyNode, type GuideNode, useScene } from '@pascal-app/core'
+import { type AnyNode, emitter, type GuideNode, useScene } from '@pascal-app/core'
 import { Box, Image as ImageIcon } from 'lucide-react'
 import { useCallback } from 'react'
 import useEditor from '../../../store/use-editor'
@@ -52,6 +52,28 @@ export function ReferencePanel() {
       title={node.name || (isScan ? '3D Scan' : 'Guide Image')}
       width={300}
     >
+      {/* Scale calibration trigger — emits the same event auto-fired on
+          upload. Useful when the user dismissed the initial banner or wants
+          to redo. */}
+      {!isScan && (
+        <PanelSection title="Scale">
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedReferenceId) {
+                emitter.emit(
+                  'floorplan:calibrate-scale' as any,
+                  { guideId: selectedReferenceId },
+                )
+              }
+            }}
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 font-medium text-amber-200 text-xs transition-colors hover:bg-amber-500/20"
+          >
+            Set scale by 2-point reference
+          </button>
+        </PanelSection>
+      )}
+
       <PanelSection title="Position">
         <SliderControl
           label={

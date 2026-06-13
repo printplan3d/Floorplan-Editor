@@ -167,7 +167,8 @@ export const useKeyboard = () => {
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
 
-        const selectedNodeIds = useViewer.getState().selection.selectedIds as AnyNodeId[]
+        const sel = useViewer.getState().selection
+        const selectedNodeIds = sel.selectedIds as AnyNodeId[]
 
         if (selectedNodeIds.length > 0) {
           // Play appropriate SFX based on what's being deleted
@@ -183,6 +184,13 @@ export const useKeyboard = () => {
           }
 
           useScene.getState().deleteNodes(selectedNodeIds)
+        } else if (sel.zoneId) {
+          // Ritn3D 2026-06-13: zones use a separate selection field
+          // (selection.zoneId, not selectedIds) so Delete used to no-op on
+          // a selected room. Handle it explicitly + clear the selection.
+          sfxEmitter.emit('sfx:structure-delete')
+          useScene.getState().deleteNode(sel.zoneId as AnyNodeId)
+          useViewer.getState().setSelection({ zoneId: null })
         }
       }
     }
