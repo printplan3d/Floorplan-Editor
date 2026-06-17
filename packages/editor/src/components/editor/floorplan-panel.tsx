@@ -5281,7 +5281,10 @@ export function FloorplanPanel() {
         const SENSITIVITY = 0.3
         const perpDelta = (cursorPerp - bulgeDrag.initialPerp) * SENSITIVITY
         const raw = bulgeDrag.initialBulge + (2 * perpDelta) / chord
-        const next = Math.max(-1, Math.min(1, raw))
+        // Ritn3D 2026-06-17: no semicircle cap. Bulge can legitimately exceed 1
+        // for >180° sweeps (3/4 circle = bulge ~2.4). Soft-cap at ±50 to keep
+        // tessellation sane near the full-circle singularity.
+        const next = Math.max(-50, Math.min(50, raw))
         bulgeDrag.lastBulge = next
 
         setWallBulgeDraft({ wallId: bulgeDrag.wallId, bulge: next })

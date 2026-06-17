@@ -70,7 +70,9 @@ export function WallPanel() {
   const bulge = node.bulge ?? 0
   const sweepDeg = Math.round((4 * Math.atan(bulge) * 180) / Math.PI)
   const setSweepDeg = (deg: number) => {
-    const clamped = Math.max(-179.9, Math.min(179.9, deg))
+    // Allow full 0–360° range each direction. Stop just shy of ±360° because
+    // sweep = 360° is a degenerate full circle (chord = 0, infinite radius).
+    const clamped = Math.max(-358, Math.min(358, deg))
     const nextBulge = Math.tan((clamped * Math.PI) / 180 / 4)
     handleUpdate({ bulge: Math.abs(nextBulge) < 1e-5 ? 0 : nextBulge })
   }
@@ -86,8 +88,8 @@ export function WallPanel() {
       <PanelSection title="Curve">
         <SliderControl
           label="Sweep"
-          max={179}
-          min={-179}
+          max={358}
+          min={-358}
           onChange={setSweepDeg}
           precision={0}
           step={1}
