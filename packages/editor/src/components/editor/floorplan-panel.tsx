@@ -8972,57 +8972,71 @@ export function FloorplanPanel() {
           if (chord < 0.01) return null
           const halfChordCm = Math.max(10, Math.floor(chord * 50))
           const bulge = wall.bulge ?? 0
-          const depthCm = Math.round((chord * bulge) / 2 * 100)
-          const sweepDeg = Math.round(4 * Math.atan(bulge) * 180 / Math.PI)
-          const setDepthCm = (cm: number) => {
-            const safe = Math.max(-halfChordCm, Math.min(halfChordCm, cm))
-            const nextBulge = (2 * (safe / 100)) / chord
+          // Ritn3D 2026-06-17: slider is MAGNITUDE-only (0 = straight, max =
+          // semicircle). Direction is a separate Flip toggle. The previous
+          // bidirectional ±half-chord slider made the user start in the
+          // middle and didn't match how architects think ('curve depth' is
+          // unsigned; the side is a separate decision).
+          const absDepthCm = Math.round((chord * Math.abs(bulge)) / 2 * 100)
+          const sweepDeg = Math.round(Math.abs(4 * Math.atan(bulge) * 180 / Math.PI))
+          // Sign defaults to +1 when the wall is currently straight, so the
+          // first slider movement always produces a visible curve in a
+          // predictable direction. Flip swaps the side.
+          const currentSign = bulge > 0 ? 1 : bulge < 0 ? -1 : 1
+          const setAbsDepthCm = (cm: number) => {
+            const safe = Math.max(0, Math.min(halfChordCm, Math.abs(cm)))
+            const nextBulge = (currentSign * 2 * (safe / 100)) / chord
             const clamped = Math.max(-1, Math.min(1, nextBulge))
             updateNode(wall.id, { bulge: Math.abs(clamped) < 1e-5 ? 0 : clamped })
+          }
+          const flipDirection = () => {
+            if (Math.abs(bulge) > 1e-5) updateNode(wall.id, { bulge: -bulge })
           }
           return (
             <div
               className="pointer-events-auto fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-amber-500/40 bg-background/95 px-4 py-2 shadow-2xl backdrop-blur-md"
             >
               <span className="text-xs font-semibold text-amber-200">Curve</span>
+              <span className="text-[10px] text-zinc-400">flat</span>
               <input
                 type="range"
-                min={-halfChordCm}
+                min={0}
                 max={halfChordCm}
                 step={1}
-                value={depthCm}
-                onChange={(e) => setDepthCm(Number(e.target.value))}
+                value={absDepthCm}
+                onChange={(e) => setAbsDepthCm(Number(e.target.value))}
                 className="w-64 accent-amber-500"
               />
+              <span className="text-[10px] text-zinc-400">semi</span>
               <div className="flex items-center gap-1">
                 <input
                   type="number"
-                  value={depthCm}
-                  min={-halfChordCm}
+                  value={absDepthCm}
+                  min={0}
                   max={halfChordCm}
                   step={1}
-                  onChange={(e) => setDepthCm(Number(e.target.value))}
+                  onChange={(e) => setAbsDepthCm(Number(e.target.value))}
                   className="w-16 rounded border border-border bg-background/60 px-2 py-1 text-right font-mono text-xs text-foreground focus:border-amber-500 focus:outline-none"
                 />
                 <span className="text-[11px] text-zinc-400">cm</span>
               </div>
               <span className="font-mono text-[11px] text-zinc-500">
-                {Math.abs(sweepDeg)}°
+                {sweepDeg}°
               </span>
               <button
                 type="button"
-                onClick={() => setDepthCm(0)}
+                onClick={() => setAbsDepthCm(0)}
                 className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700"
               >
                 Straight
               </button>
               <button
                 type="button"
-                onClick={() => setDepthCm(-depthCm)}
-                disabled={depthCm === 0}
+                onClick={flipDirection}
+                disabled={absDepthCm === 0}
                 className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-zinc-700/40"
               >
-                Flip
+                {bulge >= 0 ? '↻ Flip side' : '↺ Flip side'}
               </button>
             </div>
           )
