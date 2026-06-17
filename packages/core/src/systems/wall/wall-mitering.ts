@@ -145,6 +145,19 @@ function calculateJunctionIntersections(
   getThickness: (wall: WallNode) => number,
 ): WallIntersections {
   const { meetingPoint, connectedWalls } = junction
+
+  // Ritn3D 2026-06-17: if any wall at this junction is an arc, skip mitering
+  // for every wall here. Why: the straight-wall side mitered against an arc's
+  // TANGENT line, which diverges from the actual arc path — so its body
+  // extended past its endpoint INTO the curve region (visible as a stray
+  // straight line inside the arc, user report 2026-06-17). The arc side
+  // already butts (see wall-footprint.ts comment); making the straight side
+  // butt too produces a clean shared endpoint with no overshoot. Trade-off:
+  // no chamfered corner at arc/straight junctions — but a butt corner is
+  // correct geometry, and the stray-line artifact is gone.
+  const hasArc = connectedWalls.some(({ wall }) => !isStraight(wall.bulge ?? 0))
+  if (hasArc) return new Map()
+
   const processedWalls: ProcessedWall[] = []
 
   for (const { wall, endType } of connectedWalls) {
