@@ -337,6 +337,13 @@ type WallBulgeDragState = {
   wallId: WallNode['id']
   start: WallPlanPoint
   end: WallPlanPoint
+  // Relative drag state. We track the cursor's perpendicular offset and
+  // chord-aligned offset at drag start, plus the wall's bulge at drag start.
+  // On each pointer-move we compute the CHANGE in cursor perp vs drag start
+  // and apply that delta to the initial bulge. That way small drag = small
+  // bulge change regardless of how curved the wall already is.
+  initialBulge: number
+  initialPerp: number
   lastBulge: number
   lastLogAt?: number
 }
@@ -5231,29 +5238,40 @@ export function FloorplanPanel() {
         return
       }
 
-      // Bulge handle drag: cursor's plan position becomes the new arc apex.
-      // bulgeFromThreePoints derives bulge from (start, end, cursor).
+      // Bulge handle drag (RELATIVE): cursor's perpendicular DELTA from
+      // drag-start becomes a change in bulge applied to the initial bulge.
+      // initial_bulge + 2 * (cursor_perp - initial_perp) / chord. Small
+      // drag = small change in bulge, regardless of how curved the wall
+      // already was. Compare the older "absolute" model where bulge was
+      // 2 * cursor_perp / chord — that meant a curved wall could only be
+      // straightened by dragging the cursor all the way to the chord line.
       const bulgeDrag = wallBulgeDragRef.current
       if (bulgeDrag && event.pointerId === bulgeDrag.pointerId) {
         event.preventDefault()
         const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
         if (!planPoint) return
-        const raw = bulgeFromThreePoints(bulgeDrag.start, bulgeDrag.end, planPoint)
-        // Snap-to-straight: when the cursor is within ~0.10m of the chord
-        // line, snap bulge to 0 so the user can get a perfectly straight
-        // wall by dragging "back to where straight is" without pixel-precise
-        // aim. The chord guide line (dashed amber) gives visual reference.
+
         const chord = Math.hypot(
           bulgeDrag.end[0] - bulgeDrag.start[0],
           bulgeDrag.end[1] - bulgeDrag.start[1],
         )
-        const dx = (bulgeDrag.end[0] - bulgeDrag.start[0]) / (chord || 1)
-        const dy = (bulgeDrag.end[1] - bulgeDrag.start[1]) / (chord || 1)
+        if (chord === 0) return
+
+        const dx = (bulgeDrag.end[0] - bulgeDrag.start[0]) / chord
+        const dy = (bulgeDrag.end[1] - bulgeDrag.start[1]) / chord
         const vx = planPoint[0] - bulgeDrag.start[0]
         const vy = planPoint[1] - bulgeDrag.start[1]
         const cursorPerp = vx * -dy + vy * dx
-        const SNAP_PERP_M = 0.10
-        const snapped = Math.abs(cursorPerp) < SNAP_PERP_M ? 0 : raw
+
+        // Delta from drag start → bulge change.
+        const perpDelta = cursorPerp - bulgeDrag.initialPerp
+        const raw = bulgeDrag.initialBulge + (2 * perpDelta) / chord
+
+        // Snap-to-straight: when the resulting bulge crosses near 0, snap
+        // exactly. Lets the user reach a perfectly straight wall without
+        // pixel-precise control.
+        const SNAP_BULGE = 0.03
+        const snapped = Math.abs(raw) < SNAP_BULGE ? 0 : raw
         const next = Math.max(-1, Math.min(1, snapped))
         bulgeDrag.lastBulge = next
 
@@ -6940,27 +6958,43 @@ export function FloorplanPanel() {
       if (!alreadySelected) {
         handleWallSelect(wall)
       }
+      // Capture the cursor's perpendicular distance from the chord AT
+      // drag start so the move handler can compute a delta. Without this
+      // capture, the bulge was tied to absolute cursor position — once the
+      // wall was curved, the user couldn't realistically drag the cursor
+      // far enough to make it straight (had to cover the full sagitta in
+      // one drag).
+      const initialBulge = wall.bulge ?? 0
+      const downPlanPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
+      const chord = Math.hypot(
+        wall.end[0] - wall.start[0],
+        wall.end[1] - wall.start[1],
+      )
+      let initialPerp = 0
+      if (downPlanPoint && chord > 0) {
+        const dx = (wall.end[0] - wall.start[0]) / chord
+        const dy = (wall.end[1] - wall.start[1]) / chord
+        const vx = downPlanPoint[0] - wall.start[0]
+        const vy = downPlanPoint[1] - wall.start[1]
+        initialPerp = vx * -dy + vy * dx
+      }
       wallBulgeDragRef.current = {
         pointerId: event.pointerId,
         wallId: wall.id,
         start: wall.start,
         end: wall.end,
-        lastBulge: wall.bulge ?? 0,
+        initialBulge,
+        initialPerp,
+        lastBulge: initialBulge,
       }
-      // Point-to-point diagnostic.
-      const chord = Math.hypot(
-        wall.end[0] - wall.start[0],
-        wall.end[1] - wall.start[1],
-      )
       // eslint-disable-next-line no-console
       console.log('[bulge] pointerDown', {
         wallId: wall.id,
-        start: [+wall.start[0].toFixed(3), +wall.start[1].toFixed(3)],
-        end: [+wall.end[0].toFixed(3), +wall.end[1].toFixed(3)],
         chord_m: +chord.toFixed(3),
-        currentBulge: +(wall.bulge ?? 0).toFixed(4),
+        initialBulge: +initialBulge.toFixed(4),
+        initialPerp: +initialPerp.toFixed(3),
       })
-      setWallBulgeDraft({ wallId: wall.id, bulge: wall.bulge ?? 0 })
+      setWallBulgeDraft({ wallId: wall.id, bulge: initialBulge })
       // eslint-disable-next-line no-console
       console.log('[bulge] drag STARTED', { wallId: wall.id, initialBulge: wall.bulge ?? 0 })
     },
