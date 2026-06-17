@@ -5250,41 +5250,18 @@ export function FloorplanPanel() {
         return
       }
 
-      // Bulge handle drag (RELATIVE): cursor's perpendicular DELTA from
-      // drag-start becomes a change in bulge applied to the initial bulge.
-      // initial_bulge + 2 * (cursor_perp - initial_perp) / chord. Small
-      // drag = small change in bulge, regardless of how curved the wall
-      // already was. Compare the older "absolute" model where bulge was
-      // 2 * cursor_perp / chord — that meant a curved wall could only be
-      // straightened by dragging the cursor all the way to the chord line.
+      // Bulge handle drag (ABSOLUTE): cursor's plan position IS the new arc
+      // apex. raw = 2 * perp / chord, clamped to [-1, 1]. Chord line shown
+      // as a bright dashed amber line so the user can see where "straight"
+      // is. No relative-delta tricks, no snap zones — just: cursor on chord
+      // = straight wall, cursor off chord = curve with apex at cursor.
       const bulgeDrag = wallBulgeDragRef.current
       if (bulgeDrag && event.pointerId === bulgeDrag.pointerId) {
         event.preventDefault()
         const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
         if (!planPoint) return
-
-        const chord = Math.hypot(
-          bulgeDrag.end[0] - bulgeDrag.start[0],
-          bulgeDrag.end[1] - bulgeDrag.start[1],
-        )
-        if (chord === 0) return
-
-        const dx = (bulgeDrag.end[0] - bulgeDrag.start[0]) / chord
-        const dy = (bulgeDrag.end[1] - bulgeDrag.start[1]) / chord
-        const vx = planPoint[0] - bulgeDrag.start[0]
-        const vy = planPoint[1] - bulgeDrag.start[1]
-        const cursorPerp = vx * -dy + vy * dx
-
-        // Delta from drag start → bulge change.
-        const perpDelta = cursorPerp - bulgeDrag.initialPerp
-        const raw = bulgeDrag.initialBulge + (2 * perpDelta) / chord
-
-        // Snap-to-straight: when the resulting bulge crosses near 0, snap
-        // exactly. Lets the user reach a perfectly straight wall without
-        // pixel-precise control.
-        const SNAP_BULGE = 0.03
-        const snapped = Math.abs(raw) < SNAP_BULGE ? 0 : raw
-        const next = Math.max(-1, Math.min(1, snapped))
+        const raw = bulgeFromThreePoints(bulgeDrag.start, bulgeDrag.end, planPoint)
+        const next = Math.max(-1, Math.min(1, raw))
         bulgeDrag.lastBulge = next
 
         // Point-to-point diagnostic: log every ~80ms during drag so we can
@@ -8909,32 +8886,46 @@ export function FloorplanPanel() {
               />
             )}
 
-            {/* Bulge drag overlay: shows the chord line (dashed amber) while
-                the user drags the bulge handle. Without this, the user can't
-                see where "straight" is — the chord is INSIDE the wall body
-                so it's invisible, and you have to drag the cursor onto it to
-                straighten the wall, but you don't know where it is. With the
-                guide line drawn, dragging toward it = smaller curve, dragging
-                away = bigger curve. */}
+            {/* Bulge drag chord guide — VERY visible: thick bright magenta
+                dashed line so the user can see where "straight" is. The
+                chord lives inside the wall body and is invisible by default;
+                the user needs to drag the cursor onto this line to make the
+                wall straight, so we render it on top of EVERYTHING with
+                vector-effect non-scaling-stroke for screen-px width. */}
             {wallBulgeDraft && (() => {
               const drag = wallBulgeDragRef.current
               if (!drag) return null
               const a = toSvgPoint({ x: drag.start[0], y: drag.start[1] })
               const b = toSvgPoint({ x: drag.end[0], y: drag.end[1] })
               return (
-                <g key="bulge-chord-guide">
+                <g key="bulge-chord-guide" pointerEvents="none">
+                  {/* White halo for contrast against the dark wall body */}
                   <line
                     x1={a.x}
                     y1={a.y}
                     x2={b.x}
                     y2={b.y}
-                    stroke="#fbbf24"
-                    strokeWidth="0.04"
-                    strokeDasharray="0.15 0.1"
+                    stroke="#ffffff"
+                    strokeWidth="6"
+                    strokeOpacity="0.7"
                     strokeLinecap="round"
                     vectorEffect="non-scaling-stroke"
-                    pointerEvents="none"
                   />
+                  {/* Bright magenta dashed line on top */}
+                  <line
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke="#ec4899"
+                    strokeWidth="3"
+                    strokeDasharray="8 6"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {/* Endpoint dots so the user can see where the wall ends */}
+                  <circle cx={a.x} cy={a.y} r="0.12" fill="#ec4899" stroke="#fff" strokeWidth="0.04" vectorEffect="non-scaling-stroke" />
+                  <circle cx={b.x} cy={b.y} r="0.12" fill="#ec4899" stroke="#fff" strokeWidth="0.04" vectorEffect="non-scaling-stroke" />
                 </g>
               )
             })()}
@@ -8988,11 +8979,11 @@ export function FloorplanPanel() {
             <div
               className="pointer-events-none fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-amber-500/40 bg-background/95 px-4 py-1.5 shadow-2xl backdrop-blur-md"
             >
-              <span className="font-mono text-xs text-amber-200">
-                {isStraightNow ? 'STRAIGHT' : `curve: ${(sagitta * 100).toFixed(0)}cm peak · ${sweepDeg.toFixed(0)}°`}
+              <span className="font-mono text-xs font-bold text-amber-200">
+                {isStraightNow ? '⟶ STRAIGHT WALL' : `peak: ${(sagitta * 100).toFixed(0)}cm · ${sweepDeg.toFixed(0)}°`}
               </span>
-              <span className="text-[10px] text-muted-foreground">
-                drag toward chord → smaller · away → larger
+              <span className="text-[10px] text-pink-300">
+                ← drag cursor ONTO the pink dashed line to make wall straight
               </span>
             </div>
           )
