@@ -61,22 +61,28 @@ export function WallPanel() {
   const height = node.height ?? 2.5
   const thickness = node.thickness ?? 0.1
 
-  // Ritn3D 2026-06-17: curve slider. bulge<->sweep-angle conversion so the
-  // user sees degrees (intuitive) instead of the raw -1..1 tangent value.
-  //   sweep = 4 * atan(bulge)   (radians)
-  //   bulge = tan(sweep / 4)
-  // bulge -1 = -180°, 0 = straight, +1 = +180° (semicircle each side).
-  // Drag UX kept fighting us — slider is the reliable path.
+  // Ritn3D 2026-06-17: slider in DEPTH (sagitta) cm — the actual thing
+  // architects care about. Sweep-angle slider failed because 95 % of real
+  // curves live in the first 30° of a ±180° slider — too tiny to hit. Depth
+  // is linear with bulge, so the slider gives uniform precision over the
+  // full useful range.
+  //   sagitta = chord * bulge / 2  →  bulge = 2 * sagitta / chord
   const bulge = node.bulge ?? 0
-  const sweepDeg = Math.round((4 * Math.atan(bulge) * 180) / Math.PI)
-  const setSweepDeg = (deg: number) => {
-    // Allow full 0–360° range each direction. Stop just shy of ±360° because
-    // sweep = 360° is a degenerate full circle (chord = 0, infinite radius).
-    const clamped = Math.max(-358, Math.min(358, deg))
-    const nextBulge = Math.tan((clamped * Math.PI) / 180 / 4)
-    handleUpdate({ bulge: Math.abs(nextBulge) < 1e-5 ? 0 : nextBulge })
+  const depthCm = Math.round((length * bulge) / 2 * 100)
+  // Default range is "gentle to semicircle" (±chord/2 = full semicircle apex).
+  // Round to nice 10cm steps and never less than 50cm for very short walls.
+  const halfChordCm = Math.max(50, Math.round((length * 100) / 2 / 10) * 10)
+  const setDepthCm = (cm: number) => {
+    if (length < 1e-9) return
+    const nextBulge = (2 * (cm / 100)) / length
+    // soft-cap at ±50 to match drag handler (avoids near-360° singularity)
+    const safe = Math.max(-50, Math.min(50, nextBulge))
+    handleUpdate({ bulge: Math.abs(safe) < 1e-5 ? 0 : safe })
   }
-  const sagittaCm = Math.round((length * Math.abs(bulge)) / 2 * 100)
+  const sweepDeg = Math.round((4 * Math.atan(bulge) * 180) / Math.PI)
+  const radiusM = Math.abs(bulge) > 1e-5
+    ? (length * (1 + bulge * bulge)) / (4 * Math.abs(bulge))
+    : null
 
   return (
     <PanelWrapper
@@ -87,31 +93,36 @@ export function WallPanel() {
     >
       <PanelSection title="Curve">
         <SliderControl
-          label="Sweep"
-          max={358}
-          min={-358}
-          onChange={setSweepDeg}
+          label="Depth"
+          max={halfChordCm}
+          min={-halfChordCm}
+          onChange={setDepthCm}
           precision={0}
           step={1}
-          unit="°"
-          value={sweepDeg}
+          unit="cm"
+          value={depthCm}
         />
         <div className="flex items-center justify-between gap-2 px-1 pt-1 text-[11px]">
           <span className="text-zinc-400">
-            Peak <span className="font-mono text-zinc-200">{sagittaCm} cm</span>
+            Sweep <span className="font-mono text-zinc-200">{sweepDeg}°</span>
+            {radiusM !== null && (
+              <>
+                {' · '}R <span className="font-mono text-zinc-200">{radiusM < 10 ? radiusM.toFixed(2) : radiusM.toFixed(1)} m</span>
+              </>
+            )}
           </span>
           <div className="flex gap-1.5">
             <button
               type="button"
               className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-0.5 text-zinc-200 hover:bg-zinc-700"
-              onClick={() => setSweepDeg(0)}
+              onClick={() => setDepthCm(0)}
             >
               Straight
             </button>
             <button
               type="button"
               className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-0.5 text-zinc-200 hover:bg-zinc-700"
-              onClick={() => setSweepDeg(-sweepDeg)}
+              onClick={() => setDepthCm(-depthCm)}
             >
               Flip
             </button>
