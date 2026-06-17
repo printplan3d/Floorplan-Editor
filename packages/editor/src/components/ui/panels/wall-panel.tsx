@@ -61,6 +61,21 @@ export function WallPanel() {
   const height = node.height ?? 2.5
   const thickness = node.thickness ?? 0.1
 
+  // Ritn3D 2026-06-17: curve slider. bulge<->sweep-angle conversion so the
+  // user sees degrees (intuitive) instead of the raw -1..1 tangent value.
+  //   sweep = 4 * atan(bulge)   (radians)
+  //   bulge = tan(sweep / 4)
+  // bulge -1 = -180°, 0 = straight, +1 = +180° (semicircle each side).
+  // Drag UX kept fighting us — slider is the reliable path.
+  const bulge = node.bulge ?? 0
+  const sweepDeg = Math.round((4 * Math.atan(bulge) * 180) / Math.PI)
+  const setSweepDeg = (deg: number) => {
+    const clamped = Math.max(-179.9, Math.min(179.9, deg))
+    const nextBulge = Math.tan((clamped * Math.PI) / 180 / 4)
+    handleUpdate({ bulge: Math.abs(nextBulge) < 1e-5 ? 0 : nextBulge })
+  }
+  const sagittaCm = Math.round((length * Math.abs(bulge)) / 2 * 100)
+
   return (
     <PanelWrapper
       icon="/icons/wall.png"
@@ -68,6 +83,40 @@ export function WallPanel() {
       title={node.name || 'Wall'}
       width={280}
     >
+      <PanelSection title="Curve">
+        <SliderControl
+          label="Sweep"
+          max={179}
+          min={-179}
+          onChange={setSweepDeg}
+          precision={0}
+          step={1}
+          unit="°"
+          value={sweepDeg}
+        />
+        <div className="flex items-center justify-between gap-2 px-1 pt-1 text-[11px]">
+          <span className="text-zinc-400">
+            Peak <span className="font-mono text-zinc-200">{sagittaCm} cm</span>
+          </span>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-0.5 text-zinc-200 hover:bg-zinc-700"
+              onClick={() => setSweepDeg(0)}
+            >
+              Straight
+            </button>
+            <button
+              type="button"
+              className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-0.5 text-zinc-200 hover:bg-zinc-700"
+              onClick={() => setSweepDeg(-sweepDeg)}
+            >
+              Flip
+            </button>
+          </div>
+        </div>
+      </PanelSection>
+
       <PanelSection title="Dimensions">
         {/* Adicionando o controle de Length solicitado na Issue #191 */}
         <SliderControl
