@@ -8958,6 +8958,76 @@ export function FloorplanPanel() {
           </svg>
         )}
 
+        {/* Ritn3D 2026-06-17: inline curve editor. Drag handle precision is
+            limited by pixel density (a 50cm wall has ~25cm of dragable range,
+            ~50px on screen — sub-cm precision is impossible). Putting the
+            slider + number input INSIDE the canvas, bottom-centre, means the
+            user gets a CAD-grade precision control right where their eye is.
+            Side-panel slider stays as a redundancy. Hidden during active drag
+            so the live drag readout (below) doesn't overlap. */}
+        {!wallBulgeDraft && mode === 'select' && selectedIds.length === 1 && (() => {
+          const wall = wallById.get(selectedIds[0] as WallNode['id'])
+          if (!wall || wall.type !== 'wall') return null
+          const chord = Math.hypot(wall.end[0] - wall.start[0], wall.end[1] - wall.start[1])
+          if (chord < 0.01) return null
+          const halfChordCm = Math.max(10, Math.floor(chord * 50))
+          const bulge = wall.bulge ?? 0
+          const depthCm = Math.round((chord * bulge) / 2 * 100)
+          const sweepDeg = Math.round(4 * Math.atan(bulge) * 180 / Math.PI)
+          const setDepthCm = (cm: number) => {
+            const safe = Math.max(-halfChordCm, Math.min(halfChordCm, cm))
+            const nextBulge = (2 * (safe / 100)) / chord
+            const clamped = Math.max(-1, Math.min(1, nextBulge))
+            updateNode(wall.id, { bulge: Math.abs(clamped) < 1e-5 ? 0 : clamped })
+          }
+          return (
+            <div
+              className="pointer-events-auto fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-amber-500/40 bg-background/95 px-4 py-2 shadow-2xl backdrop-blur-md"
+            >
+              <span className="text-xs font-semibold text-amber-200">Curve</span>
+              <input
+                type="range"
+                min={-halfChordCm}
+                max={halfChordCm}
+                step={1}
+                value={depthCm}
+                onChange={(e) => setDepthCm(Number(e.target.value))}
+                className="w-64 accent-amber-500"
+              />
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  value={depthCm}
+                  min={-halfChordCm}
+                  max={halfChordCm}
+                  step={1}
+                  onChange={(e) => setDepthCm(Number(e.target.value))}
+                  className="w-16 rounded border border-border bg-background/60 px-2 py-1 text-right font-mono text-xs text-foreground focus:border-amber-500 focus:outline-none"
+                />
+                <span className="text-[11px] text-zinc-400">cm</span>
+              </div>
+              <span className="font-mono text-[11px] text-zinc-500">
+                {Math.abs(sweepDeg)}°
+              </span>
+              <button
+                type="button"
+                onClick={() => setDepthCm(0)}
+                className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700"
+              >
+                Straight
+              </button>
+              <button
+                type="button"
+                onClick={() => setDepthCm(-depthCm)}
+                disabled={depthCm === 0}
+                className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-zinc-700/40"
+              >
+                Flip
+              </button>
+            </div>
+          )
+        })()}
+
         {/* Bulge live readout — fixed badge bottom-center showing the
             current bulge / sagitta during a drag. Without this the user
             can lose track of what they're producing when the cursor wanders
