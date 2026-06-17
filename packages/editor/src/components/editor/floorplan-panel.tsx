@@ -3897,18 +3897,6 @@ export function FloorplanPanel() {
         getFloorplanWall(previewWall),
         EMPTY_WALL_MITER_DATA,
       )
-      // Diagnostic: confirms the polygon IS being rebuilt during a bulge
-      // drag. If the user reports "wall body doesn't follow my cursor",
-      // they should see one of these logs per drag tick. If they don't,
-      // displayWallPolygons isn't being consumed by the render path.
-      if (wallBulgeDraft && entry.wall.id === wallBulgeDraft.wallId) {
-        // eslint-disable-next-line no-console
-        console.log('[bulge] polygon rebuild', {
-          wallId: entry.wall.id,
-          bulge: +previewWall.bulge.toFixed(4),
-          pointCount: previewPolygon.length,
-        })
-      }
       return {
         wall: previewWall,
         polygon: previewPolygon,
@@ -5470,21 +5458,6 @@ export function FloorplanPanel() {
       const wall = wallById.get(dragState.wallId)
       if (wall) {
         const finalBulge = isStraight(dragState.lastBulge) ? 0 : dragState.lastBulge
-        // Diagnostic: print the actual numeric values so a "the curve is
-        // still too big" complaint can be debugged. chord = wall length,
-        // sagitta = the perpendicular bulge height in plan units (meters).
-        // bulge ~= 2 * sagitta / chord; small visible curve = small sagitta.
-        const chord = Math.hypot(
-          wall.end[0] - wall.start[0],
-          wall.end[1] - wall.start[1],
-        )
-        const sagitta = (chord * Math.abs(finalBulge)) / 2
-        // eslint-disable-next-line no-console
-        console.log('[bulge] commit', {
-          bulge: finalBulge.toFixed(4),
-          chord_m: chord.toFixed(3),
-          sagitta_m: sagitta.toFixed(3),
-        })
         if ((wall.bulge ?? 0) !== finalBulge) {
           updateNode(wall.id, { bulge: finalBulge })
           sfxEmitter.emit('sfx:structure-build')
@@ -6939,15 +6912,6 @@ export function FloorplanPanel() {
   // user can't accidentally curve a wall while building doors etc.
   const handleWallBulgePointerDown = useCallback(
     (wall: WallNode, event: ReactPointerEvent<SVGCircleElement>) => {
-      // eslint-disable-next-line no-console
-      console.log('[bulge] pointerDown', {
-        button: event.button,
-        pointerId: event.pointerId,
-        wallId: wall.id,
-        wallBulge: wall.bulge,
-        mode,
-        tool,
-      })
       if (event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
@@ -6955,8 +6919,6 @@ export function FloorplanPanel() {
       // expose the handle (see wallBulgeHandles useMemo); both must allow
       // the drag too.
       if (mode !== 'select' && tool !== 'arc-wall') {
-        // eslint-disable-next-line no-console
-        console.log('[bulge] BAIL: mode/tool gate failed')
         return
       }
       clearWallPlacementDraft()
@@ -7000,16 +6962,7 @@ export function FloorplanPanel() {
         initialPerp,
         lastBulge: initialBulge,
       }
-      // eslint-disable-next-line no-console
-      console.log('[bulge] pointerDown', {
-        wallId: wall.id,
-        chord_m: +chord.toFixed(3),
-        initialBulge: +initialBulge.toFixed(4),
-        initialPerp: +initialPerp.toFixed(3),
-      })
       setWallBulgeDraft({ wallId: wall.id, bulge: initialBulge })
-      // eslint-disable-next-line no-console
-      console.log('[bulge] drag STARTED', { wallId: wall.id, initialBulge: wall.bulge ?? 0 })
     },
     [clearWallPlacementDraft, handleWallSelect, mode, tool],
   )
@@ -8984,118 +8937,6 @@ export function FloorplanPanel() {
             })()}
           </svg>
         )}
-
-        {/* Ritn3D 2026-06-17: inline curve editor. Drag handle precision is
-            limited by pixel density (a 50cm wall has ~25cm of dragable range,
-            ~50px on screen — sub-cm precision is impossible). Putting the
-            slider + number input INSIDE the canvas, bottom-centre, means the
-            user gets a CAD-grade precision control right where their eye is.
-            Side-panel slider stays as a redundancy. Hidden during active drag
-            so the live drag readout (below) doesn't overlap. */}
-        {!wallBulgeDraft && mode === 'select' && selectedIds.length === 1 && (() => {
-          const wall = wallById.get(selectedIds[0] as WallNode['id'])
-          if (!wall || wall.type !== 'wall') return null
-          const chord = Math.hypot(wall.end[0] - wall.start[0], wall.end[1] - wall.start[1])
-          if (chord < 0.01) return null
-          const halfChordCm = Math.max(10, Math.floor(chord * 50))
-          const bulge = wall.bulge ?? 0
-          // Ritn3D 2026-06-17: slider is MAGNITUDE-only (0 = straight, max =
-          // semicircle). Direction is a separate Flip toggle. The previous
-          // bidirectional ±half-chord slider made the user start in the
-          // middle and didn't match how architects think ('curve depth' is
-          // unsigned; the side is a separate decision).
-          const absDepthCm = Math.round((chord * Math.abs(bulge)) / 2 * 100)
-          const sweepDeg = Math.round(Math.abs(4 * Math.atan(bulge) * 180 / Math.PI))
-          // Sign defaults to +1 when the wall is currently straight, so the
-          // first slider movement always produces a visible curve in a
-          // predictable direction. Flip swaps the side.
-          const currentSign = bulge > 0 ? 1 : bulge < 0 ? -1 : 1
-          const setAbsDepthCm = (cm: number) => {
-            const safe = Math.max(0, Math.min(halfChordCm, Math.abs(cm)))
-            const nextBulge = (currentSign * 2 * (safe / 100)) / chord
-            const clamped = Math.max(-1, Math.min(1, nextBulge))
-            updateNode(wall.id, { bulge: Math.abs(clamped) < 1e-5 ? 0 : clamped })
-          }
-          const flipDirection = () => {
-            if (Math.abs(bulge) > 1e-5) updateNode(wall.id, { bulge: -bulge })
-          }
-          return (
-            <div
-              className="pointer-events-auto fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-amber-500/40 bg-background/95 px-4 py-2 shadow-2xl backdrop-blur-md"
-            >
-              <span className="text-xs font-semibold text-amber-200">Curve</span>
-              <span className="text-[10px] text-zinc-400">flat</span>
-              <input
-                type="range"
-                min={0}
-                max={halfChordCm}
-                step={1}
-                value={absDepthCm}
-                onChange={(e) => setAbsDepthCm(Number(e.target.value))}
-                className="w-64 accent-amber-500"
-              />
-              <span className="text-[10px] text-zinc-400">semi</span>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  value={absDepthCm}
-                  min={0}
-                  max={halfChordCm}
-                  step={1}
-                  onChange={(e) => setAbsDepthCm(Number(e.target.value))}
-                  className="w-16 rounded border border-border bg-background/60 px-2 py-1 text-right font-mono text-xs text-foreground focus:border-amber-500 focus:outline-none"
-                />
-                <span className="text-[11px] text-zinc-400">cm</span>
-              </div>
-              <span className="font-mono text-[11px] text-zinc-500">
-                {sweepDeg}°
-              </span>
-              <button
-                type="button"
-                onClick={() => setAbsDepthCm(0)}
-                className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700"
-              >
-                Straight
-              </button>
-              <button
-                type="button"
-                onClick={flipDirection}
-                disabled={absDepthCm === 0}
-                className="rounded border border-zinc-600 bg-zinc-700/40 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-zinc-700/40"
-              >
-                {bulge >= 0 ? '↻ Flip side' : '↺ Flip side'}
-              </button>
-            </div>
-          )
-        })()}
-
-        {/* Bulge live readout — fixed badge bottom-center showing the
-            current bulge / sagitta during a drag. Without this the user
-            can lose track of what they're producing when the cursor wanders
-            and they release at a value they didn't intend. */}
-        {wallBulgeDraft && (() => {
-          const drag = wallBulgeDragRef.current
-          if (!drag) return null
-          const chord = Math.hypot(
-            drag.end[0] - drag.start[0],
-            drag.end[1] - drag.start[1],
-          )
-          const sagitta = (chord * Math.abs(wallBulgeDraft.bulge)) / 2
-          const sweepDeg = Math.abs(4 * Math.atan(wallBulgeDraft.bulge) * 180 / Math.PI)
-          const isStraightNow = Math.abs(wallBulgeDraft.bulge) < 1e-5
-          return (
-            <div
-              className="pointer-events-none fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-amber-500/40 bg-background/95 px-4 py-1.5 shadow-2xl backdrop-blur-md"
-            >
-              <span className="font-mono text-xs font-bold text-amber-200">
-                {isStraightNow ? '⟶ STRAIGHT' : `peak: ${(sagitta * 100).toFixed(0)}cm · ${sweepDeg.toFixed(0)}°`}
-              </span>
-              <span className="text-[10px] text-amber-300/80">
-                drag away from wall → bigger curve · drag toward → smaller
-              </span>
-            </div>
-          )
-        })()}
 
         {/* Scale-calibration input panel — appears once both points are set.
             HTML overlay (NOT inside the SVG) so the <input> is a real text
