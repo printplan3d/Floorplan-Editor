@@ -5250,51 +5250,39 @@ export function FloorplanPanel() {
         return
       }
 
-      // Bulge handle drag (ABSOLUTE): cursor's plan position IS the new arc
-      // apex. raw = 2 * perp / chord, clamped to [-1, 1]. Chord line shown
-      // as a bright dashed amber line so the user can see where "straight"
-      // is. No relative-delta tricks, no snap zones — just: cursor on chord
-      // = straight wall, cursor off chord = curve with apex at cursor.
+      // Bulge handle drag (RELATIVE): cursor perpendicular delta from drag
+      // start, scaled DOWN by SENSITIVITY so small drags produce small
+      // curve changes. Earlier "absolute cursor=apex" model meant the user
+      // could only get extreme values (cursor on chord = straight, cursor
+      // anywhere else = quickly hits the semicircle clamp) — no usable
+      // middle ground.
+      //
+      // With sensitivity = 0.3, a 1m cursor drag perpendicular changes
+      // bulge by (2 * 1m * 0.3) / chord. For a 3.5m wall: 0.17 bulge
+      // change per 1m drag. Predictable, gentle, you can land any value.
       const bulgeDrag = wallBulgeDragRef.current
       if (bulgeDrag && event.pointerId === bulgeDrag.pointerId) {
         event.preventDefault()
         const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
         if (!planPoint) return
-        const raw = bulgeFromThreePoints(bulgeDrag.start, bulgeDrag.end, planPoint)
+
+        const chord = Math.hypot(
+          bulgeDrag.end[0] - bulgeDrag.start[0],
+          bulgeDrag.end[1] - bulgeDrag.start[1],
+        )
+        if (chord === 0) return
+
+        const dx = (bulgeDrag.end[0] - bulgeDrag.start[0]) / chord
+        const dy = (bulgeDrag.end[1] - bulgeDrag.start[1]) / chord
+        const vx = planPoint[0] - bulgeDrag.start[0]
+        const vy = planPoint[1] - bulgeDrag.start[1]
+        const cursorPerp = vx * -dy + vy * dx
+
+        const SENSITIVITY = 0.3
+        const perpDelta = (cursorPerp - bulgeDrag.initialPerp) * SENSITIVITY
+        const raw = bulgeDrag.initialBulge + (2 * perpDelta) / chord
         const next = Math.max(-1, Math.min(1, raw))
         bulgeDrag.lastBulge = next
-
-        // Point-to-point diagnostic: log every ~80ms during drag so we can
-        // see the full picture without flooding the console. Shows what the
-        // cursor is, what perpendicular distance to the chord it is, and
-        // what bulge that produces.
-        const now = performance.now()
-        if (!bulgeDrag.lastLogAt || now - bulgeDrag.lastLogAt > 80) {
-          bulgeDrag.lastLogAt = now
-          const chord = Math.hypot(
-            bulgeDrag.end[0] - bulgeDrag.start[0],
-            bulgeDrag.end[1] - bulgeDrag.start[1],
-          )
-          // Perpendicular distance from cursor to chord line (same math
-          // bulgeFromThreePoints uses internally).
-          const dx = (bulgeDrag.end[0] - bulgeDrag.start[0]) / (chord || 1)
-          const dy = (bulgeDrag.end[1] - bulgeDrag.start[1]) / (chord || 1)
-          const vx = planPoint[0] - bulgeDrag.start[0]
-          const vy = planPoint[1] - bulgeDrag.start[1]
-          const perp = vx * -dy + vy * dx
-          const sagitta = (chord * Math.abs(next)) / 2
-          // eslint-disable-next-line no-console
-          console.log('[bulge] move', {
-            cursor: [+planPoint[0].toFixed(3), +planPoint[1].toFixed(3)],
-            start: [+bulgeDrag.start[0].toFixed(3), +bulgeDrag.start[1].toFixed(3)],
-            end: [+bulgeDrag.end[0].toFixed(3), +bulgeDrag.end[1].toFixed(3)],
-            chord_m: +chord.toFixed(3),
-            perp_m: +perp.toFixed(3),
-            raw_bulge: +raw.toFixed(4),
-            clamped: +next.toFixed(4),
-            sagitta_m: +sagitta.toFixed(3),
-          })
-        }
 
         setWallBulgeDraft({ wallId: bulgeDrag.wallId, bulge: next })
         return
@@ -8980,10 +8968,10 @@ export function FloorplanPanel() {
               className="pointer-events-none fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-amber-500/40 bg-background/95 px-4 py-1.5 shadow-2xl backdrop-blur-md"
             >
               <span className="font-mono text-xs font-bold text-amber-200">
-                {isStraightNow ? '⟶ STRAIGHT WALL' : `peak: ${(sagitta * 100).toFixed(0)}cm · ${sweepDeg.toFixed(0)}°`}
+                {isStraightNow ? '⟶ STRAIGHT' : `peak: ${(sagitta * 100).toFixed(0)}cm · ${sweepDeg.toFixed(0)}°`}
               </span>
-              <span className="text-[10px] text-pink-300">
-                ← drag cursor ONTO the pink dashed line to make wall straight
+              <span className="text-[10px] text-amber-300/80">
+                drag away from wall → bigger curve · drag toward → smaller
               </span>
             </div>
           )
