@@ -1256,6 +1256,33 @@ function getWallHoverSidePaths(polygon: Point2D[], wall: WallNode): [string, str
     return null
   }
 
+  // Ritn3D 2026-06-17: arc walls. Their footprint polygon is
+  // [outer[0..N], inner[N..0]] with N+1 tessellated points per side. The
+  // straight-wall fast path below took polygon[0]/polygon[1] and drew ONE
+  // straight line, which renders as a chord stub diving across the arc.
+  // For arc walls trace the full tessellated outer and inner polylines.
+  const isArc = Math.abs(wall.bulge ?? 0) > 1e-6
+  if (isArc && polygon.length % 2 === 0) {
+    const half = polygon.length / 2
+    const outerPts = polygon.slice(0, half)
+    const innerPts = polygon.slice(half).reverse()
+    const buildPath = (pts: Point2D[]) => {
+      if (pts.length < 2) return ''
+      const svgPts = pts.map(toSvgPoint)
+      const first = svgPts[0]!
+      let d = `M ${first.x} ${first.y}`
+      for (let i = 1; i < svgPts.length; i++) {
+        const p = svgPts[i]!
+        d += ` L ${p.x} ${p.y}`
+      }
+      return d
+    }
+    const outerPath = buildPath(outerPts)
+    const innerPath = buildPath(innerPts)
+    if (!outerPath || !innerPath) return null
+    return [outerPath, innerPath]
+  }
+
   const startRight = polygon[0]
   const endRight = polygon[1]
   const hasEndCenterPoint = pointMatchesWallPlanPoint(polygon[2], wall.end)
