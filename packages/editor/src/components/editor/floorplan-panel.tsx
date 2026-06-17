@@ -3870,6 +3870,18 @@ export function FloorplanPanel() {
         getFloorplanWall(previewWall),
         EMPTY_WALL_MITER_DATA,
       )
+      // Diagnostic: confirms the polygon IS being rebuilt during a bulge
+      // drag. If the user reports "wall body doesn't follow my cursor",
+      // they should see one of these logs per drag tick. If they don't,
+      // displayWallPolygons isn't being consumed by the render path.
+      if (wallBulgeDraft && entry.wall.id === wallBulgeDraft.wallId) {
+        // eslint-disable-next-line no-console
+        console.log('[bulge] polygon rebuild', {
+          wallId: entry.wall.id,
+          bulge: +previewWall.bulge.toFixed(4),
+          pointCount: previewPolygon.length,
+        })
+      }
       return {
         wall: previewWall,
         polygon: previewPolygon,
@@ -8957,6 +8969,34 @@ export function FloorplanPanel() {
             })()}
           </svg>
         )}
+
+        {/* Bulge live readout — fixed badge bottom-center showing the
+            current bulge / sagitta during a drag. Without this the user
+            can lose track of what they're producing when the cursor wanders
+            and they release at a value they didn't intend. */}
+        {wallBulgeDraft && (() => {
+          const drag = wallBulgeDragRef.current
+          if (!drag) return null
+          const chord = Math.hypot(
+            drag.end[0] - drag.start[0],
+            drag.end[1] - drag.start[1],
+          )
+          const sagitta = (chord * Math.abs(wallBulgeDraft.bulge)) / 2
+          const sweepDeg = Math.abs(4 * Math.atan(wallBulgeDraft.bulge) * 180 / Math.PI)
+          const isStraightNow = Math.abs(wallBulgeDraft.bulge) < 1e-5
+          return (
+            <div
+              className="pointer-events-none fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-amber-500/40 bg-background/95 px-4 py-1.5 shadow-2xl backdrop-blur-md"
+            >
+              <span className="font-mono text-xs text-amber-200">
+                {isStraightNow ? 'STRAIGHT' : `curve: ${(sagitta * 100).toFixed(0)}cm peak · ${sweepDeg.toFixed(0)}°`}
+              </span>
+              <span className="text-[10px] text-muted-foreground">
+                drag toward chord → smaller · away → larger
+              </span>
+            </div>
+          )
+        })()}
 
         {/* Scale-calibration input panel — appears once both points are set.
             HTML overlay (NOT inside the SVG) so the <input> is a real text
