@@ -175,8 +175,11 @@ function SidebarToolbar() {
         </div>
       )}
 
-      {/* Drawing tools — only visible in Draw mode */}
-      {mode === 'build' && (
+      {/* Ritn3D 2026-06-18: drawing tools are ALWAYS visible. Previously the
+          tool row was gated on `mode === 'build'`, so pressing Escape (which
+          flips mode to 'select') made the whole Wall/Door/Window row vanish
+          and the user had to remember another way to start drawing. Now the
+          tools stay; clicking one switches mode to 'build' as before. */}
       <div className="flex gap-1">
           {TOOLS.map((t) => {
             const isActive = mode === 'build' && tool === t.id
@@ -217,9 +220,6 @@ function SidebarToolbar() {
             )
           })}
         </div>
-      )}
-
-
 
       {/* Upload trace (image or PDF) — creates a GuideNode on the active level
           so the user can trace walls/doors on top of it. Mirrors the handler
@@ -452,6 +452,10 @@ function UploadTraceButton() {
         opacity: 40,
       }
       useScene.getState().createNode(guideNode as any, levelId as any)
+      // Auto-zoom the canvas to frame the newly uploaded guide. fittedViewport
+      // now includes guide bounds, so reset-view re-runs the fit math.
+      // Microtask so the createNode store update has propagated before fit runs.
+      queueMicrotask(() => emitter.emit('floorplan:reset-view' as any))
       // Auto-trigger scale calibration immediately after upload — without it
       // the guide renders at default scale=5 and walls measure garbage.
       // FloorplanPanel listens for this event.
@@ -544,7 +548,7 @@ export function AppSidebar({
             {/* Drawing tools + Reset View */}
             <SidebarToolbar />
 
-            <SidebarContent className={cn('no-scrollbar flex flex-1 flex-col overflow-hidden')}>
+            <SidebarContent className={cn('flex flex-1 flex-col overflow-y-auto overflow-x-hidden')}>
               {renderPanelContent()}
             </SidebarContent>
           </div>

@@ -4337,11 +4337,31 @@ export function FloorplanPanel() {
   const svgAspectRatio = surfaceSize.width / surfaceSize.height || 1
 
   const fittedViewport = useMemo(() => {
+    // Ritn3D 2026-06-18: include guide images in the fit bounds so the
+    // 'reset view' shortcut + the auto-zoom-after-upload both frame the
+    // plan trace. Width-as-diameter is a conservative square bound — we
+    // don't know the image aspect ratio at fit time without loading the
+    // bitmap, so use the longer-dimension fallback (width for landscape
+    // images, height ≥ width for portrait).
+    const guideCornerPoints: Point2D[] = levelGuides.flatMap((g) => {
+      if (!g.visible || g.opacity <= 0 || g.scale <= 0) return []
+      const w = getGuideWidth(g.scale)
+      const cx = g.position[0]
+      const cy = g.position[2]
+      const half = w / 2
+      return [
+        { x: cx - half, y: cy - half },
+        { x: cx + half, y: cy - half },
+        { x: cx + half, y: cy + half },
+        { x: cx - half, y: cy + half },
+      ]
+    })
     const allPoints = [
       ...(visibleSitePolygon ? visibleSitePolygon.polygon : []),
       ...displaySlabPolygons.flatMap((entry) => entry.polygon),
       ...visibleZonePolygons.flatMap((entry) => entry.polygon),
       ...wallPolygons.flatMap((entry) => entry.polygon),
+      ...guideCornerPoints,
     ]
 
     if (allPoints.length === 0) {
@@ -4378,7 +4398,7 @@ export function FloorplanPanel() {
       centerY,
       width,
     }
-  }, [displaySlabPolygons, svgAspectRatio, visibleSitePolygon, visibleZonePolygons, wallPolygons])
+  }, [displaySlabPolygons, levelGuides, svgAspectRatio, visibleSitePolygon, visibleZonePolygons, wallPolygons])
 
   useEffect(() => {
     const host = viewportHostRef.current
@@ -7861,15 +7881,15 @@ export function FloorplanPanel() {
           distance, types the distance, scale auto-adjusts. */}
       {calibratingGuideId && (
         <div
-          className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 border-b border-amber-500/40 bg-amber-500/15 px-4 py-2.5 text-amber-200 backdrop-blur-md"
+          className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 border-b-2 border-amber-400 bg-amber-500 px-4 py-3 text-amber-950 shadow-lg"
           style={{ paddingLeft: '320px' }}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M3 21h18" />
             <path d="M6 18 L 18 6" />
             <path d="M5 17 l 2 2 M 9 13 l 2 2 M 13 9 l 2 2 M 17 5 l 2 2" />
           </svg>
-          <span className="font-medium text-sm">
+          <span className="font-semibold text-sm">
             {!calibrationP1 && 'Set scale: click the first endpoint of a known wall on the plan.'}
             {calibrationP1 && !calibrationP2 && 'Now click the second endpoint.'}
             {calibrationP1 && calibrationP2 && 'Enter the real distance to finish — or click again to redo.'}
@@ -7882,7 +7902,7 @@ export function FloorplanPanel() {
               setCalibrationP2(null)
               setCalibrationInput('')
             }}
-            className="ml-2 text-xs text-amber-300/80 hover:text-amber-100 underline-offset-2 hover:underline"
+            className="ml-2 rounded border border-amber-900/40 bg-amber-100/40 px-2 py-0.5 text-xs font-semibold text-amber-950 hover:bg-amber-100/60"
           >
             Skip (Esc)
           </button>
@@ -8692,19 +8712,46 @@ export function FloorplanPanel() {
                         x1={svgC.x}
                         y1={svgC.y - halfD}
                         x2={svgC.x}
-                        y2={svgC.y - halfD - 0.4}
+                        y2={svgC.y - halfD - 0.5}
                         stroke="#3b82f6"
-                        strokeWidth="0.03"
+                        strokeWidth="2"
                         vectorEffect="non-scaling-stroke"
                       />
+                      {/* Curved-arrow rotate icon under the dot so the affordance is obvious */}
+                      <g
+                        transform={`translate(${svgC.x} ${svgC.y - halfD - 0.5})`}
+                        pointerEvents="none"
+                      >
+                        <circle
+                          r="0.32"
+                          fill="#3b82f6"
+                          stroke="#fff"
+                          strokeWidth="2"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <path
+                          d="M -0.13 -0.05 A 0.16 0.16 0 1 1 -0.13 0.05"
+                          fill="none"
+                          stroke="#fff"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <path
+                          d="M -0.18 0.02 L -0.13 0.08 L -0.08 0.02"
+                          fill="none"
+                          stroke="#fff"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </g>
                       <circle
                         cx={svgC.x}
-                        cy={svgC.y - halfD - 0.4}
-                        r="0.13"
-                        fill="#3b82f6"
-                        stroke="#fff"
-                        strokeWidth="0.03"
-                        vectorEffect="non-scaling-stroke"
+                        cy={svgC.y - halfD - 0.5}
+                        r="0.4"
+                        fill="transparent"
                         style={{ cursor: 'grab' }}
                         onPointerDown={(event) => {
                           if (event.button !== 0) return
