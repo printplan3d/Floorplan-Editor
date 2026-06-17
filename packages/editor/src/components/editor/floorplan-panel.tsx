@@ -5272,19 +5272,25 @@ export function FloorplanPanel() {
         )
         if (chord === 0) return
 
+        // Ritn3D 2026-06-17: ABSOLUTE model with hard cap at semicircle.
+        // The bulge handle IS the arc's apex. Its perpendicular distance
+        // from the chord equals the sagitta. So:
+        //     sagitta = cursor_perp
+        //     bulge   = 2 * sagitta / chord = 2 * cursor_perp / chord
+        // Hard-clamped to [-1, +1] — never beyond semicircle. When the
+        // cursor goes past chord/2 the handle stops moving and the curve
+        // sits at exactly semicircle.
+        // Relative + sensitivity models all failed because they decoupled
+        // cursor position from the visible apex. Absolute = "drag the
+        // apex to where you want it."
         const dx = (bulgeDrag.end[0] - bulgeDrag.start[0]) / chord
         const dy = (bulgeDrag.end[1] - bulgeDrag.start[1]) / chord
         const vx = planPoint[0] - bulgeDrag.start[0]
         const vy = planPoint[1] - bulgeDrag.start[1]
         const cursorPerp = vx * -dy + vy * dx
 
-        const SENSITIVITY = 0.3
-        const perpDelta = (cursorPerp - bulgeDrag.initialPerp) * SENSITIVITY
-        const raw = bulgeDrag.initialBulge + (2 * perpDelta) / chord
-        // Ritn3D 2026-06-17: no semicircle cap. Bulge can legitimately exceed 1
-        // for >180° sweeps (3/4 circle = bulge ~2.4). Soft-cap at ±50 to keep
-        // tessellation sane near the full-circle singularity.
-        const next = Math.max(-50, Math.min(50, raw))
+        const raw = (2 * cursorPerp) / chord
+        const next = Math.max(-1, Math.min(1, raw))
         bulgeDrag.lastBulge = next
 
         setWallBulgeDraft({ wallId: bulgeDrag.wallId, bulge: next })

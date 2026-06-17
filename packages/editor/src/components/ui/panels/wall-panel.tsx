@@ -69,14 +69,16 @@ export function WallPanel() {
   //   sagitta = chord * bulge / 2  →  bulge = 2 * sagitta / chord
   const bulge = node.bulge ?? 0
   const depthCm = Math.round((length * bulge) / 2 * 100)
-  // Default range is "gentle to semicircle" (±chord/2 = full semicircle apex).
-  // Round to nice 10cm steps and never less than 50cm for very short walls.
-  const halfChordCm = Math.max(50, Math.round((length * 100) / 2 / 10) * 10)
+  // Slider range = ±half-chord = exactly the semicircle apex. Beyond that
+  // is geometrically impossible (the arc would have to wrap further than
+  // 180°, which we hard-cap against). Floor (don't round up) so the slider
+  // never lets you ask for a depth that exceeds the semicircle limit.
+  const halfChordCm = Math.max(10, Math.floor((length * 100) / 2))
   const setDepthCm = (cm: number) => {
     if (length < 1e-9) return
     const nextBulge = (2 * (cm / 100)) / length
-    // soft-cap at ±50 to match drag handler (avoids near-360° singularity)
-    const safe = Math.max(-50, Math.min(50, nextBulge))
+    // Hard cap at semicircle (±1). Never beyond.
+    const safe = Math.max(-1, Math.min(1, nextBulge))
     handleUpdate({ bulge: Math.abs(safe) < 1e-5 ? 0 : safe })
   }
   const sweepDeg = Math.round((4 * Math.atan(bulge) * 180) / Math.PI)
