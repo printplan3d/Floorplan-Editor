@@ -104,7 +104,17 @@ export function arcParamsFromBulge(start: Point2, end: Point2, bulge: number): A
 
   const startAngle = Math.atan2(start[1] - cy, start[0] - cx)
   const endAngle = Math.atan2(end[1] - cy, end[0] - cx)
-  const sweepAngle = 4 * Math.atan(bulge)
+  // Ritn3D 2026-06-17: sign of sweepAngle. arcMidpoint puts the apex in the
+  // +perp direction for bulge>0; the center is in the -perp direction (set
+  // by `sign` above). For the arc to pass through that apex going from
+  // start->end, we must sweep AROUND the center in the direction that takes
+  // the arc OVER to the +perp side. With center on -perp, that's CW
+  // (decreasing angle), i.e. NEGATIVE sweep. The old `+4*atan(bulge)`
+  // swept CCW around the same center, putting every interior arc point on
+  // the -perp side — the wall body rendered on the opposite side from the
+  // bulge handle. `points[length-1] = end` masked the geometric mismatch
+  // by snapping the last point into place.
+  const sweepAngle = -4 * Math.atan(bulge)
 
   return {
     center,
@@ -112,7 +122,8 @@ export function arcParamsFromBulge(start: Point2, end: Point2, bulge: number): A
     startAngle,
     endAngle,
     sweepAngle,
-    ccw: bulge > 0,
+    // ccw now reflects the actual sweep direction (negative sweep = CW = !ccw).
+    ccw: bulge < 0,
   }
 }
 
