@@ -337,11 +337,8 @@ type WallBulgeDragState = {
   wallId: WallNode['id']
   start: WallPlanPoint
   end: WallPlanPoint
-  // Latest bulge from the most recent pointer-move. Read by commit so we
-  // don't have to dig the value out of React state (setState callbacks must
-  // be pure — calling updateNode inside one triggers a render-time setState
-  // warning across components).
   lastBulge: number
+  lastLogAt?: number
 }
 
 type WallBulgeDraft = {
@@ -5242,14 +5239,56 @@ export function FloorplanPanel() {
         const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
         if (!planPoint) return
         const raw = bulgeFromThreePoints(bulgeDrag.start, bulgeDrag.end, planPoint)
-        // Clamp to [-1, 1] (semicircle max). Beyond that the arc goes the
-        // long way around the chord and looks reversed.
-        const next = Math.max(-1, Math.min(1, raw))
-        // Store in the ref so commit can read the final value WITHOUT going
-        // through setState (setState callbacks must be pure — calling
-        // updateNode inside one fires the cross-component "Cannot update a
-        // component while rendering" React warning, which broke the page).
+        // Snap-to-straight: when the cursor is within ~0.10m of the chord
+        // line, snap bulge to 0 so the user can get a perfectly straight
+        // wall by dragging "back to where straight is" without pixel-precise
+        // aim. The chord guide line (dashed amber) gives visual reference.
+        const chord = Math.hypot(
+          bulgeDrag.end[0] - bulgeDrag.start[0],
+          bulgeDrag.end[1] - bulgeDrag.start[1],
+        )
+        const dx = (bulgeDrag.end[0] - bulgeDrag.start[0]) / (chord || 1)
+        const dy = (bulgeDrag.end[1] - bulgeDrag.start[1]) / (chord || 1)
+        const vx = planPoint[0] - bulgeDrag.start[0]
+        const vy = planPoint[1] - bulgeDrag.start[1]
+        const cursorPerp = vx * -dy + vy * dx
+        const SNAP_PERP_M = 0.10
+        const snapped = Math.abs(cursorPerp) < SNAP_PERP_M ? 0 : raw
+        const next = Math.max(-1, Math.min(1, snapped))
         bulgeDrag.lastBulge = next
+
+        // Point-to-point diagnostic: log every ~80ms during drag so we can
+        // see the full picture without flooding the console. Shows what the
+        // cursor is, what perpendicular distance to the chord it is, and
+        // what bulge that produces.
+        const now = performance.now()
+        if (!bulgeDrag.lastLogAt || now - bulgeDrag.lastLogAt > 80) {
+          bulgeDrag.lastLogAt = now
+          const chord = Math.hypot(
+            bulgeDrag.end[0] - bulgeDrag.start[0],
+            bulgeDrag.end[1] - bulgeDrag.start[1],
+          )
+          // Perpendicular distance from cursor to chord line (same math
+          // bulgeFromThreePoints uses internally).
+          const dx = (bulgeDrag.end[0] - bulgeDrag.start[0]) / (chord || 1)
+          const dy = (bulgeDrag.end[1] - bulgeDrag.start[1]) / (chord || 1)
+          const vx = planPoint[0] - bulgeDrag.start[0]
+          const vy = planPoint[1] - bulgeDrag.start[1]
+          const perp = vx * -dy + vy * dx
+          const sagitta = (chord * Math.abs(next)) / 2
+          // eslint-disable-next-line no-console
+          console.log('[bulge] move', {
+            cursor: [+planPoint[0].toFixed(3), +planPoint[1].toFixed(3)],
+            start: [+bulgeDrag.start[0].toFixed(3), +bulgeDrag.start[1].toFixed(3)],
+            end: [+bulgeDrag.end[0].toFixed(3), +bulgeDrag.end[1].toFixed(3)],
+            chord_m: +chord.toFixed(3),
+            perp_m: +perp.toFixed(3),
+            raw_bulge: +raw.toFixed(4),
+            clamped: +next.toFixed(4),
+            sagitta_m: +sagitta.toFixed(3),
+          })
+        }
+
         setWallBulgeDraft({ wallId: bulgeDrag.wallId, bulge: next })
         return
       }
@@ -5398,13 +5437,23 @@ export function FloorplanPanel() {
       const dragState = wallBulgeDragRef.current
       if (!dragState || event.pointerId !== dragState.pointerId) return
       const wall = wallById.get(dragState.wallId)
-      // Read the final bulge from the drag ref (last value written by the
-      // pointer-move handler). Side effects (updateNode, SFX) MUST happen
-      // outside the setState callback — the old setWallBulgeDraft(current =>
-      // updateNode(...)) shape fired React's "Cannot update a component
-      // while rendering" warning and froze the next interaction.
       if (wall) {
         const finalBulge = isStraight(dragState.lastBulge) ? 0 : dragState.lastBulge
+        // Diagnostic: print the actual numeric values so a "the curve is
+        // still too big" complaint can be debugged. chord = wall length,
+        // sagitta = the perpendicular bulge height in plan units (meters).
+        // bulge ~= 2 * sagitta / chord; small visible curve = small sagitta.
+        const chord = Math.hypot(
+          wall.end[0] - wall.start[0],
+          wall.end[1] - wall.start[1],
+        )
+        const sagitta = (chord * Math.abs(finalBulge)) / 2
+        // eslint-disable-next-line no-console
+        console.log('[bulge] commit', {
+          bulge: finalBulge.toFixed(4),
+          chord_m: chord.toFixed(3),
+          sagitta_m: sagitta.toFixed(3),
+        })
         if ((wall.bulge ?? 0) !== finalBulge) {
           updateNode(wall.id, { bulge: finalBulge })
           sfxEmitter.emit('sfx:structure-build')
@@ -6898,6 +6947,19 @@ export function FloorplanPanel() {
         end: wall.end,
         lastBulge: wall.bulge ?? 0,
       }
+      // Point-to-point diagnostic.
+      const chord = Math.hypot(
+        wall.end[0] - wall.start[0],
+        wall.end[1] - wall.start[1],
+      )
+      // eslint-disable-next-line no-console
+      console.log('[bulge] pointerDown', {
+        wallId: wall.id,
+        start: [+wall.start[0].toFixed(3), +wall.start[1].toFixed(3)],
+        end: [+wall.end[0].toFixed(3), +wall.end[1].toFixed(3)],
+        chord_m: +chord.toFixed(3),
+        currentBulge: +(wall.bulge ?? 0).toFixed(4),
+      })
       setWallBulgeDraft({ wallId: wall.id, bulge: wall.bulge ?? 0 })
       // eslint-disable-next-line no-console
       console.log('[bulge] drag STARTED', { wallId: wall.id, initialBulge: wall.bulge ?? 0 })
@@ -8800,6 +8862,36 @@ export function FloorplanPanel() {
                 vectorEffect="non-scaling-stroke"
               />
             )}
+
+            {/* Bulge drag overlay: shows the chord line (dashed amber) while
+                the user drags the bulge handle. Without this, the user can't
+                see where "straight" is — the chord is INSIDE the wall body
+                so it's invisible, and you have to drag the cursor onto it to
+                straighten the wall, but you don't know where it is. With the
+                guide line drawn, dragging toward it = smaller curve, dragging
+                away = bigger curve. */}
+            {wallBulgeDraft && (() => {
+              const drag = wallBulgeDragRef.current
+              if (!drag) return null
+              const a = toSvgPoint({ x: drag.start[0], y: drag.start[1] })
+              const b = toSvgPoint({ x: drag.end[0], y: drag.end[1] })
+              return (
+                <g key="bulge-chord-guide">
+                  <line
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke="#fbbf24"
+                    strokeWidth="0.04"
+                    strokeDasharray="0.15 0.1"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                    pointerEvents="none"
+                  />
+                </g>
+              )
+            })()}
 
             {/* Scale-calibration overlay: dots at P1/P2 + line between them.
                 Drawn last so it's on top of everything. */}
