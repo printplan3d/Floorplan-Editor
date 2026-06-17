@@ -337,6 +337,11 @@ type WallBulgeDragState = {
   wallId: WallNode['id']
   start: WallPlanPoint
   end: WallPlanPoint
+  // Latest bulge from the most recent pointer-move. Read by commit so we
+  // don't have to dig the value out of React state (setState callbacks must
+  // be pure — calling updateNode inside one triggers a render-time setState
+  // warning across components).
+  lastBulge: number
 }
 
 type WallBulgeDraft = {
@@ -5236,14 +5241,15 @@ export function FloorplanPanel() {
         event.preventDefault()
         const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
         if (!planPoint) return
-        // No grid snap — bulge is a continuous perpendicular offset; snapping
-        // produces visible "stepping" on shallow curves.
         const raw = bulgeFromThreePoints(bulgeDrag.start, bulgeDrag.end, planPoint)
-        // Clamp to [-1, 1] (semicircle max). The earlier [-2, 2] cap let
-        // users drag past 180° sweep, at which point the arc goes "the long
-        // way around" the chord and visually looks reversed. Floor plans
-        // never need >180° curves in practice.
+        // Clamp to [-1, 1] (semicircle max). Beyond that the arc goes the
+        // long way around the chord and looks reversed.
         const next = Math.max(-1, Math.min(1, raw))
+        // Store in the ref so commit can read the final value WITHOUT going
+        // through setState (setState callbacks must be pure — calling
+        // updateNode inside one fires the cross-component "Cannot update a
+        // component while rendering" React warning, which broke the page).
+        bulgeDrag.lastBulge = next
         setWallBulgeDraft({ wallId: bulgeDrag.wallId, bulge: next })
         return
       }
@@ -5392,26 +5398,19 @@ export function FloorplanPanel() {
       const dragState = wallBulgeDragRef.current
       if (!dragState || event.pointerId !== dragState.pointerId) return
       const wall = wallById.get(dragState.wallId)
-      // eslint-disable-next-line no-console
-      console.log('[bulge] commit', { wallId: dragState.wallId, foundWall: !!wall })
-      // Pull the latest draft bulge from setter to avoid stale closure reads.
-      setWallBulgeDraft((current) => {
-        if (wall && current && current.wallId === wall.id) {
-          // Collapse near-zero bulge back to a clean straight wall on commit.
-          const finalBulge = isStraight(current.bulge) ? 0 : current.bulge
-          // eslint-disable-next-line no-console
-          console.log('[bulge] commit applying', {
-            currentBulge: current.bulge,
-            finalBulge,
-            wallStoredBulge: wall.bulge,
-          })
-          if ((wall.bulge ?? 0) !== finalBulge) {
-            updateNode(wall.id, { bulge: finalBulge })
-            sfxEmitter.emit('sfx:structure-build')
-          }
+      // Read the final bulge from the drag ref (last value written by the
+      // pointer-move handler). Side effects (updateNode, SFX) MUST happen
+      // outside the setState callback — the old setWallBulgeDraft(current =>
+      // updateNode(...)) shape fired React's "Cannot update a component
+      // while rendering" warning and froze the next interaction.
+      if (wall) {
+        const finalBulge = isStraight(dragState.lastBulge) ? 0 : dragState.lastBulge
+        if ((wall.bulge ?? 0) !== finalBulge) {
+          updateNode(wall.id, { bulge: finalBulge })
+          sfxEmitter.emit('sfx:structure-build')
         }
-        return null
-      })
+      }
+      setWallBulgeDraft(null)
       clearWallBulgeDrag()
     }
 
@@ -6897,6 +6896,7 @@ export function FloorplanPanel() {
         wallId: wall.id,
         start: wall.start,
         end: wall.end,
+        lastBulge: wall.bulge ?? 0,
       }
       setWallBulgeDraft({ wallId: wall.id, bulge: wall.bulge ?? 0 })
       // eslint-disable-next-line no-console
