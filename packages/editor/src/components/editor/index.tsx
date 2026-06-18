@@ -334,7 +334,13 @@ export default function Editor({
     null,
   )
   const isPreviewMode = useEditor((s) => s.isPreviewMode)
-  const isFloorplanOpen = useEditor((s) => s.isFloorplanOpen)
+  const tool = useEditor((s) => s.tool)
+  // Ritn3D 2026-06-18: 3D canvas is mounted ONLY for roof and ceiling editing —
+  // every other tool (wall, door, window, item, slab, zone) has a complete 2D
+  // path in FloorplanPanel. The dummy-mounted 1px-hidden trick previously kept
+  // 3D-only tools (selection manager, grid, etc.) alive even in 2D mode; we
+  // don't need them anymore. Preview mode still uses the full 3D scene.
+  const needs3D = isPreviewMode || tool === 'roof' || tool === 'ceiling'
 
   useEffect(() => {
     initializeEditorRuntime()
@@ -421,10 +427,12 @@ export default function Editor({
           <ViewerOverlay onBack={() => useEditor.getState().setPreviewMode(false)} />
         ) : (
           <>
-            {/* Ritn3D: floating toolbar moved to sidebar */}
-            {!isFloorplanOpen && <ActionMenu />}
+            {/* Ritn3D 2026-06-18: FloorplanPanel is now the primary editor
+                surface. It hides itself when the 3D canvas is up for
+                roof/ceiling editing so the user sees the 3D scene cleanly. */}
             <PanelManager />
-            {isFloorplanOpen && <FloorplanPanel />}
+            {!needs3D && <FloorplanPanel />}
+            {needs3D && <ActionMenu />}
             <HelperManager />
 
             <SidebarProvider className="fixed z-20">
@@ -439,27 +447,33 @@ export default function Editor({
         )}
 
         <ErrorBoundary fallback={<EditorSceneCrashFallback />}>
-          {/* Ritn3D: 3D canvas hidden but still mounted when 2D floorplan is open (tools need it) */}
-          <div className="h-full w-full" style={isFloorplanOpen ? { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0, pointerEvents: 'none' } : undefined}>
-            <SelectionPersistenceManager enabled={hasLoadedInitialScene && !showLoader} />
-            <Viewer selectionManager={isPreviewMode ? 'default' : 'custom'}>
-              {!isPreviewMode && <SelectionManager />}
-              {!isPreviewMode && <FloatingActionMenu />}
-              {!isPreviewMode && <WallMeasurementLabel />}
-              <ExportManager />
-              {isPreviewMode ? <ViewerZoneSystem /> : <ZoneSystem />}
-              <CeilingSystem />
-              <RoofEditSystem />
-              {!isPreviewMode && <Grid cellColor="#aaa" fadeDistance={500} sectionColor="#ccc" />}
-              {!(isPreviewMode || isLoading) && <ToolManager />}
-              <CustomCameraControls />
-              <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
-              <PresetThumbnailGenerator />
-              {!isPreviewMode && <SiteEdgeLabels />}
-              {isPreviewMode && <InteractiveSystem />}
-            </Viewer>
-          </div>
-          {!(isPreviewMode || isLoading) && <ZoneLabelEditorSystem />}
+          {/* Ritn3D 2026-06-18: 3D canvas mounted ONLY for roof/ceiling tools
+              or preview. Default editor surface is the FloorplanPanel SVG.
+              The viewer-package useViewer Zustand store still drives selection
+              and project state for the 2D path; it doesn't require a mounted
+              <Viewer>. */}
+          {needs3D && (
+            <div className="h-full w-full">
+              <SelectionPersistenceManager enabled={hasLoadedInitialScene && !showLoader} />
+              <Viewer selectionManager={isPreviewMode ? 'default' : 'custom'}>
+                {!isPreviewMode && <SelectionManager />}
+                {!isPreviewMode && <FloatingActionMenu />}
+                {!isPreviewMode && <WallMeasurementLabel />}
+                <ExportManager />
+                {isPreviewMode ? <ViewerZoneSystem /> : <ZoneSystem />}
+                <CeilingSystem />
+                <RoofEditSystem />
+                {!isPreviewMode && <Grid cellColor="#aaa" fadeDistance={500} sectionColor="#ccc" />}
+                {!(isPreviewMode || isLoading) && <ToolManager />}
+                <CustomCameraControls />
+                <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
+                <PresetThumbnailGenerator />
+                {!isPreviewMode && <SiteEdgeLabels />}
+                {isPreviewMode && <InteractiveSystem />}
+              </Viewer>
+            </div>
+          )}
+          {!(isPreviewMode || isLoading) && needs3D && <ZoneLabelEditorSystem />}
         </ErrorBoundary>
       </div>
     </PresetsProvider>
