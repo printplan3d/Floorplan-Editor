@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1600">
+  <!-- Outer tub -->
+  <rect x="0" y="0" width="1600" height="1600" rx="120" fill="#e8e8e8" stroke="black" stroke-width="8"/>
+  <!-- Inner basin -->
+  <rect x="100" y="100" width="1400" height="1400" rx="100" fill="#f0f0f0" stroke="black" stroke-width="5"/>
+  <!-- Jets around perimeter -->
+  <circle cx="300" cy="300" r="40" fill="#d0d0d0" stroke="black" stroke-width="3"/>
+  <circle cx="800" cy="250" r="40" fill="#d0d0d0" stroke="black" stroke-width="3"/>
+  <circle cx="1300" cy="300" r="40" fill="#d0d0d0" stroke="black" stroke-width="3"/>
+  <circle cx="300" cy="800" r="40" fill="#d0d0d0" stroke="black" stroke-width="3"/>
+  <circle cx="1300" cy="800" r="40" fill="#d0d0d0" stroke="black" stroke-width="3"/>
+  <circle cx="300" cy="1300" r="40" fill="#d0d0d0" stroke="black" stroke-width="3"/>
+  <circle cx="800" cy="1350" r="40" fill="#d0d0d0" stroke="black" stroke-width="3"/>
+  <circle cx="1300" cy="1300" r="40" fill="#d0d0d0" stroke="black" stroke-width="3"/>
+  <!-- Headrest -->
+  <rect x="600" y="120" width="400" height="80" rx="30" fill="#d0d0d0" stroke="black" stroke-width="4"/>
+  <!-- Center drain -->
+  <circle cx="800" cy="800" r="40" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+</svg>

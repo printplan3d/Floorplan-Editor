@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+  <!-- Basin (oval) -->
+  <ellipse cx="250" cy="250" rx="240" ry="220" fill="#e8e8e8" stroke="black" stroke-width="6"/>
+  <!-- Inner basin -->
+  <ellipse cx="250" cy="270" rx="180" ry="160" fill="#f0f0f0" stroke="black" stroke-width="4"/>
+  <!-- Drain -->
+  <circle cx="250" cy="280" r="20" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+  <!-- Faucet -->
+  <circle cx="250" cy="80" r="25" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+  <line x1="250" y1="105" x2="250" y2="140" stroke="black" stroke-width="4"/>
+  <!-- Pedestal column (dashed showing under-fixture) -->
+  <rect x="200" y="350" width="100" height="120" fill="none" stroke="black" stroke-width="3" stroke-dasharray="10,6"/>
+</svg>

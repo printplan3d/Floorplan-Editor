@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600">
+  <!-- Outer frame -->
+  <rect x="20" y="20" width="360" height="560" rx="24" fill="none" stroke="currentColor" stroke-width="8"/>
+  <!-- Inner mattress -->
+  <rect x="55" y="55" width="290" height="490" rx="14" fill="none" stroke="currentColor" stroke-width="4"/>
+  <!-- Rail bars (slats) -->
+  <line x1="100" y1="20" x2="100" y2="580" stroke="currentColor" stroke-width="3"/>
+  <line x1="160" y1="20" x2="160" y2="580" stroke="currentColor" stroke-width="3"/>
+  <line x1="220" y1="20" x2="220" y2="580" stroke="currentColor" stroke-width="3"/>
+  <line x1="280" y1="20" x2="280" y2="580" stroke="currentColor" stroke-width="3"/>
+</svg>

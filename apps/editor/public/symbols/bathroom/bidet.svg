@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600">
+  <!-- Bowl -->
+  <ellipse cx="200" cy="350" rx="190" ry="240" fill="#e8e8e8" stroke="black" stroke-width="6"/>
+  <!-- Inner basin -->
+  <ellipse cx="200" cy="380" rx="130" ry="170" fill="#f0f0f0" stroke="black" stroke-width="4"/>
+  <!-- Faucet hub at rear -->
+  <circle cx="200" cy="80" r="30" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+  <!-- Two control knobs -->
+  <circle cx="140" cy="80" r="16" fill="#b0b0b0" stroke="black" stroke-width="2"/>
+  <circle cx="260" cy="80" r="16" fill="#b0b0b0" stroke="black" stroke-width="2"/>
+</svg>

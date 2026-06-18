@@ -1,12 +1,13 @@
 import {
   type AnyNode,
   type AnyNodeId,
-  type BuildingNode,
+  BuildingNode,
   emitter,
   generateId,
   type GuideNode,
   LevelNode,
   type SiteNode,
+  SlabNode,
   useScene,
   type ZoneNode,
 } from '@pascal-app/core'
@@ -882,6 +883,34 @@ function LevelsSection({
     setSelection({ levelId: newLevel.id })
   }
 
+  // Ritn3D 2026-06-18: 'Add mezzanine' creates a new level + a half-slab
+  // stub the user can drag-shape. Useful for partial-floor designs (loft
+  // bedroom, double-height living room with mezzanine above, etc.). The
+  // stub covers the +X half of an 8x8m default — explicitly NOT a full
+  // floor so the user sees immediately that it's a partial slab.
+  const handleAddMezzanine = () => {
+    const newLevel = LevelNode.parse({
+      level: levels.length,
+      name: 'Mezzanine',
+      children: [],
+      parentId: building.id,
+    })
+    createNode(newLevel, building.id)
+    // Half-slab covering +X side of the building footprint.
+    const stub = SlabNode.parse({
+      name: 'Mezzanine slab',
+      polygon: [
+        [0, -4],
+        [4, -4],
+        [4, 4],
+        [0, 4],
+      ],
+      surfaceType: 'interior',
+    })
+    createNode(stub, newLevel.id)
+    setSelection({ levelId: newLevel.id, selectedIds: [stub.id] })
+  }
+
   return (
     <div className="relative flex flex-col">
       {/* Level buttons */}
@@ -899,6 +928,18 @@ function LevelsSection({
             <Plus className="h-3.5 w-3.5" />
           </div>
           <span className="truncate">Add level</span>
+        </button>
+        <button
+          className="relative flex h-8 cursor-pointer select-none items-center gap-2 border-border/50 border-b py-0 pl-0 text-muted-foreground text-sm transition-all duration-200 hover:bg-accent/30 hover:text-foreground"
+          onClick={handleAddMezzanine}
+          title="Add a new level with a partial slab, ready to drag-shape into a mezzanine / loft"
+        >
+          <div className="pointer-events-none absolute top-0 bottom-0 left-[21px] w-px bg-border/50" />
+          <div className="pointer-events-none absolute top-1/2 left-[21px] z-10 h-px w-[11px] bg-border/50" />
+          <div className="relative z-10 flex items-center pr-1 pl-[38px]">
+            <Plus className="h-3.5 w-3.5" />
+          </div>
+          <span className="truncate">Add mezzanine</span>
         </button>
         {levels.length === 0 && (
           <div className="relative flex h-8 select-none items-center border-border/50 border-b py-0 pr-2 pl-[38px] text-muted-foreground text-xs">
@@ -1382,6 +1423,7 @@ export function SitePanel({ projectId, onUploadAsset, onDeleteAsset }: SitePanel
   const nodes = useScene((state) => state.nodes)
   const rootNodeIds = useScene((state) => state.rootNodeIds)
   const updateNode = useScene((state) => state.updateNode)
+  const createNode = useScene((state) => state.createNode)
   const selectedBuildingId = useViewer((state) => state.selection.buildingId)
   const setSelection = useViewer((state) => state.setSelection)
   const phase = useEditor((state) => state.phase)
@@ -1511,6 +1553,39 @@ export function SitePanel({ projectId, onUploadAsset, onDeleteAsset }: SitePanel
                 )
               })}
             </motion.div>
+          )}
+
+          {/* Ritn3D 2026-06-18: 'Add building' — SiteNode.children already
+              allows multiple buildings (discriminatedUnion). Useful for
+              garages, sheds, ADUs — anything with its own roof / foundation
+              separate from the main house. The new building gets one level
+              and is offset 12m on +X so it doesn't overlap the existing one. */}
+          {siteNode?.type === 'site' && (
+            <motion.button
+              layout="position"
+              type="button"
+              onClick={() => {
+                const offsetX = (buildings.length + 1) * 12
+                const newBuilding = BuildingNode.parse({
+                  name: buildings.length === 0 ? 'Main building' : `Building ${buildings.length + 1}`,
+                  position: [offsetX, 0, 0],
+                  parentId: siteNode.id,
+                })
+                createNode(newBuilding as any, siteNode.id as any)
+                const firstLevel = LevelNode.parse({
+                  level: 0,
+                  children: [],
+                  parentId: newBuilding.id,
+                })
+                createNode(firstLevel, newBuilding.id)
+                setSelection({ buildingId: newBuilding.id, levelId: firstLevel.id })
+                setPhase('structure')
+              }}
+              className="flex items-center gap-2 border-border/50 border-t px-3 py-2.5 text-muted-foreground text-sm hover:bg-accent/30 hover:text-foreground"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Add building (garage / shed / ADU)</span>
+            </motion.button>
           )}
         </motion.div>
       </div>

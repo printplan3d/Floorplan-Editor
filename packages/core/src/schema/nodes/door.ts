@@ -17,6 +17,14 @@ export const DoorSegment = z.object({
 
 export type DoorSegment = z.infer<typeof DoorSegment>
 
+// Ritn3D 2026-06-18: door styles. 'pedestrian' = legacy default (0.9 x 2.1 m
+// hinged door). 'garage' = sectional-style overhead door for garages / sheds
+// (default 2.4 x 2.1 m, no swing leaf). 'sliding' = patio sliding glass door.
+// The Blender pipeline switches geometry based on style; existing scenes
+// parse with style='pedestrian' (no migration).
+export const DoorStyle = z.enum(['pedestrian', 'garage', 'sliding'])
+export type DoorStyle = z.infer<typeof DoorStyle>
+
 export const DoorNode = BaseNode.extend({
   id: objectId('door'),
   type: nodeType('door'),
@@ -25,6 +33,7 @@ export const DoorNode = BaseNode.extend({
   rotation: z.tuple([z.number(), z.number(), z.number()]).default([0, 0, 0]),
   side: z.enum(['front', 'back']).optional(),
   wallId: z.string().optional(),
+  style: DoorStyle.default('pedestrian'),
 
   // Overall dimensions
   width: z.number().default(0.9),

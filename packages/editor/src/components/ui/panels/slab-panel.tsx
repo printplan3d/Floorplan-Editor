@@ -1,14 +1,25 @@
 'use client'
 
-import { type AnyNode, type SlabNode, useScene } from '@pascal-app/core'
+import { type AnyNode, type SlabNode, type SlabSurfaceType, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { Edit, Plus, Trash2 } from 'lucide-react'
+import { Edit, Plus, Scissors, Trash2 } from 'lucide-react'
 import { useCallback, useEffect } from 'react'
 import useEditor from '../../../store/use-editor'
 import { ActionButton, ActionGroup } from '../controls/action-button'
 import { PanelSection } from '../controls/panel-section'
 import { SliderControl } from '../controls/slider-control'
 import { PanelWrapper } from './panel-wrapper'
+
+const SURFACE_TYPES: { id: SlabSurfaceType; label: string }[] = [
+  { id: 'interior', label: 'Interior' },
+  { id: 'patio', label: 'Patio' },
+  { id: 'deck', label: 'Deck' },
+  { id: 'driveway', label: 'Driveway' },
+  { id: 'garage', label: 'Garage' },
+  { id: 'gravel', label: 'Gravel' },
+  { id: 'grass', label: 'Grass' },
+  { id: 'wood', label: 'Wood' },
+]
 
 export function SlabPanel() {
   const selectedIds = useViewer((s) => s.selection.selectedIds)
@@ -139,6 +150,28 @@ export function SlabPanel() {
         </div>
       </PanelSection>
 
+      <PanelSection title="Surface">
+        <div className="grid grid-cols-4 gap-1 px-1 pb-1">
+          {SURFACE_TYPES.map((s) => {
+            const isActive = (node.surfaceType ?? 'interior') === s.id
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => handleUpdate({ surfaceType: s.id })}
+                className={`rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
+                  isActive
+                    ? 'border-amber-500/50 bg-amber-500/20 text-amber-100'
+                    : 'border-border/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground'
+                }`}
+              >
+                {s.label}
+              </button>
+            )
+          })}
+        </div>
+      </PanelSection>
+
       <PanelSection title="Info">
         <div className="flex items-center justify-between px-2 py-1 text-muted-foreground text-sm">
           <span>Area</span>
@@ -146,7 +179,7 @@ export function SlabPanel() {
         </div>
       </PanelSection>
 
-      <PanelSection title="Holes">
+      <PanelSection title="Floor cuts (stair openings / double-height voids)">
         {node.holes && node.holes.length > 0 ? (
           <div className="flex flex-col gap-1 pb-2">
             {node.holes.map((hole, index) => {
@@ -207,13 +240,19 @@ export function SlabPanel() {
         )}
 
         <div className="px-1 pt-1 pb-1">
-          <ActionButton
-            className="w-full"
+          <button
+            type="button"
             disabled={editingHole?.nodeId === selectedId}
-            icon={<Plus className="h-3.5 w-3.5" />}
-            label="Add Hole"
             onClick={handleAddHole}
-          />
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Scissors className="h-4 w-4" />
+            Cut floor
+          </button>
+          <p className="px-1 pt-1.5 text-[10px] text-muted-foreground">
+            Adds an opening at the slab's centre. Drag its corners to shape the void
+            (stair shaft, double-height living room, etc).
+          </p>
         </div>
       </PanelSection>
     </PanelWrapper>

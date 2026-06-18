@@ -27,8 +27,14 @@ const SYMBOL_GROUPS: SymbolGroup[] = [
     symbols: [
       { id: 'toilet', label: 'Toilet', src: '/symbols/bathroom/toilet.svg' },
       { id: 'sink', label: 'Sink', src: '/symbols/bathroom/sink.svg' },
+      { id: 'double_sink', label: 'Double Sink', src: '/symbols/bathroom/double_sink.svg' },
+      { id: 'pedestal_sink', label: 'Pedestal Sink', src: '/symbols/bathroom/pedestal_sink.svg' },
       { id: 'bathtub', label: 'Bathtub', src: '/symbols/bathroom/bathtub.svg' },
+      { id: 'jacuzzi', label: 'Jacuzzi', src: '/symbols/bathroom/jacuzzi.svg' },
       { id: 'shower', label: 'Shower', src: '/symbols/bathroom/shower.svg' },
+      { id: 'shower_corner', label: 'Corner Shower', src: '/symbols/bathroom/shower_corner.svg' },
+      { id: 'bidet', label: 'Bidet', src: '/symbols/bathroom/bidet.svg' },
+      { id: 'urinal', label: 'Urinal', src: '/symbols/bathroom/urinal.svg' },
     ],
   },
   {
@@ -39,6 +45,9 @@ const SYMBOL_GROUPS: SymbolGroup[] = [
       { id: 'oven', label: 'Oven', src: '/symbols/kitchen/oven.svg' },
       { id: 'fridge', label: 'Fridge', src: '/symbols/kitchen/fridge.svg' },
       { id: 'counter', label: 'Counter', src: '/symbols/kitchen/counter.svg' },
+      { id: 'dishwasher', label: 'Dishwasher', src: '/symbols/kitchen/dishwasher.svg' },
+      { id: 'microwave', label: 'Microwave', src: '/symbols/kitchen/microwave.svg' },
+      { id: 'island', label: 'Island', src: '/symbols/kitchen/island.svg' },
     ],
   },
   {
@@ -46,7 +55,12 @@ const SYMBOL_GROUPS: SymbolGroup[] = [
     label: 'Bedroom',
     symbols: [
       { id: 'bed', label: 'Bed', src: '/symbols/bedroom/bed.svg' },
+      { id: 'bed_twin', label: 'Twin Bed', src: '/symbols/bedroom/bed_twin.svg' },
+      { id: 'bed_king', label: 'King Bed', src: '/symbols/bedroom/bed_king.svg' },
+      { id: 'crib', label: 'Crib', src: '/symbols/bedroom/crib.svg' },
       { id: 'wardrobe', label: 'Wardrobe', src: '/symbols/bedroom/wardrobe.svg' },
+      { id: 'dresser', label: 'Dresser', src: '/symbols/bedroom/dresser.svg' },
+      { id: 'nightstand', label: 'Nightstand', src: '/symbols/bedroom/nightstand.svg' },
     ],
   },
   {
@@ -85,6 +99,9 @@ const SYMBOL_GROUPS: SymbolGroup[] = [
     label: 'Stairs',
     symbols: [
       { id: 'staircase', label: 'Straight', src: '/symbols/stairs/staircase.svg' },
+      { id: 'l_staircase', label: 'L-Shape', src: '/symbols/stairs/l_staircase.svg' },
+      { id: 'u_staircase', label: 'U-Shape', src: '/symbols/stairs/u_staircase.svg' },
+      { id: 'switchback_staircase', label: 'Switchback', src: '/symbols/stairs/switchback_staircase.svg' },
       { id: 'spiral_staircase', label: 'Spiral', src: '/symbols/stairs/spiral_staircase.svg' },
     ],
   },

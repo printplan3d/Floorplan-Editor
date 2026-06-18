@@ -84,6 +84,59 @@ function ModeDefaultSelectEffect({
   return null
 }
 
+// Ritn3D 2026-06-18: Outdoor surface tools — patio / deck / driveway / etc.
+// Each button:
+//   1. sets pendingSlabSurfaceType on the editor store
+//   2. activates the slab tool (creates a polygon)
+// The slab-creation code on both the 2D and 3D paths reads
+// pendingSlabSurfaceType, applies it, and resets to 'interior'.
+const OUTDOOR_SURFACES: { id: import('@pascal-app/core').SlabSurfaceType; label: string; emoji: string }[] = [
+  { id: 'patio', label: 'Patio', emoji: '🟫' },
+  { id: 'deck', label: 'Deck', emoji: '🪵' },
+  { id: 'driveway', label: 'Driveway', emoji: '🛣️' },
+  { id: 'garage', label: 'Garage', emoji: '🚗' },
+  { id: 'gravel', label: 'Gravel', emoji: '🪨' },
+  { id: 'grass', label: 'Grass', emoji: '🌱' },
+]
+
+function OutdoorSurfaceRow() {
+  const pendingType = useEditor((s) => s.pendingSlabSurfaceType)
+  const tool = useEditor((s) => s.tool)
+  const mode = useEditor((s) => s.mode)
+  const isSlabActive = mode === 'build' && tool === 'slab'
+  return (
+    <div className="grid grid-cols-6 gap-1">
+      {OUTDOOR_SURFACES.map((s) => {
+        const isActive = isSlabActive && pendingType === s.id
+        return (
+          <button
+            key={s.id}
+            type="button"
+            title={`Draw ${s.label.toLowerCase()} (slab + ${s.id} material)`}
+            onClick={() => {
+              useEditor.getState().setPhase('structure')
+              useEditor.getState().setStructureLayer('elements')
+              useEditor.getState().setCatalogCategory(null)
+              useEditor.getState().setPendingSlabSurfaceType(s.id)
+              useEditor.getState().setMode('build')
+              useEditor.getState().setTool('slab')
+            }}
+            className={cn(
+              'flex flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-[10px] transition-all',
+              isActive
+                ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40'
+                : 'text-muted-foreground opacity-80 hover:bg-accent/60 hover:opacity-100',
+            )}
+          >
+            <span className="text-base leading-none">{s.emoji}</span>
+            <span className="font-medium">{s.label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function SidebarToolbar() {
   const mode = useEditor((s) => s.mode)
   const phase = useEditor((s) => s.phase)
@@ -220,6 +273,13 @@ function SidebarToolbar() {
             )
           })}
         </div>
+
+      {/* Outdoor surfaces — separate row so the main TOOLS row stays uncluttered.
+          Each button arms the slab tool with a specific surfaceType. The 3D
+          pipeline picks the material (concrete, wood, gravel, grass, etc.) by
+          that flag. Driveway and patio also default to lower elevation than
+          interior floors so they sit flush with the ground. */}
+      <OutdoorSurfaceRow />
 
       {/* Upload trace (image or PDF) — creates a GuideNode on the active level
           so the user can trace walls/doors on top of it. Mirrors the handler

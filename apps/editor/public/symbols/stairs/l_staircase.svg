@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">
+  <!-- L-shaped outer outline: horizontal leg + vertical leg meeting at corner -->
+  <path d="M 20 20 L 580 20 L 580 220 L 220 220 L 220 580 L 20 580 Z" fill="none" stroke="currentColor" stroke-width="8"/>
+  <!-- Horizontal leg risers -->
+  <line x1="290" y1="20" x2="290" y2="220" stroke="currentColor" stroke-width="4"/>
+  <line x1="360" y1="20" x2="360" y2="220" stroke="currentColor" stroke-width="4"/>
+  <line x1="430" y1="20" x2="430" y2="220" stroke="currentColor" stroke-width="4"/>
+  <line x1="500" y1="20" x2="500" y2="220" stroke="currentColor" stroke-width="4"/>
+  <!-- Landing diagonal -->
+  <line x1="20" y1="220" x2="220" y2="20" stroke="currentColor" stroke-width="3" stroke-dasharray="6 6"/>
+  <!-- Vertical leg risers -->
+  <line x1="20" y1="290" x2="220" y2="290" stroke="currentColor" stroke-width="4"/>
+  <line x1="20" y1="360" x2="220" y2="360" stroke="currentColor" stroke-width="4"/>
+  <line x1="20" y1="430" x2="220" y2="430" stroke="currentColor" stroke-width="4"/>
+  <line x1="20" y1="500" x2="220" y2="500" stroke="currentColor" stroke-width="4"/>
+  <!-- Up arrow at bottom -->
+  <path d="M 120 560 L 120 470 M 100 490 L 120 470 L 140 490" fill="none" stroke="currentColor" stroke-width="5"/>
+</svg>

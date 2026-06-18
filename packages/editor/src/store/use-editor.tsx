@@ -8,6 +8,7 @@ import {
   type LevelNode,
   type RoofNode,
   type RoofSegmentNode,
+  type SlabSurfaceType,
   type Space,
   useScene,
   type WindowNode,
@@ -94,6 +95,11 @@ type EditorState = {
   // Development-only camera debug flag for inspecting underside geometry
   allowUndergroundCamera: boolean
   setAllowUndergroundCamera: (enabled: boolean) => void
+  // Ritn3D 2026-06-18: surface type the next-created slab should adopt.
+  // Outdoor surface tools (patio/deck/driveway/...) set this before
+  // activating the slab tool. Reset to 'interior' on tool change.
+  pendingSlabSurfaceType: SlabSurfaceType
+  setPendingSlabSurfaceType: (t: SlabSurfaceType) => void
 }
 
 export type PersistedEditorUiState = Pick<
@@ -348,6 +354,8 @@ const useEditor = create<EditorState>()(
       setFloorplanHovered: (hovered) => set({ isFloorplanHovered: hovered }),
       allowUndergroundCamera: false,
       setAllowUndergroundCamera: (enabled) => set({ allowUndergroundCamera: enabled }),
+      pendingSlabSurfaceType: 'interior' as SlabSurfaceType,
+      setPendingSlabSurfaceType: (t) => set({ pendingSlabSurfaceType: t }),
     }),
     {
       name: 'pascal-editor-ui-preferences',

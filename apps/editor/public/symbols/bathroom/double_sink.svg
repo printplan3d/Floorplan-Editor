@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500">
+  <!-- Counter / vanity -->
+  <rect x="0" y="0" width="1200" height="500" fill="#e8e8e8" stroke="black" stroke-width="6"/>
+  <!-- Left basin -->
+  <ellipse cx="320" cy="270" rx="200" ry="160" fill="#d8d8d8" stroke="black" stroke-width="5"/>
+  <circle cx="320" cy="290" r="22" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+  <!-- Left faucet -->
+  <circle cx="320" cy="80" r="22" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+  <line x1="320" y1="102" x2="320" y2="140" stroke="black" stroke-width="4"/>
+  <!-- Right basin -->
+  <ellipse cx="880" cy="270" rx="200" ry="160" fill="#d8d8d8" stroke="black" stroke-width="5"/>
+  <circle cx="880" cy="290" r="22" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+  <!-- Right faucet -->
+  <circle cx="880" cy="80" r="22" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+  <line x1="880" y1="102" x2="880" y2="140" stroke="black" stroke-width="4"/>
+</svg>

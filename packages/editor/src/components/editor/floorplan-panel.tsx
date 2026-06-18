@@ -5146,12 +5146,22 @@ export function FloorplanPanel() {
 
       const { createNode, nodes } = useScene.getState()
       const slabCount = Object.values(nodes).filter((node) => node.type === 'slab').length
+      // Ritn3D 2026-06-18: outdoor surface tools (patio/deck/driveway/...)
+      // set pendingSlabSurfaceType before activating the slab tool. Read it
+      // here and reset to 'interior' so a subsequent generic slab draw goes
+      // back to default. Naming follows the surface so the tree shows
+      // 'Patio 1', 'Driveway 1' etc.
+      const pendingType = useEditor.getState().pendingSlabSurfaceType
+      const isOutdoor = pendingType !== 'interior'
+      const label = pendingType.charAt(0).toUpperCase() + pendingType.slice(1)
       const slab = SlabNode.parse({
-        name: `Slab ${slabCount + 1}`,
+        name: isOutdoor ? `${label} ${slabCount + 1}` : `Slab ${slabCount + 1}`,
         polygon: points.map(([x, z]) => [x, z] as [number, number]),
+        surfaceType: pendingType,
       })
 
       createNode(slab, levelId)
+      if (isOutdoor) useEditor.getState().setPendingSlabSurfaceType('interior')
       sfxEmitter.emit('sfx:structure-build')
       setSelection({ selectedIds: [slab.id] })
       return slab.id

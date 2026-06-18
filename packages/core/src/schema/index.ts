@@ -6,7 +6,7 @@ export { CameraSchema } from './camera'
 export { type Collection, type CollectionId, generateCollectionId } from './collections'
 export { BuildingNode } from './nodes/building'
 export { CeilingNode } from './nodes/ceiling'
-export { DoorNode, DoorSegment } from './nodes/door'
+export { DoorNode, DoorSegment, DoorStyle } from './nodes/door'
 export { GuideNode } from './nodes/guide'
 export type {
   AnimationEffect,
@@ -27,7 +27,7 @@ export { RoofSegmentNode, RoofType } from './nodes/roof-segment'
 // ScanNode removed 2026-06-10 (Ritn3D cleanup).
 // Nodes
 export { SiteNode } from './nodes/site'
-export { SlabNode } from './nodes/slab'
+export { SlabNode, SlabSurfaceType } from './nodes/slab'
 export { WallNode } from './nodes/wall'
 export { WindowNode } from './nodes/window'
 export { ZoneNode } from './nodes/zone'

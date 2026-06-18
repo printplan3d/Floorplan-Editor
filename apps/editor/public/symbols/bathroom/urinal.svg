@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500">
+  <!-- Wall-mounted bowl outline -->
+  <path d="M 50 0 L 350 0 L 350 280 Q 350 480 200 480 Q 50 480 50 280 Z" fill="#e8e8e8" stroke="black" stroke-width="6"/>
+  <!-- Inner basin -->
+  <path d="M 100 40 L 300 40 L 300 280 Q 300 430 200 430 Q 100 430 100 280 Z" fill="#f0f0f0" stroke="black" stroke-width="4"/>
+  <!-- Flush valve at top -->
+  <circle cx="200" cy="40" r="25" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+  <!-- Drain -->
+  <circle cx="200" cy="380" r="22" fill="#a0a0a0" stroke="black" stroke-width="3"/>
+</svg>

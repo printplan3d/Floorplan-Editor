@@ -5,6 +5,7 @@ import { BufferGeometry, DoubleSide, type Group, type Line, Shape, Vector3 } fro
 import { markToolCancelConsumed } from '../../../hooks/use-keyboard'
 import { EDITOR_LAYER } from '../../../lib/constants'
 import { sfxEmitter } from '../../../lib/sfx-bus'
+import useEditor from '../../../store/use-editor'
 import { CursorSphere } from '../shared/cursor-sphere'
 
 const Y_OFFSET = 0.02
@@ -53,14 +54,21 @@ const commitSlabDrawing = (levelId: LevelNode['id'], points: Array<[number, numb
 
   // Count existing slabs for naming
   const slabCount = Object.values(nodes).filter((n) => n.type === 'slab').length
-  const name = `Slab ${slabCount + 1}`
+  // Ritn3D 2026-06-18: read pendingSlabSurfaceType so outdoor tools work
+  // identically from the 3D edit canvas. Reset to 'interior' after creation.
+  const pendingType = useEditor.getState().pendingSlabSurfaceType
+  const isOutdoor = pendingType !== 'interior'
+  const label = pendingType.charAt(0).toUpperCase() + pendingType.slice(1)
+  const name = isOutdoor ? `${label} ${slabCount + 1}` : `Slab ${slabCount + 1}`
 
   const slab = SlabNode.parse({
     name,
     polygon: points,
+    surfaceType: pendingType,
   })
 
   createNode(slab, levelId)
+  if (isOutdoor) useEditor.getState().setPendingSlabSurfaceType('interior')
   sfxEmitter.emit('sfx:structure-build')
   return slab.id
 }
