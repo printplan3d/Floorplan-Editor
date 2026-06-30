@@ -2,7 +2,7 @@
 
 import { emitter, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { Moon, Sun } from 'lucide-react'
+import { MoonIcon, ResetViewIcon, SunIcon, TrashIcon } from '../primitives/sidebar-icons'
 import { motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
 import {
@@ -39,7 +39,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
   return (
     <div
       className={cn(
-        'flex h-full w-14 flex-col items-center gap-1.5 border-border/50 border-r py-2',
+        'flex h-full w-14 flex-col items-center gap-1.5 border-r border-hair bg-paper py-2',
         className,
       )}
     >
@@ -47,7 +47,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       {appMenuButton}
 
       {/* Divider */}
-      <div className="mb-1 h-px w-10 bg-border/50" />
+      <div className="mb-1 h-px w-10 bg-hair" />
 
       {panels.map((panel) => {
         const isActive = activePanel === panel.id
@@ -56,8 +56,8 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
             <TooltipTrigger asChild>
               <button
                 className={cn(
-                  'flex h-10 w-10 items-center justify-center rounded-lg transition-all',
-                  isActive ? 'bg-accent' : 'hover:bg-accent',
+                  'flex h-10 w-10 items-center justify-center rounded-md transition-all',
+                  isActive ? 'bg-ink/[0.06] text-[var(--color-accent)]' : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink',
                 )}
                 onClick={() => onPanelChange(panel.id)}
                 type="button"
@@ -84,13 +84,11 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-border/50 bg-accent/40 text-muted-foreground transition-all hover:bg-accent hover:text-foreground"
+            className="flex h-10 w-10 items-center justify-center rounded-md border border-hair bg-paper text-ink/60 transition-all hover:bg-ink/[0.04] hover:text-ink"
             onClick={() => emitter.emit('floorplan:reset-view' as any)}
             type="button"
           >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 3h6v6" /><path d="M9 21H3v-6" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" />
-            </svg>
+            <ResetViewIcon size={15} />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">Reset View</TooltipContent>
@@ -100,13 +98,11 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-border/50 bg-accent/40 text-muted-foreground transition-all hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30"
+            className="flex h-10 w-10 items-center justify-center rounded-md border border-hair bg-paper text-ink/60 transition-all hover:bg-red-50 hover:text-red-700 hover:border-red-200"
             onClick={() => emitter.emit('floorplan:clear-canvas' as any)}
             type="button"
           >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-            </svg>
+            <TrashIcon size={15} />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">Clear Canvas</TooltipContent>
@@ -114,26 +110,26 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
 
       {/* Unit Toggle — bigger segmented button */}
       {mounted && (
-        <div className="flex w-10 flex-col rounded-lg border border-border/50 overflow-hidden">
+        <div className="flex w-10 flex-col rounded-md border border-hair overflow-hidden">
           <button
             className={cn(
               'flex h-8 items-center justify-center font-semibold text-xs transition-all',
               unit === 'metric'
-                ? 'bg-accent text-foreground'
-                : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/40',
+                ? 'bg-ink text-paper'
+                : 'text-ink/50 hover:text-ink hover:bg-ink/[0.04]',
             )}
             onClick={() => setUnit('metric')}
             type="button"
           >
             m
           </button>
-          <div className="h-px bg-border/50" />
+          <div className="h-px bg-hair" />
           <button
             className={cn(
               'flex h-8 items-center justify-center font-semibold text-xs transition-all',
               unit === 'imperial'
-                ? 'bg-accent text-foreground'
-                : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/40',
+                ? 'bg-ink text-paper'
+                : 'text-ink/50 hover:text-ink hover:bg-ink/[0.04]',
             )}
             onClick={() => setUnit('imperial')}
             type="button"
@@ -148,7 +144,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              className="mb-2 mt-1.5 flex h-10 w-10 items-center justify-center rounded-lg border border-border/50 bg-accent/40 text-foreground transition-all hover:bg-accent"
+              className="mb-2 mt-1.5 flex h-10 w-10 items-center justify-center rounded-md border border-hair bg-paper text-ink/65 transition-all hover:bg-ink/[0.04] hover:text-ink"
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               type="button"
             >
@@ -158,7 +154,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
                 key={theme}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
               >
-                {theme === 'dark' ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
+                {theme === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
               </motion.div>
             </button>
           </TooltipTrigger>
