@@ -169,32 +169,33 @@ export function SliderControl({
     [submitValue, value, precision, step, clamp, onChange],
   )
 
+  // Ritn3D 2026-06-18: paper-themed slider control. Hover bg is hair-tinted
+  // (not white/5), label and value use ink with mono numerics for tabular
+  // alignment. Same drag / wheel / arrow / click-to-edit mechanics.
   return (
     <div
       className={cn(
-        'group flex h-7 w-full select-none items-center rounded-lg px-2 transition-colors',
-        isDragging ? 'bg-white/5' : 'hover:bg-white/5',
+        'group flex h-7 w-full select-none items-center rounded-md px-2 transition-colors',
+        isDragging ? 'bg-ink/[0.05]' : 'hover:bg-ink/[0.03]',
         className,
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Label — drag handle */}
       <div
         className={cn(
-          'flex shrink-0 cursor-ew-resize items-center gap-1.5 text-xs transition-colors',
-          isDragging ? 'text-foreground' : 'text-muted-foreground hover:text-foreground/80',
+          'flex shrink-0 cursor-ew-resize items-center gap-1.5 text-[12px] transition-colors',
+          isDragging ? 'text-ink' : 'text-ink/60 hover:text-ink/80',
         )}
         onPointerDown={handleLabelPointerDown}
         onPointerMove={handleLabelPointerMove}
         onPointerUp={handleLabelPointerUp}
         ref={labelRef}
       >
-        {/* Grip dots — 2×3 grid */}
         <div
           className={cn(
             'grid grid-cols-2 gap-[2.5px] transition-opacity',
-            isDragging ? 'opacity-70' : 'opacity-25 group-hover:opacity-50',
+            isDragging ? 'opacity-70' : 'opacity-25 group-hover:opacity-45',
           )}
         >
           {[...Array(6)].map((_, i) => (
@@ -206,30 +207,29 @@ export function SliderControl({
 
       <div className="flex-1" />
 
-      {/* Value — click to edit */}
-      <div className="flex items-center text-xs">
+      <div className="flex items-center text-[12px]">
         {isEditing ? (
           <>
             <input
               autoFocus
-              className="w-14 bg-transparent p-0 text-right font-mono text-foreground outline-none selection:bg-primary/30"
+              className="w-14 bg-transparent p-0 text-right font-mono tabular-nums text-ink outline-none selection:bg-[var(--color-accent)]/25"
               onBlur={submitValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleInputKeyDown}
               type="text"
               value={inputValue}
             />
-            {unit && <span className="ml-[1px] text-muted-foreground">{unit}</span>}
+            {unit && <span className="ml-[1px] text-ink/45">{unit}</span>}
           </>
         ) : (
           <div
-            className="flex cursor-text items-center text-foreground/60 transition-colors hover:text-foreground"
+            className="flex cursor-text items-center text-ink/65 transition-colors hover:text-ink"
             onClick={handleValueClick}
           >
-            <span className="font-mono tabular-nums tracking-tight">
+            <span className="font-mono tabular-nums tracking-[-0.01em]">
               {Number(value.toFixed(precision)).toFixed(precision)}
             </span>
-            {unit && <span className="ml-[1px] text-muted-foreground">{unit}</span>}
+            {unit && <span className="ml-[1px] text-ink/45">{unit}</span>}
           </div>
         )}
       </div>

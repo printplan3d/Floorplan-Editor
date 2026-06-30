@@ -22,27 +22,29 @@ export function PanelSection({
 
   return (
     <motion.div
-      className={cn('flex shrink-0 flex-col overflow-hidden border-border/50 border-b', className)}
+      className={cn('flex shrink-0 flex-col overflow-hidden border-b border-hair', className)}
       layout
       transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
     >
+      {/* Ritn3D 2026-06-18: webapp Mono caps for section labels.
+          font-mono + uppercase + letter-spacing — same micro-typography as
+          AppShell section headings. Background stays paper to avoid the
+          banded look. */}
       <motion.button
         className={cn(
-          'group/section flex h-10 shrink-0 items-center justify-between px-3 transition-all duration-200',
-          isExpanded
-            ? 'bg-accent/50 text-foreground'
-            : 'text-muted-foreground hover:bg-accent/30 hover:text-foreground',
+          'group/section flex h-9 shrink-0 items-center justify-between px-3 transition-colors duration-200',
+          'text-ink/55 hover:bg-ink/[0.03] hover:text-ink',
         )}
         layout="position"
         onClick={() => setIsExpanded(!isExpanded)}
         type="button"
       >
-        <span className="truncate font-medium text-sm">{title}</span>
+        <span className="truncate font-mono text-[11px] uppercase tracking-[0.02em]">{title}</span>
         <ChevronDown
           className={cn(
-            'h-4 w-4 transition-transform duration-200',
-            isExpanded ? 'rotate-180' : 'rotate-0',
-            isExpanded ? 'text-foreground' : 'opacity-0 group-hover/section:opacity-100',
+            'h-3.5 w-3.5 transition-transform duration-200',
+            isExpanded ? 'rotate-180 text-ink/70' : 'rotate-0',
+            !isExpanded && 'opacity-0 group-hover/section:opacity-100',
           )}
         />
       </motion.button>

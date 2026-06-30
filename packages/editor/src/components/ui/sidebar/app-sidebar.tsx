@@ -124,8 +124,8 @@ function OutdoorSurfaceRow() {
             className={cn(
               'flex flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-[10px] transition-all',
               isActive
-                ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40'
-                : 'text-muted-foreground opacity-80 hover:bg-accent/60 hover:opacity-100',
+                ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30'
+                : 'text-ink/60 hover:bg-ink/[0.04] hover:text-ink',
             )}
           >
             <span className="text-base leading-none">{s.emoji}</span>

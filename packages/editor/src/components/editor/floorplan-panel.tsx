@@ -7872,34 +7872,34 @@ export function FloorplanPanel() {
           visual treatment as the scale-calibration banner. */}
       {tool === 'arc-wall' && !arcDraftStart && wallBulgeHandles.length > 0 && (
         <div
-          className="pointer-events-none fixed inset-x-0 top-0 z-40 flex items-center justify-center gap-3 border-b border-sky-500/40 bg-sky-500/15 px-4 py-2.5 text-sky-200 backdrop-blur-md"
+          className="pointer-events-none fixed inset-x-0 top-0 z-40 flex items-center justify-center gap-3 border-b border-hair bg-paper/95 px-4 py-2.5 text-ink/70 backdrop-blur-md"
           style={{ paddingLeft: '320px' }}
         >
-          <svg width="18" height="18" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 28 28" fill="none" aria-hidden="true" className="text-[var(--color-accent)]">
             <path d="M5 22 Q 14 2 23 22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
             <circle cx="5" cy="22" r="2.5" fill="currentColor" />
             <circle cx="23" cy="22" r="2.5" fill="currentColor" />
           </svg>
-          <span className="font-medium text-sm">
+          <span className="font-medium text-[13px] tracking-[-0.005em]">
             Drag the blue dot at the wall's middle to bend it into a curve.
           </span>
         </div>
       )}
 
-      {/* Scale calibration banner — visible when calibratingGuideId is set.
-          Two-point reference: user clicks two points with a known real-world
-          distance, types the distance, scale auto-adjusts. */}
+      {/* Scale calibration banner — paper / ink system banner, ink fill so it
+          reads as a top-of-app alert. Webapp aesthetic: ink bar with paper
+          text, hairline accent stroke, mono caps for the inline action. */}
       {calibratingGuideId && (
         <div
-          className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 border-b-2 border-amber-400 bg-amber-500 px-4 py-3 text-amber-950 shadow-lg"
+          className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 bg-ink px-4 py-3 text-paper shadow-[0_4px_12px_rgba(22,24,28,0.12)]"
           style={{ paddingLeft: '320px' }}
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-[var(--color-accent)] opacity-90">
             <path d="M3 21h18" />
             <path d="M6 18 L 18 6" />
             <path d="M5 17 l 2 2 M 9 13 l 2 2 M 13 9 l 2 2 M 17 5 l 2 2" />
           </svg>
-          <span className="font-semibold text-sm">
+          <span className="font-medium text-[13.5px] tracking-[-0.005em]">
             {!calibrationP1 && 'Set scale: click the first endpoint of a known wall on the plan.'}
             {calibrationP1 && !calibrationP2 && 'Now click the second endpoint.'}
             {calibrationP1 && calibrationP2 && 'Enter the real distance to finish — or click again to redo.'}
@@ -7912,9 +7912,9 @@ export function FloorplanPanel() {
               setCalibrationP2(null)
               setCalibrationInput('')
             }}
-            className="ml-2 rounded border border-amber-900/40 bg-amber-100/40 px-2 py-0.5 text-xs font-semibold text-amber-950 hover:bg-amber-100/60"
+            className="ml-2 rounded-[5px] border border-paper/20 bg-transparent px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.05em] text-paper/80 hover:bg-paper/10 hover:text-paper"
           >
-            Skip (Esc)
+            Skip · Esc
           </button>
         </div>
       )}
@@ -9001,9 +9001,9 @@ export function FloorplanPanel() {
             the canvas as a small floating card. */}
         {calibratingGuideId && calibrationP1 && calibrationP2 && (
           <div
-            className="pointer-events-auto fixed bottom-10 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-amber-500/40 bg-background/95 px-3 py-2.5 shadow-2xl backdrop-blur-md"
+            className="pointer-events-auto fixed bottom-10 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-md border border-hair bg-paper px-3 py-2 shadow-[0_8px_28px_rgba(22,24,28,0.10)]"
           >
-            <span className="text-amber-200 text-xs font-medium">Real distance:</span>
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.05em] text-ink/55">Real distance</span>
             <input
               autoFocus
               type="text"
@@ -9013,16 +9013,16 @@ export function FloorplanPanel() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') applyCalibration()
               }}
-              placeholder="e.g. 3.6"
-              className="w-24 rounded-md border border-border bg-background/60 px-2 py-1 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+              placeholder="3.6"
+              className="w-24 rounded border border-hair bg-paper px-2 py-1 text-[13px] tabular-nums text-ink placeholder:text-ink/30 focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]/30"
             />
-            <div className="flex overflow-hidden rounded-md border border-border">
+            <div className="flex overflow-hidden rounded border border-hair">
               <button
                 type="button"
                 onClick={() => setCalibrationUnit('m')}
                 className={cn(
-                  'px-2 py-1 text-xs font-medium',
-                  calibrationUnit === 'm' ? 'bg-amber-500/30 text-amber-100' : 'text-muted-foreground hover:bg-accent',
+                  'px-2 py-1 text-[12px] font-medium',
+                  calibrationUnit === 'm' ? 'bg-ink text-paper' : 'text-ink/60 hover:bg-ink/[0.05] hover:text-ink',
                 )}
               >
                 m
@@ -9031,8 +9031,8 @@ export function FloorplanPanel() {
                 type="button"
                 onClick={() => setCalibrationUnit('ft')}
                 className={cn(
-                  'px-2 py-1 text-xs font-medium',
-                  calibrationUnit === 'ft' ? 'bg-amber-500/30 text-amber-100' : 'text-muted-foreground hover:bg-accent',
+                  'px-2 py-1 text-[12px] font-medium',
+                  calibrationUnit === 'ft' ? 'bg-ink text-paper' : 'text-ink/60 hover:bg-ink/[0.05] hover:text-ink',
                 )}
               >
                 ft
@@ -9041,7 +9041,7 @@ export function FloorplanPanel() {
             <button
               type="button"
               onClick={applyCalibration}
-              className="rounded-md bg-amber-500/80 px-3 py-1 text-xs font-semibold text-amber-950 hover:bg-amber-500"
+              className="rounded bg-[var(--color-accent)] px-3 py-1 text-[12.5px] font-semibold text-white hover:opacity-90"
             >
               Apply
             </button>
