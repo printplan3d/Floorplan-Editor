@@ -588,7 +588,7 @@ export function AppSidebar({
 
   return (
     <>
-      <Sidebar className={cn('dark text-white')} variant="floating">
+      <Sidebar className={cn('bg-paper text-ink')} variant="floating">
         <div className="flex h-full">
           {/* Icon Rail */}
           <IconRail

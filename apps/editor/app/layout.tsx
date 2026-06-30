@@ -1,21 +1,25 @@
-import { GeistPixelSquare } from 'geist/font/pixel'
-import { Barlow } from 'next/font/google'
-import localFont from 'next/font/local'
+import { Inter, Inter_Tight, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 
-const geistSans = localFont({
-  src: './fonts/GeistVF.woff',
-  variable: '--font-geist-sans',
+// Ritn3D 2026-06-18: match the webapp font stack — Inter body, Inter Tight
+// display, JetBrains Mono micro-caps. Replaced Geist + Barlow. Same CSS-var
+// slot names (--font-sans / --font-mono) reused so existing classes work.
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-sans',
+  display: 'swap',
 })
-const geistMono = localFont({
-  src: './fonts/GeistMonoVF.woff',
-  variable: '--font-geist-mono',
-})
-
-const barlow = Barlow({
+const interTight = Inter_Tight({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
-  variable: '--font-barlow',
+  variable: '--font-display',
+  display: 'swap',
+})
+const jetbrains = JetBrains_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500'],
+  variable: '--font-mono',
   display: 'swap',
 })
 
@@ -26,11 +30,11 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      className={`${geistSans.variable} ${geistMono.variable} ${GeistPixelSquare.variable} ${barlow.variable}`}
+      className={`${inter.variable} ${interTight.variable} ${jetbrains.variable}`}
       lang="en"
     >
       <head />
-      <body className="font-sans">
+      <body className="font-sans bg-paper text-ink">
         {children}
       </body>
     </html>

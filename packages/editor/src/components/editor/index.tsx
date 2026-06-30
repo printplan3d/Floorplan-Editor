@@ -414,7 +414,7 @@ export default function Editor({
 
   return (
     <PresetsProvider adapter={presetsAdapter}>
-      <div className="dark h-full w-full text-foreground">
+      <div className="h-full w-full bg-paper text-ink">
         {showLoader && (
           <div className="fixed inset-0 z-60">
             <SceneLoader />

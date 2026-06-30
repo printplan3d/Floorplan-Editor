@@ -135,7 +135,7 @@ export const ViewerOverlay = ({
   return (
     <>
       {/* Unified top-left card */}
-      <div className="dark absolute top-4 left-4 z-20 flex flex-col gap-3 text-foreground">
+      <div className="absolute top-4 left-4 z-20 flex flex-col gap-3 text-foreground">
         <div className="pointer-events-auto flex min-w-[200px] flex-col overflow-hidden rounded-2xl border border-border/40 bg-background/95 shadow-lg backdrop-blur-xl transition-colors duration-200 ease-out">
           {/* Project info + back */}
           <div className="flex items-center gap-3 px-3 py-2.5">
@@ -270,7 +270,7 @@ export const ViewerOverlay = ({
       </div>
 
       {/* Controls Panel - Bottom Center */}
-      <div className="dark absolute bottom-6 left-1/2 z-20 -translate-x-1/2 text-foreground">
+      <div className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 text-foreground">
         <TooltipProvider delayDuration={0}>
           <div className="pointer-events-auto flex h-14 flex-row items-center justify-center gap-1.5 rounded-2xl border border-border/40 bg-background/95 p-1.5 shadow-lg backdrop-blur-xl transition-colors duration-200 ease-out">
             {/* Theme Toggle */}
