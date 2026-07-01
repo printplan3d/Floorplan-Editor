@@ -83,9 +83,18 @@ export function snapWallDraftPoint(args: {
   start?: WallPlanPoint
   angleSnap?: boolean
   ignoreWallIds?: string[]
+  // Ritn3D 2026-06-18: when the user holds Shift they get raw sub-grid
+  // precision — no 0.5m grid snap, no 45° angle snap. Wall-endpoint snap
+  // (for joining walls cleanly) still applies within the join radius.
+  // Needed for tracing scanned plans where walls fall between grid nodes.
+  freehand?: boolean
 }): WallPlanPoint {
-  const { point, walls, start, angleSnap = false, ignoreWallIds } = args
-  const basePoint = start && angleSnap ? snapPointTo45Degrees(start, point) : snapPointToGrid(point)
+  const { point, walls, start, angleSnap = false, ignoreWallIds, freehand = false } = args
+  const basePoint = freehand
+    ? point
+    : start && angleSnap
+      ? snapPointTo45Degrees(start, point)
+      : snapPointToGrid(point)
   return (
     findWallSnapTarget(basePoint, walls, {
       ignoreWallIds,

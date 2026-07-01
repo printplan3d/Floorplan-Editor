@@ -909,6 +909,7 @@ function LevelsSection({
     })
     createNode(stub, newLevel.id)
     setSelection({ levelId: newLevel.id, selectedIds: [stub.id] })
+    queueMicrotask(() => emitter.emit('floorplan:reset-view' as any))
   }
 
   return (
@@ -1444,7 +1445,11 @@ export function SitePanel({ projectId, onUploadAsset, onDeleteAsset }: SitePanel
 
   return (
     <LayoutGroup>
-      <div className="flex h-full flex-col">
+      {/* Ritn3D 2026-06-18: min-h-0 + overflow-y-auto so the panel scrolls
+          on its own when content exceeds viewport. Previously flex h-full
+          overflowed off-screen and the user couldn't reach items past
+          the fold (Add building / Add mezzanine both at the bottom). */}
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto">
         {/* Site Header */}
         {siteNode && (
           <motion.div
@@ -1580,6 +1585,11 @@ export function SitePanel({ projectId, onUploadAsset, onDeleteAsset }: SitePanel
                 createNode(firstLevel, newBuilding.id)
                 setSelection({ buildingId: newBuilding.id, levelId: firstLevel.id })
                 setPhase('structure')
+                // Ritn3D 2026-06-18: the new building is offset 12m on +X,
+                // which lands outside the previous viewport. Refit so the
+                // user sees BOTH buildings — otherwise the canvas looks
+                // empty and they think it broke.
+                queueMicrotask(() => emitter.emit('floorplan:reset-view' as any))
               }}
               className="flex items-center gap-2 border-border/50 border-t px-3 py-2.5 text-muted-foreground text-sm hover:bg-accent/30 hover:text-foreground"
             >

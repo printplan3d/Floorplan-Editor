@@ -2305,31 +2305,59 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
     <>
       {slabPolygons.map(({ slab, polygon, holes, path }) => {
         const isSelected = selectedIdSet.has(slab.id)
+        // Ritn3D 2026-06-18: colour and label slabs by surface type so the
+        // user can tell a Patio from a Garage from a Driveway at a glance.
+        // Interior slabs keep the neutral palette so existing floor plans
+        // read the same.
+        const surfaceType = (slab as any).surfaceType ?? 'interior'
+        const surfaceFill =
+          surfaceType === 'patio' ? '#c8b78a'
+          : surfaceType === 'deck' ? '#a78458'
+          : surfaceType === 'driveway' ? '#8f9098'
+          : surfaceType === 'garage' ? '#9aa2ac'
+          : surfaceType === 'gravel' ? '#b8b4a5'
+          : surfaceType === 'grass' ? '#8ab073'
+          : surfaceType === 'wood' ? '#b7885a'
+          : null
+        const fillColour = isSelected
+          ? palette.selectedSlabFill
+          : (surfaceFill ?? palette.slabFill)
+        const { area, centroid } = getSlabArea(polygon, holes)
         let slabLabel = null
-
-        if (isSelected) {
-          const { area, centroid } = getSlabArea(polygon, holes)
-          if (area > 0) {
+        if (area > 0) {
+          const showName = surfaceType !== 'interior'
+          const nameLine = showName ? (slab.name ?? surfaceType) : null
+          const areaLine = isSelected ? formatArea(area, unit) : null
+          const lines: Array<{ content: React.ReactNode; isName: boolean }> = []
+          if (nameLine) lines.push({ content: nameLine, isName: true })
+          if (areaLine) lines.push({ content: areaLine, isName: false })
+          if (lines.length > 0) {
+            const fs = getMeasureLabelFontSize()
             slabLabel = (
-              <text
-                dominantBaseline="central"
-                fill={palette.measurementStroke}
-                fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
-                fontSize={getMeasureLabelFontSize()}
-                fontWeight="600"
-                paintOrder="stroke"
-                pointerEvents="none"
-                stroke={palette.surface}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={getMeasureLabelStrokeWidth()}
-                style={{ userSelect: 'none' }}
-                textAnchor="middle"
-                x={toSvgX(centroid.x)}
-                y={toSvgY(centroid.y)}
-              >
-                {formatArea(area, unit)}
-              </text>
+              <g pointerEvents="none" style={{ userSelect: 'none' }}>
+                {lines.map((line, i) => (
+                  <text
+                    key={i}
+                    dominantBaseline="central"
+                    fill={palette.measurementStroke}
+                    fontFamily={line.isName
+                      ? 'Inter Tight, Inter, sans-serif'
+                      : 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'}
+                    fontSize={fs}
+                    fontWeight={line.isName ? '600' : '500'}
+                    paintOrder="stroke"
+                    stroke={palette.surface}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={getMeasureLabelStrokeWidth()}
+                    textAnchor="middle"
+                    x={toSvgX(centroid.x)}
+                    y={toSvgY(centroid.y) + (i - (lines.length - 1) / 2) * fs * 1.2}
+                  >
+                    {line.content}
+                  </text>
+                ))}
+              </g>
             )
           }
         }
@@ -2339,7 +2367,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
             <path
               clipRule="evenodd"
               d={path}
-              fill={isSelected ? palette.selectedSlabFill : palette.slabFill}
+              fill={fillColour}
               fillRule="evenodd"
               onClick={
                 canSelectSlabs
@@ -5359,6 +5387,7 @@ export function FloorplanPanel() {
         walls,
         start: dragState.fixedPoint,
         angleSnap: !shiftPressed,
+        freehand: shiftPressed,
         ignoreWallIds: [dragState.wallId],
       })
 
@@ -6043,6 +6072,7 @@ export function FloorplanPanel() {
             walls,
             start: arcDraftStart,
             angleSnap: !shiftPressed,
+            freehand: shiftPressed,
           })
           setCursorPoint(cursor)
           return
@@ -6064,6 +6094,7 @@ export function FloorplanPanel() {
         walls,
         start: draftStart ?? undefined,
         angleSnap: Boolean(draftStart) && !shiftPressed,
+        freehand: shiftPressed,
       })
 
       setCursorPoint(snappedPoint)
@@ -6304,22 +6335,51 @@ export function FloorplanPanel() {
       }
 
       if (isOpeningPlacementActive) {
+        // Ritn3D 2026-06-18: doors/windows are created HERE directly on the
+        // 2D click. Previously the 3D door-tool/window-tool listened for
+        // 'wall:click' events and did the create; after the 3D-strip they no
+        // longer exist. Since the click landed on a wall and we already know
+        // the local position, do the create inline.
         const closest = findClosestWallPoint(planPoint, walls)
         if (closest) {
-          // Arc-aware: closest.t is arc-length-parametric (0..1) per
-          // findClosestWallPoint, and the wall's effective length is arc
-          // length. For straight walls bulge=0 -> arcLength collapses to the
-          // chord, byte-identical to the legacy path.
           const length = arcLength(closest.wall.start, closest.wall.end, closest.wall.bulge ?? 0)
           const distance = closest.t * length
-
-          emitter.emit('wall:click', {
-            node: closest.wall,
-            point: { x: closest.point[0], y: 0, z: closest.point[1] },
-            localPosition: [distance, floorplanOpeningLocalY, 0],
-            normal: closest.normal,
-            stopPropagation: () => {},
-          } as any)
+          const wall = closest.wall
+          const isDoor = tool === 'door'
+          const state = useScene.getState()
+          const existing = Object.values(state.nodes).filter((n) => {
+            if (n.type !== (isDoor ? 'door' : 'window')) return false
+            const parentWall = n.parentId ? state.nodes[n.parentId as AnyNodeId] : undefined
+            return parentWall?.parentId === levelId
+          }).length
+          const name = `${isDoor ? 'Door' : 'Window'} ${existing + 1}`
+          const wallDx = wall.end[0] - wall.start[0]
+          const wallDy = wall.end[1] - wall.start[1]
+          const wallAngle = Math.atan2(wallDy, wallDx)
+          if (isDoor) {
+            const node = DoorNode.parse({
+              name,
+              position: [distance, 0, 0],
+              rotation: [0, wallAngle, 0],
+              side: 'front',
+              wallId: wall.id,
+              parentId: wall.id,
+            })
+            state.createNode(node, wall.id as AnyNodeId)
+            useViewer.getState().setSelection({ selectedIds: [node.id] })
+          } else {
+            const node = WindowNode.parse({
+              name,
+              position: [distance, floorplanOpeningLocalY, 0],
+              rotation: [0, wallAngle, 0],
+              side: 'front',
+              wallId: wall.id,
+              parentId: wall.id,
+            })
+            state.createNode(node, wall.id as AnyNodeId)
+            useViewer.getState().setSelection({ selectedIds: [node.id] })
+          }
+          sfxEmitter.emit('sfx:item-place')
         }
         return
       }
@@ -6362,6 +6422,7 @@ export function FloorplanPanel() {
               walls,
               start: arcDraftStart ?? undefined,
               angleSnap: Boolean(arcDraftStart) && !shiftPressed,
+              freehand: shiftPressed,
             })
         handleArcWallPlacementPoint(snappedPoint)
         return
@@ -6383,6 +6444,7 @@ export function FloorplanPanel() {
         walls,
         start: draftStart ?? undefined,
         angleSnap: Boolean(draftStart) && !shiftPressed,
+        freehand: shiftPressed,
       })
 
       handleWallPlacementPoint(snappedPoint)
@@ -7866,6 +7928,16 @@ export function FloorplanPanel() {
         visibility: isPanelReady ? 'visible' : 'hidden',
       }}
     >
+      {/* Freehand-snap hint — when wall/arc-wall build is active and NO shift
+          is currently held, show a subtle bottom-right chip advertising the
+          Shift-for-freehand shortcut. Critical for tracing scanned plans
+          where walls fall between grid nodes. */}
+      {(tool === 'wall' || tool === 'arc-wall') && mode === 'build' && !shiftPressed && (
+        <div className="pointer-events-none fixed bottom-4 right-4 z-30 rounded-[5px] border border-hair bg-paper/90 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.05em] text-ink/55 backdrop-blur-sm">
+          Hold Shift for freehand · off-grid
+        </div>
+      )}
+
       {/* Arc-wall hint: shown briefly after the user places a straight wall
           with the Arc Wall tool. Tells them how to bend it. Disappears once
           they touch the bulge handle or pick another tool. Uses the same
