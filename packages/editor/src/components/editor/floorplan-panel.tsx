@@ -8912,57 +8912,59 @@ export function FloorplanPanel() {
               const wall = wallById.get(openingPreview.wallId)
               if (!wall) return null
               const [px, py] = openingPreview.point
-              const [nx, nz] = openingPreview.normal
               const width = tool === 'door' ? 0.9 : 1.0
-              const depth = (wall.thickness ?? 0.1)
-              // Tangent along wall = perpendicular to the normal.
-              const tx = -nz
-              const ty = nx
-              // Four corners of the opening rectangle in plan space.
-              const halfW = width / 2
-              const halfD = depth / 2 + 0.02
-              const corners: [number, number][] = [
-                [px + tx * halfW + nx * halfD, py + ty * halfW + nz * halfD],
-                [px - tx * halfW + nx * halfD, py - ty * halfW + nz * halfD],
-                [px - tx * halfW - nx * halfD, py - ty * halfW - nz * halfD],
-                [px + tx * halfW - nx * halfD, py + ty * halfW - nz * halfD],
-              ]
-              const points = corners.map(([x, y]) => `${toSvgX(x)},${toSvgY(y)}`).join(' ')
+              const depth = (wall.thickness ?? 0.1) + 0.04
+              // Wall tangent angle in plan coordinates.
+              const wallAngle = Math.atan2(
+                wall.end[1] - wall.start[1],
+                wall.end[0] - wall.start[0],
+              )
+              // Convert plan angle -> SVG angle. Plan (x, y) -> SVG (-x, -y),
+              // so a plan-space rotation by θ around the projected point
+              // becomes an SVG-space rotation by the same θ around the SVG
+              // image of that point (both axes flipped -> rotation direction
+              // preserved).
               const cSvg = toSvgPoint({ x: px, y: py })
-              // Door swing arc — quarter-circle inside the room.
-              const swingEndX = cSvg.x + toSvgX(tx * width) - toSvgX(0)
-              const swingEndY = cSvg.y + toSvgY(ty * width) - toSvgY(0)
+              const angleDeg = (wallAngle * 180) / Math.PI
+              const halfW = width / 2
+              const halfD = depth / 2
               return (
-                <g pointerEvents="none" style={{ opacity: 0.65 }}>
-                  {/* Wall opening rectangle */}
-                  <polygon
-                    points={points}
-                    fill="var(--color-accent)"
-                    fillOpacity="0.12"
-                    stroke="var(--color-accent)"
-                    strokeWidth="0.03"
-                    strokeDasharray="0.08 0.06"
+                <g pointerEvents="none" transform={`rotate(${angleDeg} ${cSvg.x} ${cSvg.y})`}>
+                  {/* Opening rectangle — solid accent tint straddling the wall */}
+                  <rect
+                    x={cSvg.x - halfW}
+                    y={cSvg.y - halfD}
+                    width={width}
+                    height={depth}
+                    fill="#2f6dab"
+                    fillOpacity="0.28"
+                    stroke="#2f6dab"
+                    strokeWidth="0.04"
                     vectorEffect="non-scaling-stroke"
                   />
-                  {/* Door swing preview */}
+                  {/* End-caps on the wall edge — bold ticks at the two jambs */}
+                  <line x1={cSvg.x - halfW} y1={cSvg.y - halfD} x2={cSvg.x - halfW} y2={cSvg.y + halfD} stroke="#2f6dab" strokeWidth="0.06" vectorEffect="non-scaling-stroke" />
+                  <line x1={cSvg.x + halfW} y1={cSvg.y - halfD} x2={cSvg.x + halfW} y2={cSvg.y + halfD} stroke="#2f6dab" strokeWidth="0.06" vectorEffect="non-scaling-stroke" />
+                  {/* Door swing quarter-arc */}
                   {tool === 'door' && (
                     <path
-                      d={`M ${cSvg.x + toSvgX(tx * halfW) - toSvgX(0)} ${cSvg.y + toSvgY(ty * halfW) - toSvgY(0)} A ${width} ${width} 0 0 1 ${swingEndX} ${swingEndY}`}
+                      d={`M ${cSvg.x - halfW} ${cSvg.y - halfD} A ${width} ${width} 0 0 1 ${cSvg.x + halfW} ${cSvg.y - halfD}`}
                       fill="none"
-                      stroke="var(--color-accent)"
-                      strokeWidth="0.02"
-                      strokeDasharray="0.06 0.04"
+                      stroke="#2f6dab"
+                      strokeOpacity="0.7"
+                      strokeWidth="0.03"
+                      strokeDasharray="0.12 0.08"
                       vectorEffect="non-scaling-stroke"
                     />
                   )}
-                  {/* Anchor dot on centreline */}
+                  {/* Centre anchor */}
                   <circle
                     cx={cSvg.x}
                     cy={cSvg.y}
-                    r="0.06"
-                    fill="var(--color-accent)"
+                    r="0.08"
+                    fill="#2f6dab"
                     stroke="#fff"
-                    strokeWidth="0.02"
+                    strokeWidth="0.04"
                     vectorEffect="non-scaling-stroke"
                   />
                 </g>
