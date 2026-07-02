@@ -8452,7 +8452,11 @@ export function FloorplanPanel() {
           <span style={{ fontSize: '8px', fontWeight: 700, color: '#ef4444', marginTop: '1px', letterSpacing: '0.5px' }}>N</span>
         </div>
 
-        {activeFloorplanCursorIndicator && floorplanCursorPosition && !isPanning && (
+        {/* Ritn3D 2026-06-18: suppress the floating tool-icon card while the
+            door/window ghost is already showing what will be placed —
+            otherwise the icon covers the ghost. Icon still shows in the
+            same tool when hovering off any wall so users can see the mode. */}
+        {activeFloorplanCursorIndicator && floorplanCursorPosition && !isPanning && !openingPreview && (
           <div
             aria-hidden="true"
             className="pointer-events-none absolute z-20 flex h-8 w-8 items-center justify-center rounded-xl border border-white/5 bg-zinc-900/95 shadow-[0_8px_16px_-4px_rgba(0,0,0,0.3),0_4px_8px_-4px_rgba(0,0,0,0.2)]"
@@ -8922,7 +8926,6 @@ export function FloorplanPanel() {
               const angleDeg = (wallAngle * 180) / Math.PI
               const halfW = width / 2
               const halfD = depth / 2
-              const label = tool === 'door' ? 'DOOR' : 'WINDOW'
               return (
                 <g pointerEvents="none" transform={`rotate(${angleDeg} ${cSvg.x} ${cSvg.y})`}>
                   {/* Halo — semi-transparent wide fill to lift the ghost off the wall */}
@@ -8975,36 +8978,6 @@ export function FloorplanPanel() {
                       vectorEffect="non-scaling-stroke"
                     />
                   )}
-                  {/* Type badge — small paper chip with the word inside so
-                      you know at a glance whether you're placing a door
-                      or a window. Sits perpendicular to the wall, offset
-                      into the "room" side. */}
-                  <g transform={`translate(${cSvg.x} ${cSvg.y - halfD - 0.35})`}>
-                    <rect
-                      x={-0.32}
-                      y={-0.13}
-                      width={0.64}
-                      height={0.26}
-                      rx="0.05"
-                      fill="#fbfaf6"
-                      stroke="#1e4f80"
-                      strokeWidth="0.06"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                    <text
-                      x="0"
-                      y="0.02"
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      fontFamily="JetBrains Mono, ui-monospace, monospace"
-                      fontSize="0.16"
-                      fontWeight="600"
-                      fill="#1e4f80"
-                      letterSpacing="0.02"
-                    >
-                      {label}
-                    </text>
-                  </g>
                   {/* Centre anchor — larger, white-ringed, high contrast */}
                   <circle
                     cx={cSvg.x}
