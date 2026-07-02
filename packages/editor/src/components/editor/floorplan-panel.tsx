@@ -3528,6 +3528,15 @@ export function FloorplanPanel() {
   const [calibratingGuideId, setCalibratingGuideId] = useState<string | null>(null)
   const [calibrationP1, setCalibrationP1] = useState<WallPlanPoint | null>(null)
   const [calibrationP2, setCalibrationP2] = useState<WallPlanPoint | null>(null)
+  // Ritn3D 2026-06-18: door/window placement preview. Mirrors the AutoCAD
+  // "insert" ghost — the user sees exactly where the opening will land
+  // before they click. Wall is the projected-onto wall, point is the
+  // apex on the wall's centreline, normal is the wall's outward-pointing
+  // perpendicular (used to orient the preview swing / sill).
+  const [openingPreview, setOpeningPreview] = useState<
+    | { wallId: WallNode['id']; point: WallPlanPoint; normal: WallPlanPoint }
+    | null
+  >(null)
   const [calibrationInput, setCalibrationInput] = useState('')
   const [calibrationUnit, setCalibrationUnit] = useState<'m' | 'ft'>('m')
   const [draftStart, setDraftStart] = useState<WallPlanPoint | null>(null)
@@ -4054,6 +4063,11 @@ export function FloorplanPanel() {
   const isWindowBuildActive = phase === 'structure' && mode === 'build' && tool === 'window'
   const isPolygonBuildActive = isSlabBuildActive || isZoneBuildActive
   const isOpeningBuildActive = isDoorBuildActive || isWindowBuildActive
+  // Clear the ghost preview when the tool goes away.
+  useEffect(() => {
+    if (!isOpeningBuildActive && openingPreview) setOpeningPreview(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpeningBuildActive])
   const isOpeningMoveActive = movingOpeningType !== null
   const isOpeningPlacementActive = isOpeningBuildActive || isOpeningMoveActive
   const floorplanOpeningLocalY = useMemo(() => {
@@ -6030,6 +6044,19 @@ export function FloorplanPanel() {
           const length = arcLength(closest.wall.start, closest.wall.end, closest.wall.bulge ?? 0)
           const distance = closest.t * length
 
+          // Live placement preview — user sees exactly where the door / window
+          // will land before they click. closest.normal is a placeholder
+          // 3-tuple in this function's contract; compute the true in-plan
+          // perpendicular from the wall's chord for the ghost's orientation.
+          const nx = closest.wall.end[1] - closest.wall.start[1]
+          const nz = -(closest.wall.end[0] - closest.wall.start[0])
+          const nlen = Math.hypot(nx, nz) || 1
+          setOpeningPreview({
+            wallId: closest.wall.id,
+            point: [closest.point[0], closest.point[1]],
+            normal: [nx / nlen, nz / nlen],
+          })
+
           const wallEvent = {
             node: closest.wall,
             point: { x: closest.point[0], y: 0, z: closest.point[1] },
@@ -6047,9 +6074,12 @@ export function FloorplanPanel() {
           } else {
             emitter.emit('wall:move', wallEvent as any)
           }
-        } else if (hoveredWallIdRef.current) {
-          emitFloorplanWallLeave(hoveredWallIdRef.current)
-          hoveredWallIdRef.current = null
+        } else {
+          if (openingPreview) setOpeningPreview(null)
+          if (hoveredWallIdRef.current) {
+            emitFloorplanWallLeave(hoveredWallIdRef.current)
+            hoveredWallIdRef.current = null
+          }
         }
         return
       }
@@ -6380,6 +6410,7 @@ export function FloorplanPanel() {
             useViewer.getState().setSelection({ selectedIds: [node.id] })
           }
           sfxEmitter.emit('sfx:item-place')
+          setOpeningPreview(null)
         }
         return
       }
@@ -8495,7 +8526,7 @@ export function FloorplanPanel() {
             onPointerMove={handleSvgPointerMove}
             onPointerUp={endPanning}
             ref={svgRef}
-            style={{ cursor: EDITOR_CURSOR }}
+            style={{ cursor: isOpeningBuildActive ? 'crosshair' : EDITOR_CURSOR }}
             viewBox={`${viewBox.minX} ${viewBox.minY} ${viewBox.width} ${viewBox.height}`}
           >
             <rect
@@ -8870,6 +8901,73 @@ export function FloorplanPanel() {
               onWallEndpointPointerDown={handleWallEndpointPointerDown}
               palette={palette}
             />
+
+            {/* Ritn3D 2026-06-18: Door / window placement ghost. Shown when
+                the user is in the door/window tool AND hovering over a wall.
+                Semi-transparent rectangle centred on the projected point,
+                oriented perpendicular to the wall's normal. Mirrors the
+                AutoCAD 'insert' preview. Click commits — see the pointer-up
+                handler upstream. */}
+            {openingPreview && isOpeningBuildActive && (() => {
+              const wall = wallById.get(openingPreview.wallId)
+              if (!wall) return null
+              const [px, py] = openingPreview.point
+              const [nx, nz] = openingPreview.normal
+              const width = tool === 'door' ? 0.9 : 1.0
+              const depth = (wall.thickness ?? 0.1)
+              // Tangent along wall = perpendicular to the normal.
+              const tx = -nz
+              const ty = nx
+              // Four corners of the opening rectangle in plan space.
+              const halfW = width / 2
+              const halfD = depth / 2 + 0.02
+              const corners: [number, number][] = [
+                [px + tx * halfW + nx * halfD, py + ty * halfW + nz * halfD],
+                [px - tx * halfW + nx * halfD, py - ty * halfW + nz * halfD],
+                [px - tx * halfW - nx * halfD, py - ty * halfW - nz * halfD],
+                [px + tx * halfW - nx * halfD, py + ty * halfW - nz * halfD],
+              ]
+              const points = corners.map(([x, y]) => `${toSvgX(x)},${toSvgY(y)}`).join(' ')
+              const cSvg = toSvgPoint({ x: px, y: py })
+              // Door swing arc — quarter-circle inside the room.
+              const swingEndX = cSvg.x + toSvgX(tx * width) - toSvgX(0)
+              const swingEndY = cSvg.y + toSvgY(ty * width) - toSvgY(0)
+              return (
+                <g pointerEvents="none" style={{ opacity: 0.65 }}>
+                  {/* Wall opening rectangle */}
+                  <polygon
+                    points={points}
+                    fill="var(--color-accent)"
+                    fillOpacity="0.12"
+                    stroke="var(--color-accent)"
+                    strokeWidth="0.03"
+                    strokeDasharray="0.08 0.06"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {/* Door swing preview */}
+                  {tool === 'door' && (
+                    <path
+                      d={`M ${cSvg.x + toSvgX(tx * halfW) - toSvgX(0)} ${cSvg.y + toSvgY(ty * halfW) - toSvgY(0)} A ${width} ${width} 0 0 1 ${swingEndX} ${swingEndY}`}
+                      fill="none"
+                      stroke="var(--color-accent)"
+                      strokeWidth="0.02"
+                      strokeDasharray="0.06 0.04"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
+                  {/* Anchor dot on centreline */}
+                  <circle
+                    cx={cSvg.x}
+                    cy={cSvg.y}
+                    r="0.06"
+                    fill="var(--color-accent)"
+                    stroke="#fff"
+                    strokeWidth="0.02"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              )
+            })()}
 
             {/* Bulge handles: small accent-coloured dot at each selected
                 wall's arc midpoint (or chord midpoint when straight). Drag
