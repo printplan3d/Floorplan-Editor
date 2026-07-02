@@ -8913,58 +8913,106 @@ export function FloorplanPanel() {
               if (!wall) return null
               const [px, py] = openingPreview.point
               const width = tool === 'door' ? 0.9 : 1.0
-              const depth = (wall.thickness ?? 0.1) + 0.04
-              // Wall tangent angle in plan coordinates.
+              const depth = (wall.thickness ?? 0.1) + 0.06
               const wallAngle = Math.atan2(
                 wall.end[1] - wall.start[1],
                 wall.end[0] - wall.start[0],
               )
-              // Convert plan angle -> SVG angle. Plan (x, y) -> SVG (-x, -y),
-              // so a plan-space rotation by θ around the projected point
-              // becomes an SVG-space rotation by the same θ around the SVG
-              // image of that point (both axes flipped -> rotation direction
-              // preserved).
               const cSvg = toSvgPoint({ x: px, y: py })
               const angleDeg = (wallAngle * 180) / Math.PI
               const halfW = width / 2
               const halfD = depth / 2
+              const label = tool === 'door' ? 'DOOR' : 'WINDOW'
               return (
                 <g pointerEvents="none" transform={`rotate(${angleDeg} ${cSvg.x} ${cSvg.y})`}>
-                  {/* Opening rectangle — solid accent tint straddling the wall */}
+                  {/* Halo — semi-transparent wide fill to lift the ghost off the wall */}
+                  <rect
+                    x={cSvg.x - halfW - 0.06}
+                    y={cSvg.y - halfD - 0.06}
+                    width={width + 0.12}
+                    height={depth + 0.12}
+                    fill="#2f6dab"
+                    fillOpacity="0.12"
+                    rx="0.04"
+                  />
+                  {/* Opening rectangle — solid, high-contrast, straddling the wall */}
                   <rect
                     x={cSvg.x - halfW}
                     y={cSvg.y - halfD}
                     width={width}
                     height={depth}
                     fill="#2f6dab"
-                    fillOpacity="0.28"
-                    stroke="#2f6dab"
-                    strokeWidth="0.04"
+                    fillOpacity="0.55"
+                    stroke="#1e4f80"
+                    strokeWidth="0.09"
                     vectorEffect="non-scaling-stroke"
                   />
-                  {/* End-caps on the wall edge — bold ticks at the two jambs */}
-                  <line x1={cSvg.x - halfW} y1={cSvg.y - halfD} x2={cSvg.x - halfW} y2={cSvg.y + halfD} stroke="#2f6dab" strokeWidth="0.06" vectorEffect="non-scaling-stroke" />
-                  <line x1={cSvg.x + halfW} y1={cSvg.y - halfD} x2={cSvg.x + halfW} y2={cSvg.y + halfD} stroke="#2f6dab" strokeWidth="0.06" vectorEffect="non-scaling-stroke" />
-                  {/* Door swing quarter-arc */}
+                  {/* Bold jamb ticks at both ends */}
+                  <line x1={cSvg.x - halfW} y1={cSvg.y - halfD - 0.08} x2={cSvg.x - halfW} y2={cSvg.y + halfD + 0.08} stroke="#1e4f80" strokeWidth="0.14" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+                  <line x1={cSvg.x + halfW} y1={cSvg.y - halfD - 0.08} x2={cSvg.x + halfW} y2={cSvg.y + halfD + 0.08} stroke="#1e4f80" strokeWidth="0.14" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+                  {/* Door swing quarter-arc — solid line, bright */}
                   {tool === 'door' && (
                     <path
                       d={`M ${cSvg.x - halfW} ${cSvg.y - halfD} A ${width} ${width} 0 0 1 ${cSvg.x + halfW} ${cSvg.y - halfD}`}
                       fill="none"
                       stroke="#2f6dab"
-                      strokeOpacity="0.7"
-                      strokeWidth="0.03"
-                      strokeDasharray="0.12 0.08"
+                      strokeOpacity="0.9"
+                      strokeWidth="0.055"
+                      strokeDasharray="0.16 0.10"
                       vectorEffect="non-scaling-stroke"
                     />
                   )}
-                  {/* Centre anchor */}
+                  {/* Window centreline — bold dashed line inside the rect */}
+                  {tool === 'window' && (
+                    <line
+                      x1={cSvg.x - halfW}
+                      y1={cSvg.y}
+                      x2={cSvg.x + halfW}
+                      y2={cSvg.y}
+                      stroke="#1e4f80"
+                      strokeWidth="0.06"
+                      strokeDasharray="0.10 0.06"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
+                  {/* Type badge — small paper chip with the word inside so
+                      you know at a glance whether you're placing a door
+                      or a window. Sits perpendicular to the wall, offset
+                      into the "room" side. */}
+                  <g transform={`translate(${cSvg.x} ${cSvg.y - halfD - 0.35})`}>
+                    <rect
+                      x={-0.32}
+                      y={-0.13}
+                      width={0.64}
+                      height={0.26}
+                      rx="0.05"
+                      fill="#fbfaf6"
+                      stroke="#1e4f80"
+                      strokeWidth="0.06"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    <text
+                      x="0"
+                      y="0.02"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontFamily="JetBrains Mono, ui-monospace, monospace"
+                      fontSize="0.16"
+                      fontWeight="600"
+                      fill="#1e4f80"
+                      letterSpacing="0.02"
+                    >
+                      {label}
+                    </text>
+                  </g>
+                  {/* Centre anchor — larger, white-ringed, high contrast */}
                   <circle
                     cx={cSvg.x}
                     cy={cSvg.y}
-                    r="0.08"
+                    r="0.11"
                     fill="#2f6dab"
                     stroke="#fff"
-                    strokeWidth="0.04"
+                    strokeWidth="0.08"
                     vectorEffect="non-scaling-stroke"
                   />
                 </g>
