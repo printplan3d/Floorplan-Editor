@@ -9,6 +9,12 @@ interface SegmentedControlProps<T extends string> {
   className?: string
 }
 
+/*
+  Ritn3D 2026-06-18: paper-themed segmented control. Was hardcoded charcoal
+  (bg-[#2C2C2E] / #3e3e3e) — invisible-dark against the new paper background.
+  Now: hairline outer border on paper, ink fill for the selected pill, ghost
+  ink hover for the others. Same shape as webapp Btn-primary/secondary pair.
+*/
 export function SegmentedControl<T extends string>({
   value,
   onChange,
@@ -18,7 +24,7 @@ export function SegmentedControl<T extends string>({
   return (
     <div
       className={cn(
-        'flex h-9 w-full items-center rounded-lg border border-border/50 bg-[#2C2C2E] p-[3px]',
+        'flex h-9 w-full items-center rounded-md border border-hair bg-ink/[0.03] p-[3px]',
         className,
       )}
     >
@@ -27,10 +33,10 @@ export function SegmentedControl<T extends string>({
         return (
           <button
             className={cn(
-              'relative flex h-full flex-1 items-center justify-center rounded-md font-medium text-xs transition-all duration-200',
+              'relative flex h-full flex-1 items-center justify-center rounded-[5px] text-[12.5px] font-medium tracking-[-0.005em] transition-colors duration-150',
               isSelected
-                ? 'bg-[#3e3e3e] text-foreground shadow-sm ring-1 ring-border/50'
-                : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
+                ? 'bg-ink text-paper shadow-sm'
+                : 'text-ink/60 hover:text-ink hover:bg-ink/[0.05]',
             )}
             key={option.value}
             onClick={() => onChange(option.value)}

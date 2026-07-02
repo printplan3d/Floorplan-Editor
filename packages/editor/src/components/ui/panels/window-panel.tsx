@@ -32,6 +32,13 @@ export function WindowPanel() {
   const sillHeight = Math.max(0, (node?.position[1] ?? 0) - (node?.height ?? 1.5) / 2)
   const totalHeight = sillHeight + (node?.height ?? 1.5)
   const isOverHeight = totalHeight > wallHeight
+  const wallLength = useMemo(() => {
+    if (!parentWall) return 0
+    return Math.hypot(
+      parentWall.end[0] - parentWall.start[0],
+      parentWall.end[1] - parentWall.start[1],
+    )
+  }, [parentWall])
 
   const handleUpdate = useCallback(
     (updates: Partial<WindowNode>) => {
@@ -66,6 +73,38 @@ export function WindowPanel() {
       title="Window"
       width={260}
     >
+      {wallLength > 0 && (
+        <PanelSection title="Position">
+          <SliderControl
+            label="From start"
+            max={Math.max(0, wallLength - node.width / 2)}
+            min={node.width / 2}
+            onChange={(v) => {
+              const clamped = Math.max(node.width / 2, Math.min(v, wallLength - node.width / 2))
+              handleUpdate({ position: [clamped, node.position[1], node.position[2]] })
+            }}
+            precision={2}
+            step={0.01}
+            unit="m"
+            value={Math.round(node.position[0] * 100) / 100}
+          />
+          <SliderControl
+            label="From end"
+            max={Math.max(0, wallLength - node.width / 2)}
+            min={node.width / 2}
+            onChange={(v) => {
+              const posFromStart = wallLength - v
+              const clamped = Math.max(node.width / 2, Math.min(posFromStart, wallLength - node.width / 2))
+              handleUpdate({ position: [clamped, node.position[1], node.position[2]] })
+            }}
+            precision={2}
+            step={0.01}
+            unit="m"
+            value={Math.round((wallLength - node.position[0]) * 100) / 100}
+          />
+        </PanelSection>
+      )}
+
       <PanelSection title="Dimensions">
         <SliderControl
           label="Width"
@@ -94,10 +133,10 @@ export function WindowPanel() {
           />
           {isOverHeight && (
             <div className="mx-1 mt-1 flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-1">
-              <svg className="h-3 w-3 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+              <svg className="h-3 w-3 shrink-0 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
               </svg>
-              <span className="text-[10px] text-amber-300">Exceeds wall height ({wallHeight}m)</span>
+              <span className="text-[10px] font-medium text-amber-700">Exceeds wall height ({wallHeight}m)</span>
             </div>
           )}
         </div>
@@ -118,10 +157,10 @@ export function WindowPanel() {
           />
           {isOverHeight && sillHeight > 0 && (
             <div className="mx-1 mt-1 flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-1">
-              <svg className="h-3 w-3 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+              <svg className="h-3 w-3 shrink-0 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
               </svg>
-              <span className="text-[10px] text-amber-300">Sill + height exceeds wall ({wallHeight}m)</span>
+              <span className="text-[10px] font-medium text-amber-700">Sill + height exceeds wall ({wallHeight}m)</span>
             </div>
           )}
         </div>
@@ -157,8 +196,8 @@ export function WindowPanel() {
       <PanelSection title="Actions">
         <ActionGroup>
           <ActionButton
-            className="hover:bg-red-500/20"
-            icon={<Trash2 className="h-3.5 w-3.5 text-red-400" />}
+            className="hover:bg-red-50 hover:border-red-200 hover:text-red-700"
+            icon={<Trash2 className="h-3.5 w-3.5 text-red-600" />}
             label="Delete"
             onClick={handleDelete}
           />
