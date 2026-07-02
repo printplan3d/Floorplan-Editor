@@ -3533,26 +3533,8 @@ export function FloorplanPanel() {
   // before they click. Wall is the projected-onto wall, point is the
   // apex on the wall's centreline, normal is the wall's outward-pointing
   // perpendicular (used to orient the preview swing / sill).
-  // Ritn3D 2026-06-18 Pass 2: preview now carries alignment / distance data
-  //   distanceFromStart / distanceFromEnd — always shown as dimension ticks
-  //     from the ghost to each wall endpoint. Lets the user place an opening
-  //     to an exact offset (e.g. 20 cm from a corner) without a ruler.
-  //   snap — set when the projected point locked onto a reference feature:
-  //     an endpoint, wall midpoint, or an existing opening's edge on the
-  //     same wall. Renders a highlighted marker + label so the user knows
-  //     alignment fired.
   const [openingPreview, setOpeningPreview] = useState<
-    | {
-        wallId: WallNode['id']
-        point: WallPlanPoint
-        normal: WallPlanPoint
-        distanceFromStart: number
-        distanceFromEnd: number
-        snap: null | {
-          anchor: WallPlanPoint
-          label: string
-        }
-      }
+    | { wallId: WallNode['id']; point: WallPlanPoint; normal: WallPlanPoint }
     | null
   >(null)
   const [calibrationInput, setCalibrationInput] = useState('')
@@ -6055,75 +6037,15 @@ export function FloorplanPanel() {
       if (isOpeningPlacementActive) {
         const closest = findClosestWallPoint(planPoint, walls)
         if (closest) {
-          // Arc-aware: closest.t is arc-length-parametric (0..1) per
-          // findClosestWallPoint, and the wall's effective length is arc
-          // length. For straight walls bulge=0 -> arcLength collapses to the
-          // chord, byte-identical to the legacy path.
           const length = arcLength(closest.wall.start, closest.wall.end, closest.wall.bulge ?? 0)
-          let distance = closest.t * length
-
-          // Ritn3D Pass 2: CAD-style object snap tracking.
-          //   Reference features on the hovered wall are: start endpoint,
-          //   midpoint, end endpoint, and any existing opening's centre.
-          //   The width of the ghost is included so a doorway can land
-          //   flush to an existing jamb.
-          const ghostWidth = tool === 'door' ? 0.9 : 1.0
-          const SNAP_M = 0.25 // 25 cm — feels like a decent grab radius
-          type Ref = { distance: number; label: string }
-          const refs: Ref[] = [
-            { distance: 0, label: 'Start' },
-            { distance: length / 2, label: 'Mid' },
-            { distance: length, label: 'End' },
-          ]
-          const wallOpenings = Object.values(useScene.getState().nodes).filter(
-            (n) =>
-              (n.type === 'door' || n.type === 'window') &&
-              (n as any).parentId === closest.wall.id,
-          ) as Array<{ id: string; position: [number, number, number]; width?: number }>
-          for (const op of wallOpenings) {
-            const oc = op.position[0]
-            const ow = op.width ?? 0.9
-            // Jamb-to-jamb: place the ghost's edge flush against the
-            // existing opening's edge. Two ways (either side).
-            refs.push({ distance: oc + (ow / 2 + ghostWidth / 2), label: `Beside ${op.id.slice(-4)}` })
-            refs.push({ distance: oc - (ow / 2 + ghostWidth / 2), label: `Beside ${op.id.slice(-4)}` })
-          }
-          // Choose the closest reference within snap radius.
-          let best: Ref | null = null
-          for (const ref of refs) {
-            if (ref.distance < 0 || ref.distance > length) continue
-            const d = Math.abs(ref.distance - distance)
-            if (d < SNAP_M && (!best || d < Math.abs(best.distance - distance))) {
-              best = ref
-            }
-          }
-          if (best) distance = best.distance
-
-          // Convert distance-along-wall back to plan-space point.
-          const wallLen = Math.hypot(
-            closest.wall.end[0] - closest.wall.start[0],
-            closest.wall.end[1] - closest.wall.start[1],
-          )
-          const tx = wallLen > 0 ? (closest.wall.end[0] - closest.wall.start[0]) / wallLen : 1
-          const ty = wallLen > 0 ? (closest.wall.end[1] - closest.wall.start[1]) / wallLen : 0
-          const snappedPointOnWall: WallPlanPoint = [
-            closest.wall.start[0] + tx * distance,
-            closest.wall.start[1] + ty * distance,
-          ]
-
-          // Live placement preview — user sees exactly where the door / window
-          // will land before they click. Compute the true in-plan
-          // perpendicular from the wall's chord for the ghost's orientation.
+          const distance = closest.t * length
           const nx = closest.wall.end[1] - closest.wall.start[1]
           const nz = -(closest.wall.end[0] - closest.wall.start[0])
           const nlen = Math.hypot(nx, nz) || 1
           setOpeningPreview({
             wallId: closest.wall.id,
-            point: snappedPointOnWall,
+            point: [closest.point[0], closest.point[1]],
             normal: [nx / nlen, nz / nlen],
-            distanceFromStart: distance,
-            distanceFromEnd: length - distance,
-            snap: best ? { anchor: snappedPointOnWall, label: best.label } : null,
           })
 
           const wallEvent = {
@@ -6442,15 +6364,7 @@ export function FloorplanPanel() {
         const closest = findClosestWallPoint(planPoint, walls)
         if (closest) {
           const length = arcLength(closest.wall.start, closest.wall.end, closest.wall.bulge ?? 0)
-          // Ritn3D Pass 2: honour the snap decided during hover — if the
-          // preview locked onto an endpoint / midpoint / adjacent-opening
-          // jamb, commit at the same distance so the click lands EXACTLY
-          // where the ghost was showing.
-          const rawDistance = closest.t * length
-          const distance =
-            openingPreview && openingPreview.wallId === closest.wall.id
-              ? openingPreview.distanceFromStart
-              : rawDistance
+          const distance = closest.t * length
           const wall = closest.wall
           const isDoor = tool === 'door'
           const state = useScene.getState()
@@ -9065,57 +8979,6 @@ export function FloorplanPanel() {
                     strokeWidth="0.08"
                     vectorEffect="non-scaling-stroke"
                   />
-                  {/* Ritn3D Pass 2: dimension ticks + labels showing distance
-                      from the ghost to each wall endpoint. Read like a CAD
-                      dimension line — dashed axis, tick marks at both ends,
-                      distance in mono caps above. Drawn inside the wall-angle
-                      rotate transform, so left-right = along-wall. */}
-                  {(() => {
-                    const dStart = openingPreview.distanceFromStart
-                    const dEnd = openingPreview.distanceFromEnd
-                    const offset = halfD + 0.32
-                    const fmt = (m: number) =>
-                      unit === 'imperial'
-                        ? (() => {
-                            const totalIn = m * 39.3701
-                            const ft = Math.floor(totalIn / 12)
-                            const inches = Math.round(totalIn - ft * 12)
-                            return inches === 12 ? `${ft + 1}'0"` : `${ft}'${inches}"`
-                          })()
-                        : `${Math.round(m * 100)} cm`
-                    const dimLineStyle: React.CSSProperties = {}
-                    return (
-                      <g style={dimLineStyle}>
-                        {/* Left dim */}
-                        <line x1={cSvg.x - halfW} y1={cSvg.y - offset} x2={cSvg.x - halfW - dStart} y2={cSvg.y - offset} stroke="#1e4f80" strokeOpacity="0.55" strokeWidth="0.03" strokeDasharray="0.08 0.06" vectorEffect="non-scaling-stroke" />
-                        <line x1={cSvg.x - halfW} y1={cSvg.y - offset - 0.06} x2={cSvg.x - halfW} y2={cSvg.y - offset + 0.06} stroke="#1e4f80" strokeWidth="0.08" vectorEffect="non-scaling-stroke" />
-                        <line x1={cSvg.x - halfW - dStart} y1={cSvg.y - offset - 0.06} x2={cSvg.x - halfW - dStart} y2={cSvg.y - offset + 0.06} stroke="#1e4f80" strokeWidth="0.08" vectorEffect="non-scaling-stroke" />
-                        <text x={cSvg.x - halfW - dStart / 2} y={cSvg.y - offset - 0.12} textAnchor="middle" fontFamily="JetBrains Mono, ui-monospace, monospace" fontSize="0.14" fontWeight="500" fill="#1e4f80" paintOrder="stroke" stroke="#fbfaf6" strokeWidth="0.10" strokeLinejoin="round">
-                          {fmt(dStart)}
-                        </text>
-                        {/* Right dim */}
-                        <line x1={cSvg.x + halfW} y1={cSvg.y - offset} x2={cSvg.x + halfW + dEnd} y2={cSvg.y - offset} stroke="#1e4f80" strokeOpacity="0.55" strokeWidth="0.03" strokeDasharray="0.08 0.06" vectorEffect="non-scaling-stroke" />
-                        <line x1={cSvg.x + halfW} y1={cSvg.y - offset - 0.06} x2={cSvg.x + halfW} y2={cSvg.y - offset + 0.06} stroke="#1e4f80" strokeWidth="0.08" vectorEffect="non-scaling-stroke" />
-                        <line x1={cSvg.x + halfW + dEnd} y1={cSvg.y - offset - 0.06} x2={cSvg.x + halfW + dEnd} y2={cSvg.y - offset + 0.06} stroke="#1e4f80" strokeWidth="0.08" vectorEffect="non-scaling-stroke" />
-                        <text x={cSvg.x + halfW + dEnd / 2} y={cSvg.y - offset - 0.12} textAnchor="middle" fontFamily="JetBrains Mono, ui-monospace, monospace" fontSize="0.14" fontWeight="500" fill="#1e4f80" paintOrder="stroke" stroke="#fbfaf6" strokeWidth="0.10" strokeLinejoin="round">
-                          {fmt(dEnd)}
-                        </text>
-                      </g>
-                    )
-                  })()}
-                  {/* Snap indicator — X-hair marker + label when the ghost
-                      locked onto a reference. Amber so it visually pops
-                      against the blue ghost. */}
-                  {openingPreview.snap && (
-                    <g>
-                      <circle cx={cSvg.x} cy={cSvg.y} r="0.22" fill="none" stroke="#e0a01a" strokeWidth="0.09" vectorEffect="non-scaling-stroke" />
-                      <line x1={cSvg.x - 0.28} y1={cSvg.y} x2={cSvg.x + 0.28} y2={cSvg.y} stroke="#e0a01a" strokeWidth="0.05" vectorEffect="non-scaling-stroke" />
-                      <line x1={cSvg.x} y1={cSvg.y - 0.28} x2={cSvg.x} y2={cSvg.y + 0.28} stroke="#e0a01a" strokeWidth="0.05" vectorEffect="non-scaling-stroke" />
-                      <text x={cSvg.x} y={cSvg.y + halfD + 0.32} textAnchor="middle" fontFamily="JetBrains Mono, ui-monospace, monospace" fontSize="0.14" fontWeight="600" fill="#a06810" paintOrder="stroke" stroke="#fbfaf6" strokeWidth="0.10" strokeLinejoin="round">
-                        {openingPreview.snap.label.toUpperCase()}
-                      </text>
-                    </g>
-                  )}
                 </g>
               )
             })()}
