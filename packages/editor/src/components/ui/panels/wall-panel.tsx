@@ -1,7 +1,7 @@
 'use client'
 
-import { type AnyNode, type AnyNodeId, useScene, type WallNode } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNode, type AnyNodeId, useScene, type WallNode } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { useCallback } from 'react'
 import { PanelSection } from '../controls/panel-section'
 import { SliderControl } from '../controls/slider-control'

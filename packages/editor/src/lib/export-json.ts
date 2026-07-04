@@ -1,5 +1,5 @@
-import { type AnyNodeId, arcLength, type DoorNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNodeId, arcLength, type DoorNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 
 /**
  * Export the current floor plan as structured JSON matching the Ritn3D Blender pipeline format.

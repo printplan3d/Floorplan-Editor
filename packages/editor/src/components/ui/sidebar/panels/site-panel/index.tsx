@@ -10,8 +10,8 @@ import {
   SlabNode,
   useScene,
   type ZoneNode,
-} from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+} from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import {
   Camera,
   ChevronDown,

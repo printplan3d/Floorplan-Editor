@@ -1,5 +1,5 @@
-import { emitter, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { emitter, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { TreeView, VisualJson } from '@visual-json/react'
 import { Camera, Download, Save, Trash2, Upload } from 'lucide-react'
 import {

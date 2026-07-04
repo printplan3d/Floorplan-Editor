@@ -1,7 +1,7 @@
 'use client'
 
-import { emitter, generateId, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { emitter, generateId, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import NextImage from 'next/image'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { CommandPalette } from './../../../components/ui/command-palette'
@@ -90,7 +90,7 @@ function ModeDefaultSelectEffect({
 //   2. activates the slab tool (creates a polygon)
 // The slab-creation code on both the 2D and 3D paths reads
 // pendingSlabSurfaceType, applies it, and resets to 'interior'.
-const OUTDOOR_SURFACES: { id: import('@pascal-app/core').SlabSurfaceType; label: string; emoji: string }[] = [
+const OUTDOOR_SURFACES: { id: import('@ritn3d/core').SlabSurfaceType; label: string; emoji: string }[] = [
   { id: 'patio', label: 'Patio', emoji: '🟫' },
   { id: 'deck', label: 'Deck', emoji: '🪵' },
   { id: 'driveway', label: 'Driveway', emoji: '🛣️' },

@@ -9,8 +9,8 @@ import {
   type LevelNode,
   useScene,
   type ZoneNode,
-} from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+} from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { ArrowLeft, Camera, ChevronRight, Diamond, Layers, Moon, Sun } from 'lucide-react'
 import { motion } from 'motion/react'
 import Link from 'next/link'

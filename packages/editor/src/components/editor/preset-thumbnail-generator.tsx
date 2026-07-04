@@ -1,6 +1,6 @@
 'use client'
 
-import { emitter, sceneRegistry } from '@pascal-app/core'
+import { emitter, sceneRegistry } from '@ritn3d/core'
 import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect } from 'react'
 import * as THREE from 'three'

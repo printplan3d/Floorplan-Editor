@@ -1,5 +1,5 @@
-import type { LevelNode } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import type { LevelNode } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { Layers } from 'lucide-react'
 import { useState } from 'react'
 import { InlineRenameInput } from './inline-rename-input'

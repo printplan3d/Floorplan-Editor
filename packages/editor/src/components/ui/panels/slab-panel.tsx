@@ -1,7 +1,7 @@
 'use client'
 
-import { type AnyNode, type SlabNode, type SlabSurfaceType, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNode, type SlabNode, type SlabSurfaceType, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { Edit, Plus, Scissors, Trash2 } from 'lucide-react'
 import { useCallback, useEffect } from 'react'
 import useEditor from '../../../store/use-editor'

@@ -1,4 +1,4 @@
-import { type RoofNode, useRegistry } from '@pascal-app/core'
+import { type RoofNode, useRegistry } from '@ritn3d/core'
 import { useRef } from 'react'
 import type * as THREE from 'three'
 import { useNodeEvents } from '../../../hooks/use-node-events'

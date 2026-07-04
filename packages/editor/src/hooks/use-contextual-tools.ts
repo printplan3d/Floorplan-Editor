@@ -1,5 +1,5 @@
-import { type AnyNodeId, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNodeId, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { useMemo } from 'react'
 import useEditor, { type StructureTool } from '../store/use-editor'
 

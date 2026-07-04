@@ -1,7 +1,7 @@
 'use client'
 
-import { resolveLevelId, sceneRegistry, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { resolveLevelId, sceneRegistry, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import useEditor, {
   hasCustomPersistedEditorUiState,
   normalizePersistedEditorUiState,

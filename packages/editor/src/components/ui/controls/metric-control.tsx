@@ -1,7 +1,7 @@
 'use client'
 
-import { useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '../../../lib/utils'
 

@@ -1,5 +1,5 @@
-import { sceneRegistry, useScene, type ZoneNode } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { sceneRegistry, useScene, type ZoneNode } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { useFrame } from '@react-three/fiber'
 import useEditor from '../../../store/use-editor'
 

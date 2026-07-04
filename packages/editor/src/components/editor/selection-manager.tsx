@@ -8,9 +8,9 @@ import {
   resolveLevelId,
   sceneRegistry,
   useScene,
-} from '@pascal-app/core'
+} from '@ritn3d/core'
 
-import { useViewer } from '@pascal-app/viewer'
+import { useViewer } from '@ritn3d/viewer'
 import { useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import { sfxEmitter } from '../../lib/sfx-bus'

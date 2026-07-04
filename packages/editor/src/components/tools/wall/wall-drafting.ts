@@ -1,5 +1,5 @@
-import { useScene, type WallNode, WallNode as WallSchema } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { useScene, type WallNode, WallNode as WallSchema } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 export type WallPlanPoint = [number, number]
 export const WALL_GRID_STEP = 0.5

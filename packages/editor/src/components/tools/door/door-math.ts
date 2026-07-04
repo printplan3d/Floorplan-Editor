@@ -6,7 +6,7 @@ import {
   useScene,
   type WallNode,
   type WindowNode,
-} from '@pascal-app/core'
+} from '@ritn3d/core'
 
 /**
  * Converts wall-local (X along wall, Y = height above wall base) to world XYZ.

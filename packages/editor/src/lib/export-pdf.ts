@@ -2,8 +2,8 @@
  * Export floor plan as PDF — A4, to-scale, with title block.
  * Multi-level: each level on its own page.
  */
-import { type AnyNodeId, type BuildingNode, type LevelNode, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNodeId, type BuildingNode, type LevelNode, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 
 const STANDARD_SCALES = [
   { ratio: 1/50, label: '1:50' },

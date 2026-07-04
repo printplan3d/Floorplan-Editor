@@ -7,7 +7,7 @@ import {
   useInteractive,
   useRegistry,
   useScene,
-} from '@pascal-app/core'
+} from '@ritn3d/core'
 import { useAnimations } from '@react-three/drei'
 import { Clone } from '@react-three/drei/core/Clone'
 import { useGLTF } from '@react-three/drei/core/Gltf'

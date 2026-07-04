@@ -1,5 +1,5 @@
-import { type AnyNodeId, type RoofNode, type RoofSegmentNode, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNodeId, type RoofNode, type RoofSegmentNode, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { AnimatePresence } from 'motion/react'
 import Image from 'next/image'
 import { useCallback, useEffect, useState } from 'react'

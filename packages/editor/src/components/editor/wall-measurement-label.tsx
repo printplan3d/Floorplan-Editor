@@ -11,8 +11,8 @@ import {
   useScene,
   type WallMiterData,
   type WallNode,
-} from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+} from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { Html } from '@react-three/drei'
 import { createPortal, useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useState } from 'react'

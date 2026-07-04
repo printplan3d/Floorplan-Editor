@@ -8,7 +8,7 @@ import {
   SlabSystem,
   WallSystem,
   WindowSystem,
-} from '@pascal-app/core'
+} from '@ritn3d/core'
 import { Bvh } from '@react-three/drei'
 import { Canvas, extend, type ThreeToJSXElements, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'

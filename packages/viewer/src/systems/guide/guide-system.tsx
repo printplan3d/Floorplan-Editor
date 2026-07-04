@@ -1,4 +1,4 @@
-import { sceneRegistry } from '@pascal-app/core'
+import { sceneRegistry } from '@ritn3d/core'
 import { useEffect } from 'react'
 import useViewer from '../../store/use-viewer'
 

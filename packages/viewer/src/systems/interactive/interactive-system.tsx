@@ -10,7 +10,7 @@ import {
   useInteractive,
   useScene,
   type ZoneNode,
-} from '@pascal-app/core'
+} from '@ritn3d/core'
 import { Html } from '@react-three/drei'
 import { createPortal, useFrame } from '@react-three/fiber'
 import { useState } from 'react'

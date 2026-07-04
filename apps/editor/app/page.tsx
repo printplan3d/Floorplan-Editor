@@ -1,6 +1,6 @@
 'use client'
 
-import { Editor, useEditor } from '@pascal-app/editor'
+import { Editor, useEditor } from '@ritn3d/editor'
 import { useEffect } from 'react'
 
 export default function Home() {

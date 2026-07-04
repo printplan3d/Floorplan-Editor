@@ -1,7 +1,7 @@
 'use client'
 
-import { emitter, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { emitter, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { MoonIcon, ResetViewIcon, SunIcon, TrashIcon } from '../primitives/sidebar-icons'
 import { motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'

@@ -1,5 +1,5 @@
-import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNode, type AnyNodeId, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { Eye, EyeOff } from 'lucide-react'
 
 interface TreeNodeActionsProps {

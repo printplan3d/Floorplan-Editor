@@ -8,8 +8,8 @@ import {
   RoofSegmentNode,
   sceneRegistry,
   useScene,
-} from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+} from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { BufferGeometry, DoubleSide, type Group, type Line, Vector3 } from 'three'

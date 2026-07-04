@@ -1,5 +1,5 @@
-import type { SlabNode } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import type { SlabNode } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import Image from 'next/image'
 import { useState } from 'react'
 import useEditor from './../../../../../store/use-editor'

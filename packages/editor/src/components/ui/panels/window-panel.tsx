@@ -1,7 +1,7 @@
 'use client'
 
-import { type AnyNode, type AnyNodeId, DEFAULT_WALL_HEIGHT, useScene, type WallNode, type WindowNode } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNode, type AnyNodeId, DEFAULT_WALL_HEIGHT, useScene, type WallNode, type WindowNode } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { Trash2 } from 'lucide-react'
 import { useCallback, useMemo } from 'react'
 import { sfxEmitter } from '../../../lib/sfx-bus'

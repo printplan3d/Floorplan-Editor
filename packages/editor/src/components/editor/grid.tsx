@@ -1,7 +1,7 @@
 'use client'
 
-import { emitter, type GridEvent, sceneRegistry } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { emitter, type GridEvent, sceneRegistry } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MathUtils, type Mesh, Vector2 } from 'three'

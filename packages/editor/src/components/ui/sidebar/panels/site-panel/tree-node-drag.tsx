@@ -1,6 +1,6 @@
 'use client'
 
-import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
+import { type AnyNode, type AnyNodeId, useScene } from '@ritn3d/core'
 import { motion } from 'motion/react'
 import {
   createContext,

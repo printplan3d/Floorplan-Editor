@@ -1,5 +1,5 @@
 {
-  "extends": "@pascal/typescript-config/react-library.json",
+  "extends": "@ritn3d/typescript-config/react-library.json",
   "compilerOptions": {
     "rootDir": "src",
     "noEmit": true

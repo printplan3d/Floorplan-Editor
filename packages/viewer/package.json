@@ -1,5 +1,5 @@
 {
-  "name": "@pascal-app/viewer",
+  "name": "@ritn3d/viewer",
   "version": "0.3.1",
   "description": "3D viewer component for Pascal building editor",
   "type": "module",
@@ -22,7 +22,7 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "@pascal-app/core": "workspace:*",
+    "@ritn3d/core": "workspace:*",
     "@react-three/drei": "^10",
     "@react-three/fiber": "^9",
     "react": "^18 || ^19",
@@ -33,7 +33,7 @@
     "zustand": "^5"
   },
   "devDependencies": {
-    "@pascal/typescript-config": "workspace:*",
+    "@ritn3d/typescript-config": "workspace:*",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.2",
     "@types/three": "^0.183.0",

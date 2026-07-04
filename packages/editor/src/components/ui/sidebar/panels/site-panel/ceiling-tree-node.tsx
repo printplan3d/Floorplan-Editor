@@ -1,5 +1,5 @@
-import { type AnyNodeId, type CeilingNode, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNodeId, type CeilingNode, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import useEditor from './../../../../../store/use-editor'

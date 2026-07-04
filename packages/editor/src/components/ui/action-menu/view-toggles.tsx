@@ -1,7 +1,7 @@
 'use client'
 
 import { Icon } from '@iconify/react'
-import { useViewer } from '@pascal-app/viewer'
+import { useViewer } from '@ritn3d/viewer'
 import { Diamond } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import useEditor from '../../../store/use-editor'

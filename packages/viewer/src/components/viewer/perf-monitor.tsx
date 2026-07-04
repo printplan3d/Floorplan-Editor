@@ -1,4 +1,4 @@
-import { useScene } from '@pascal-app/core'
+import { useScene } from '@ritn3d/core'
 import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { useRef, useState } from 'react'

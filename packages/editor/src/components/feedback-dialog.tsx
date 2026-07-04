@@ -1,6 +1,6 @@
 'use client'
 
-import { useScene } from '@pascal-app/core'
+import { useScene } from '@ritn3d/core'
 import { ImageIcon, MessageSquare, X } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 import { Button } from './ui/primitives/button'

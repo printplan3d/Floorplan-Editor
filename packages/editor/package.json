@@ -1,5 +1,5 @@
 {
-  "name": "@pascal-app/editor",
+  "name": "@ritn3d/editor",
   "version": "0.1.0",
   "description": "Pascal building editor component",
   "type": "module",
@@ -10,8 +10,8 @@
     "check-types": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@pascal-app/core": "workspace:*",
-    "@pascal-app/viewer": "workspace:*",
+    "@ritn3d/core": "workspace:*",
+    "@ritn3d/viewer": "workspace:*",
     "@react-three/drei": "^10",
     "@react-three/fiber": "^9",
     "next": ">=15",
@@ -50,9 +50,9 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
-    "@pascal-app/core": "workspace:*",
-    "@pascal-app/viewer": "workspace:*",
-    "@pascal/typescript-config": "workspace:*",
+    "@ritn3d/core": "workspace:*",
+    "@ritn3d/viewer": "workspace:*",
+    "@ritn3d/typescript-config": "workspace:*",
     "@types/howler": "^2.2.12",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",

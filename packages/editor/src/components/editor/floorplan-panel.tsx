@@ -26,8 +26,8 @@ import {
   WindowNode,
   ZoneNode as ZoneNodeSchema,
   type ZoneNode as ZoneNodeType,
-} from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+} from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { ChevronDown, Command, X } from 'lucide-react'
 import {
   memo,

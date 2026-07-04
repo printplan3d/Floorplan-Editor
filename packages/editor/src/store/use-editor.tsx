@@ -1,6 +1,6 @@
 'use client'
 
-import type { AssetInput } from '@pascal-app/core'
+import type { AssetInput } from '@ritn3d/core'
 import {
   type BuildingNode,
   type DoorNode,
@@ -12,8 +12,8 @@ import {
   type Space,
   useScene,
   type WindowNode,
-} from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+} from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 

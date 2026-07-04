@@ -1,4 +1,4 @@
-import { type AssetInput, ItemNode } from '@pascal-app/core'
+import { type AssetInput, ItemNode } from '@ritn3d/core'
 export const CATALOG_ITEMS: AssetInput[] = [
   {
     id: 'tesla',

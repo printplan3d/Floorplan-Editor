@@ -1,4 +1,4 @@
-import { loadAssetUrl } from '@pascal-app/core'
+import { loadAssetUrl } from '@ritn3d/core'
 
 // Ritn3D: no external CDN — assets served locally or from our own CDN
 export const ASSETS_CDN_URL = process.env.NEXT_PUBLIC_ASSETS_CDN_URL || ''

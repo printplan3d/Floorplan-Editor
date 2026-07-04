@@ -1,7 +1,7 @@
 'use client'
 
-import { emitter, sceneRegistry, useScene } from '@pascal-app/core'
-import { snapLevelsToTruePositions } from '@pascal-app/viewer'
+import { emitter, sceneRegistry, useScene } from '@ritn3d/core'
+import { snapLevelsToTruePositions } from '@ritn3d/viewer'
 import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useRef } from 'react'
 import * as THREE from 'three'

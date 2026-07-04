@@ -1,6 +1,6 @@
 'use client'
 
-import { useScene } from '@pascal-app/core'
+import { useScene } from '@ritn3d/core'
 import { NodeRenderer } from './node-renderer'
 
 export const SceneRenderer = () => {

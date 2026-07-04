@@ -1,8 +1,8 @@
 'use client'
 
-import type { AnyNodeId } from '@pascal-app/core'
-import { LevelNode, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import type { AnyNodeId } from '@ritn3d/core'
+import { LevelNode, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import {
   AppWindow,
   ArrowRight,

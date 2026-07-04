@@ -1,5 +1,5 @@
-import { emitter, useScene, type ZoneNode } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { emitter, useScene, type ZoneNode } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { Camera, Hexagon, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { ColorDot } from './../../../../../components/ui/primitives/color-dot'

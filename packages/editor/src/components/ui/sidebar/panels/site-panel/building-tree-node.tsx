@@ -1,5 +1,5 @@
-import { type BuildingNode, LevelNode, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type BuildingNode, LevelNode, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { Building2, Plus } from 'lucide-react'
 import { useState } from 'react'
 import {

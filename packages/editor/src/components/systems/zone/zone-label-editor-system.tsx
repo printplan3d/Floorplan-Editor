@@ -1,7 +1,7 @@
 'use client'
 
-import { useScene, type ZoneNode } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { useScene, type ZoneNode } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { Check, Pencil } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'

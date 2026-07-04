@@ -1,5 +1,5 @@
-import { type AnyNodeId, type CeilingNode, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type AnyNodeId, type CeilingNode, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import useEditor, { type Phase, type Tool } from '../../store/use-editor'
 import { CeilingBoundaryEditor } from './ceiling/ceiling-boundary-editor'
 import { CeilingHoleEditor } from './ceiling/ceiling-hole-editor'

@@ -7,8 +7,8 @@ import {
   RoofSegmentNode as RoofSegmentNodeSchema,
   type RoofType,
   useScene,
-} from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+} from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { Copy, Move, Trash2 } from 'lucide-react'
 import { useCallback } from 'react'
 import { sfxEmitter } from '../../../lib/sfx-bus'

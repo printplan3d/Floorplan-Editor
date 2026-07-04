@@ -1,4 +1,4 @@
-import { BuildingNode, generateId, LevelNode, SiteNode, WallNode } from '@pascal-app/core'
+import { BuildingNode, generateId, LevelNode, SiteNode, WallNode } from '@ritn3d/core'
 import type { SceneGraph } from './scene'
 
 type WallDef = { start: [number, number]; end: [number, number]; name?: string }

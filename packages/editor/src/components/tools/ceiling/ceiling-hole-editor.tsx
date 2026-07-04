@@ -1,5 +1,5 @@
-import { type CeilingNode, resolveLevelId, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { type CeilingNode, resolveLevelId, useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { useCallback } from 'react'
 import { PolygonEditor } from '../shared/polygon-editor'
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { emitter } from '@pascal-app/core'
+import { emitter } from '@ritn3d/core'
 import Image from 'next/image'
 import { ActionButton } from './action-button'
 
