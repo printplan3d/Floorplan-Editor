@@ -13,6 +13,10 @@ interface UseAutoSaveOptions {
   onDirty?: () => void
   onSaveStatusChange?: (status: SaveStatus) => void
   isVersionPreviewMode?: boolean
+  // Ritn3D 2026-07-04: threaded through to the localStorage fallback so
+  // each projectId gets its own draft slot instead of all overwriting the
+  // same global key.
+  projectId?: string | null
 }
 
 /**
@@ -26,6 +30,7 @@ export function useAutoSave({
   onDirty,
   onSaveStatusChange,
   isVersionPreviewMode = false,
+  projectId,
 }: UseAutoSaveOptions): { saveStatus: SaveStatus; isLoadingSceneRef: MutableRefObject<boolean> } {
   const [saveStatus, _setSaveStatus] = useState<SaveStatus>('idle')
 
@@ -41,6 +46,7 @@ export function useAutoSave({
   const onDirtyRef = useRef(onDirty)
   const onSaveStatusChangeRef = useRef(onSaveStatusChange)
   const isVersionPreviewModeRef = useRef(isVersionPreviewMode)
+  const projectIdRef = useRef(projectId)
 
   useEffect(() => {
     onSaveRef.current = onSave
@@ -54,6 +60,9 @@ export function useAutoSave({
   useEffect(() => {
     isVersionPreviewModeRef.current = isVersionPreviewMode
   }, [isVersionPreviewMode])
+  useEffect(() => {
+    projectIdRef.current = projectId
+  }, [projectId])
 
   const setSaveStatus = useCallback((status: SaveStatus) => {
     _setSaveStatus(status)
@@ -82,7 +91,7 @@ export function useAutoSave({
         if (onSaveRef.current) {
           await onSaveRef.current(sceneGraph)
         } else {
-          saveSceneToLocalStorage(sceneGraph)
+          saveSceneToLocalStorage(sceneGraph, projectIdRef.current)
         }
         hasDirtyChangesRef.current = false
         setSaveStatus('saved')
@@ -144,7 +153,7 @@ export function useAutoSave({
       if (onSaveRef.current) {
         onSaveRef.current(sceneGraph).catch(() => {})
       } else {
-        saveSceneToLocalStorage(sceneGraph)
+        saveSceneToLocalStorage(sceneGraph, projectIdRef.current)
       }
       hasDirtyChangesRef.current = false
     }

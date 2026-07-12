@@ -369,21 +369,63 @@ export function applySceneGraphToEditor(sceneGraph?: SceneGraph | null) {
   syncEditorSelectionFromCurrentScene()
 }
 
-const LOCAL_STORAGE_KEY = 'pascal-editor-scene'
+// Ritn3D 2026-07-04: per-project draft storage.
+// Was a single global key ('pascal-editor-scene') so every editor session
+// overwrote the same scene — users couldn't have more than one draft and
+// switching projectIds silently loaded the same drawing. New scheme
+// namespaces per projectId: `ritn3d-editor:draft:<projectId>`. Old
+// single-slot key kept as a fallback so an in-progress draft from before
+// the refactor survives one more session.
+const LEGACY_LOCAL_STORAGE_KEY = 'pascal-editor-scene'
+const DRAFT_PREFIX = 'ritn3d-editor:draft:'
+const DEFAULT_DRAFT_ID = '__default__'
 
-export function saveSceneToLocalStorage(scene: SceneGraph): void {
+function draftKey(projectId?: string | null): string {
+  return DRAFT_PREFIX + (projectId && projectId.length > 0 ? projectId : DEFAULT_DRAFT_ID)
+}
+
+export function saveSceneToLocalStorage(scene: SceneGraph, projectId?: string | null): void {
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(scene))
+    localStorage.setItem(draftKey(projectId), JSON.stringify(scene))
   } catch {
     // Swallow storage quota errors
   }
 }
 
-export function loadSceneFromLocalStorage(): SceneGraph | null {
+export function loadSceneFromLocalStorage(projectId?: string | null): SceneGraph | null {
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as SceneGraph) : null
+    const raw = localStorage.getItem(draftKey(projectId))
+    if (raw) return JSON.parse(raw) as SceneGraph
+    // Fallback to the legacy single-slot key so a pre-refactor draft doesn't
+    // vanish. Once the user re-saves, the new per-project key takes over.
+    const legacy = localStorage.getItem(LEGACY_LOCAL_STORAGE_KEY)
+    return legacy ? (JSON.parse(legacy) as SceneGraph) : null
   } catch {
     return null
+  }
+}
+
+// Ritn3D 2026-07-04: draft-list helpers used by the webapp Drafts tab.
+// Returns per-projectId keys so the webapp can render a tile per draft.
+export function listLocalDraftIds(): string[] {
+  try {
+    const ids: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith(DRAFT_PREFIX)) {
+        ids.push(k.slice(DRAFT_PREFIX.length))
+      }
+    }
+    return ids.filter((id) => id !== DEFAULT_DRAFT_ID)
+  } catch {
+    return []
+  }
+}
+
+export function deleteLocalDraft(projectId: string): void {
+  try {
+    localStorage.removeItem(draftKey(projectId))
+  } catch {
+    // ignore
   }
 }

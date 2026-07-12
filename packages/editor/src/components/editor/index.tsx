@@ -336,6 +336,7 @@ export default function Editor({
     onDirty,
     onSaveStatusChange,
     isVersionPreviewMode,
+    projectId,
   })
 
   const [isSceneLoading, setIsSceneLoading] = useState(false)
@@ -374,7 +375,7 @@ export default function Editor({
       setIsSceneLoading(true)
 
       try {
-        const sceneGraph = onLoad ? await onLoad() : loadSceneFromLocalStorage()
+        const sceneGraph = onLoad ? await onLoad() : loadSceneFromLocalStorage(projectId)
         if (!cancelled) {
           applySceneGraphToEditor(sceneGraph)
         }

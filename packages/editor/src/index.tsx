@@ -13,7 +13,13 @@ export type { PresetsAdapter, PresetsTab } from './contexts/presets-context'
 export { PresetsProvider } from './contexts/presets-context'
 export type { SaveStatus } from './hooks/use-auto-save'
 export type { SceneGraph } from './lib/scene'
-export { applySceneGraphToEditor } from './lib/scene'
+export {
+  applySceneGraphToEditor,
+  deleteLocalDraft,
+  listLocalDraftIds,
+  loadSceneFromLocalStorage,
+} from './lib/scene'
+export { exportFloorPlanJSON } from './lib/export-json'
 export { default as useAudio } from './store/use-audio'
 export { type CommandAction, useCommandRegistry } from './store/use-command-registry'
 export { default as useEditor } from './store/use-editor'
