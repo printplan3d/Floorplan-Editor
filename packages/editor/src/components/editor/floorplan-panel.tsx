@@ -6699,6 +6699,15 @@ export function FloorplanPanel() {
       const localY = isOpeningPlacementActive ? floorplanOpeningLocalY : 0
 
       setSelectedReferenceId(null)
+
+      // Ritn3D 2026-07-04: SELECT the wall on click when we're not in an
+      // opening-placement mode (where a click means "insert door here").
+      // Selection opens WallPanel via PanelManager — was missing before,
+      // so users couldn't edit a wall after placing it.
+      if (!isOpeningPlacementActive) {
+        handleWallSelect(wall)
+      }
+
       emitter.emit('wall:click', {
         node: wall,
         position: [centerX, 0, centerZ],
@@ -6707,7 +6716,7 @@ export function FloorplanPanel() {
         nativeEvent: event.nativeEvent as any,
       } as any)
     },
-    [floorplanOpeningLocalY, isOpeningPlacementActive, setSelectedReferenceId],
+    [floorplanOpeningLocalY, isOpeningPlacementActive, setSelectedReferenceId, handleWallSelect],
   )
 
   const handleWallDoubleClick = useCallback(
@@ -6755,6 +6764,17 @@ export function FloorplanPanel() {
       }
 
       setSelectedReferenceId(null)
+
+      // Ritn3D 2026-07-04: actually SELECT the clicked node so PanelManager
+      // opens the corresponding side panel (SlabPanel / DoorPanel /
+      // WindowPanel). Zones use a separate selection field (zoneId) per
+      // the app's existing convention; everything else uses selectedIds.
+      if (node.type === 'zone') {
+        setSelection({ selectedIds: [], zoneId: nodeId as ZoneNodeType['id'] })
+      } else {
+        setSelection({ selectedIds: [nodeId], zoneId: null })
+      }
+
       emitter.emit(
         `${node.type}:click` as any,
         {
@@ -6766,7 +6786,7 @@ export function FloorplanPanel() {
         } as any,
       )
     },
-    [setSelectedReferenceId],
+    [setSelectedReferenceId, setSelection],
   )
   const handleGuideSelect = useCallback(
     (guideId: GuideNode['id']) => {
