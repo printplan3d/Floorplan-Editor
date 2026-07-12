@@ -9,6 +9,7 @@ import { ViewerZoneSystem } from '../../components/viewer-zone-system'
 import { type PresetsAdapter, PresetsProvider } from '../../contexts/presets-context'
 import { type SaveStatus, useAutoSave } from '../../hooks/use-auto-save'
 import { useKeyboard } from '../../hooks/use-keyboard'
+import { exportFloorPlanJSON } from '../../lib/export-json'
 import {
   applySceneGraphToEditor,
   loadSceneFromLocalStorage,
@@ -82,6 +83,14 @@ export interface EditorProps {
 
   // Presets storage backend (defaults to localStorage)
   presetsAdapter?: PresetsAdapter
+
+  // Ritn3D 2026-07-04: 'Generate 3D' handler. The editor is host-agnostic
+  // — when omitted, no Generate button is rendered. The webapp passes an
+  // impl that POSTs the current floor plan to /api/generate-from-drawing
+  // and redirects to /app/processing. Receives the export-json output;
+  // returns a promise that resolves when the render job is QUEUED (not
+  // rendered — that's server-side and can take minutes).
+  onGenerate3D?: (drawing: object) => Promise<void>
 }
 
 function EditorSceneCrashFallback() {
@@ -318,6 +327,7 @@ export default function Editor({
   settingsPanelProps,
   sitePanelProps,
   presetsAdapter,
+  onGenerate3D,
 }: EditorProps) {
   useKeyboard()
 
@@ -433,6 +443,19 @@ export default function Editor({
             <PanelManager />
             {!needs3D && <FloorplanPanel />}
             {needs3D && <ActionMenu />}
+            {/* Ritn3D 2026-07-04: Generate 3D — top-right floating button.
+                Only rendered when the host wired onGenerate3D (webapp does;
+                standalone dev app doesn't). Sits above FloorplanPanel via
+                fixed positioning + z-40 so it stays reachable regardless of
+                the sidebar / panel state. */}
+            {onGenerate3D && !needs3D && (
+              <Generate3DButton
+                onClick={async () => {
+                  const drawing = exportFloorPlanJSON()
+                  await onGenerate3D(drawing)
+                }}
+              />
+            )}
             <HelperManager />
 
             <SidebarProvider className="fixed z-20">
@@ -477,5 +500,68 @@ export default function Editor({
         </ErrorBoundary>
       </div>
     </PresetsProvider>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Generate3DButton
+// ---------------------------------------------------------------------------
+// Ritn3D 2026-07-04: primary CTA anchored top-right of the canvas. Clicks
+// call the host's onGenerate3D handler (webapp: POST to /api/generate-from-
+// drawing + redirect). Shows a busy state while the handler awaits so the
+// user knows the request is in flight; failures surface as an inline error
+// chip below the button for 4 seconds.
+function Generate3DButton({ onClick }: { onClick: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handle = useCallback(async () => {
+    if (busy) return
+    setError(null)
+    setBusy(true)
+    try {
+      await onClick()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong.')
+      setTimeout(() => setError(null), 4000)
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, onClick])
+
+  return (
+    <div className="pointer-events-none fixed top-4 right-4 z-40 flex flex-col items-end gap-2">
+      <button
+        type="button"
+        onClick={handle}
+        disabled={busy}
+        className="pointer-events-auto inline-flex items-center gap-2 rounded-md bg-ink px-4 h-10 text-[14px] font-semibold tracking-[-0.005em] text-paper shadow-[0_4px_14px_rgba(22,24,28,0.16)] hover:bg-ink/90 active:bg-ink transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {busy ? (
+          <>
+            <svg width="14" height="14" viewBox="0 0 14 14" className="animate-spin">
+              <circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.35" />
+              <path d="M7 2 A 5 5 0 0 1 12 7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            Queuing render…
+          </>
+        ) : (
+          <>
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+              <path d="M2 12 L4 8 L6.5 10 L10 5 L13 8.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M2 13.2 L13 13.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              <path d="M11.5 3 L13.5 5 M13.5 3 L11.5 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              <circle cx="12.5" cy="4" r="0.8" fill="currentColor" />
+            </svg>
+            Generate 3D
+          </>
+        )}
+      </button>
+      {error && (
+        <div className="pointer-events-auto rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-[12px] font-medium text-red-800 shadow-sm">
+          {error}
+        </div>
+      )}
+    </div>
   )
 }
