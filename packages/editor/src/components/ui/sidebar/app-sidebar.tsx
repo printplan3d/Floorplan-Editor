@@ -597,8 +597,12 @@ export function AppSidebar({
             onPanelChange={setActivePanel}
           />
 
-          {/* Panel Content */}
-          <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Panel Content — Ritn3D 2026-07-13: outer column is now the
+              scroll host (was overflow-hidden, which clipped everything
+              below the ~viewport-height toolbar). SidebarContent below
+              drops its own overflow so we don't get two nested scrollbars
+              fighting for wheel events. */}
+          <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
             {sidebarTop && (
               <SidebarHeader className="relative flex-col items-start justify-center gap-1 border-border/50 border-b px-3 py-3">
                 {sidebarTop}
@@ -608,7 +612,7 @@ export function AppSidebar({
             {/* Drawing tools + Reset View */}
             <SidebarToolbar />
 
-            <SidebarContent className={cn('flex flex-1 flex-col overflow-y-auto overflow-x-hidden')}>
+            <SidebarContent className={cn('flex flex-1 flex-col overflow-visible')}>
               {renderPanelContent()}
             </SidebarContent>
           </div>

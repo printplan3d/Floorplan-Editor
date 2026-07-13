@@ -21,9 +21,11 @@ interface IconRailProps {
   className?: string
 }
 
-const panels: { id: PanelId; iconSrc: string; label: string }[] = [
-  { id: 'site', iconSrc: '/icons/level.png', label: 'Site' },
-]
+// Ritn3D 2026-07-13: 'Site' rail button removed — it was the only entry
+// and served no purpose (activePanel defaults to 'site' anyway). Keeping
+// the array shape so the rail can still host future panels without a
+// refactor.
+const panels: { id: PanelId; iconSrc: string; label: string }[] = []
 
 export function IconRail({ activePanel, onPanelChange, appMenuButton, className }: IconRailProps) {
   const theme = useViewer((state) => state.theme)
@@ -46,8 +48,10 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       {/* App menu slot */}
       {appMenuButton}
 
-      {/* Divider */}
-      <div className="mb-1 h-px w-10 bg-hair" />
+      {/* Divider — only when there's something above it worth dividing from */}
+      {(appMenuButton || panels.length > 0) && (
+        <div className="mb-1 h-px w-10 bg-hair" />
+      )}
 
       {panels.map((panel) => {
         const isActive = activePanel === panel.id
