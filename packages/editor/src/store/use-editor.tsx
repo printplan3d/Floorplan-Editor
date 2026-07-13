@@ -268,8 +268,15 @@ const useEditor = create<EditorState>()(
 
         switch (phase) {
           case 'site':
-            // In Site mode, we zoom out and deselect specific levels/buildings
-            viewer.resetSelection()
+            // Ritn3D 2026-07-13: intentionally DO NOT call
+            // viewer.resetSelection() here. It used to zoom out + drop
+            // the levelId when clicking the Site header — which made
+            // sidebar wallCount fall to 0 and the "Start from template"
+            // panel reappear, so the user believed their plan had been
+            // wiped and couldn't find a way back. Keeping the level
+            // selection means the walls stay drawn on the canvas while
+            // the user browses the site tree; going back to structure
+            // is now a no-op instead of a fresh building/level lookup.
             break
 
           case 'structure':
