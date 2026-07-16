@@ -293,20 +293,11 @@ function SidebarToolbar() {
         <SymbolCatalog />
       </div>
 
-      {/* Generate 3D Model — primary action */}
-      <button
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-teal-500/40 bg-teal-500/10 px-2 py-2 font-semibold text-teal-300 text-xs transition-colors hover:bg-teal-500/20 hover:border-teal-500/50"
-        onClick={downloadJSON}
-        title="Generate 3D model from your floor plan"
-        type="button"
-      >
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 2L2 7l10 5 10-5-10-5z" />
-          <path d="M2 17l10 5 10-5" />
-          <path d="M2 12l10 5 10-5" />
-        </svg>
-        Generate 3D Model
-      </button>
+      {/* Ritn3D 2026-07-13: 'Generate 3D Model' sidebar button removed —
+          it was mis-wired to downloadJSON (dumped a .json file to disk
+          instead of triggering the pipeline). Real Generate 3D is the
+          floating top-right Generate3DButton in editor/index.tsx, which
+          calls the host's onGenerate3D → /api/generate-from-drawing. */}
 
       {/* Download dropdown */}
       <div className="relative">
