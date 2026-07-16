@@ -101,6 +101,24 @@ export function DoorPanel() {
         </PanelSection>
       )}
 
+      {/* Ritn3D 2026-07-16 (Tier 2): Style picker. Values map 1:1 to
+          DoorStyle enum; labels are user-facing. 'Normal' = pedestrian
+          wooden slab door (renamed for clarity; enum stays as
+          'pedestrian' for scene backwards-compat). */}
+      <PanelSection title="Style">
+        <SegmentedControl
+          onChange={(v) => handleUpdate({ style: v })}
+          options={[
+            { label: 'Normal', value: 'pedestrian' as const },
+            { label: 'Glass', value: 'glass' as const },
+            { label: 'Patio', value: 'patio' as const },
+            { label: 'Sliding', value: 'sliding' as const },
+            { label: 'Garage', value: 'garage' as const },
+          ]}
+          value={node.style ?? 'pedestrian'}
+        />
+      </PanelSection>
+
       <PanelSection title="Dimensions">
         <SliderControl
           label="Width"
@@ -163,6 +181,55 @@ export function DoorPanel() {
                 { label: 'Outward', value: 'outward' },
               ]}
               value={node.swingDirection}
+            />
+          </div>
+        </div>
+      </PanelSection>
+
+      {/* Ritn3D 2026-07-16 (Tier 2): expose the render toggles that were
+          already in DoorNode but had no UI. Handle side follows hinge by
+          default (see pipeline), user can override. Threshold on/off. */}
+      <PanelSection title="Handle & threshold">
+        <div className="flex flex-col gap-2 px-1 pb-1">
+          <div className="space-y-1">
+            <span className="font-mono text-[10px] text-ink/50 uppercase tracking-[0.06em]">
+              Handle
+            </span>
+            <SegmentedControl
+              onChange={(v) => handleUpdate({ handle: v === 'on' })}
+              options={[
+                { label: 'On', value: 'on' as const },
+                { label: 'Off', value: 'off' as const },
+              ]}
+              value={node.handle === false ? 'off' : 'on'}
+            />
+          </div>
+          {node.handle !== false && (
+            <div className="space-y-1">
+              <span className="font-mono text-[10px] text-ink/50 uppercase tracking-[0.06em]">
+                Handle side
+              </span>
+              <SegmentedControl
+                onChange={(v) => handleUpdate({ handleSide: v })}
+                options={[
+                  { label: 'Left', value: 'left' as const },
+                  { label: 'Right', value: 'right' as const },
+                ]}
+                value={node.handleSide ?? (node.hingesSide === 'left' ? 'right' : 'left')}
+              />
+            </div>
+          )}
+          <div className="space-y-1">
+            <span className="font-mono text-[10px] text-ink/50 uppercase tracking-[0.06em]">
+              Threshold
+            </span>
+            <SegmentedControl
+              onChange={(v) => handleUpdate({ threshold: v === 'on' })}
+              options={[
+                { label: 'On', value: 'on' as const },
+                { label: 'Off', value: 'off' as const },
+              ]}
+              value={node.threshold === false ? 'off' : 'on'}
             />
           </div>
         </div>

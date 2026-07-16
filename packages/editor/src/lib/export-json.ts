@@ -50,6 +50,10 @@ export function exportFloorPlanJSON(): object {
             // length, not chord. For straight walls bulge=0 so arcLength
             // collapses to chord length — same answer as before.
             const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
+            // Ritn3D 2026-07-16 (Tier 2): export style + frame dims +
+            // handle metadata so the Blender pipeline can render an
+            // actual leaf (flush slab / glass / patio sliding) instead
+            // of just a doorway.
             levelDoors.push({
               id: d.id,
               wall_id: w.id,
@@ -57,7 +61,15 @@ export function exportFloorPlanJSON(): object {
               width: d.width,
               height: d.height,
               door_type: 'single',
+              style: d.style ?? 'pedestrian',
               swing_direction: d.hingesSide === 'left' ? 'left' : 'right',
+              hinges_side: d.hingesSide ?? 'left',
+              frame_thickness: d.frameThickness ?? 0.05,
+              frame_depth: d.frameDepth ?? 0.07,
+              threshold: d.threshold ?? true,
+              handle: d.handle ?? true,
+              handle_side: d.handleSide ?? 'right',
+              handle_height: d.handleHeight ?? 1.05,
             })
           }
           if (wc.type === 'window') {
@@ -67,6 +79,9 @@ export function exportFloorPlanJSON(): object {
             // collapses to chord length — same answer as before.
             const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
             const sillHeight = Math.max(0, (win.position[1] ?? 0) - (win.height ?? 1.5) / 2)
+            // Ritn3D 2026-07-16 (Tier 2): export the actual pane grid
+            // ratios + frame dims + sill toggle so Blender stops
+            // auto-computing them and respects the user's design.
             levelWindows.push({
               id: win.id,
               wall_id: w.id,
@@ -75,6 +90,15 @@ export function exportFloorPlanJSON(): object {
               height: win.height,
               sill_height: sillHeight,
               pane_count: (win.columnRatios?.length ?? 1) * (win.rowRatios?.length ?? 1),
+              column_ratios: win.columnRatios ?? [1],
+              row_ratios: win.rowRatios ?? [1],
+              column_divider_thickness: win.columnDividerThickness ?? 0.03,
+              row_divider_thickness: win.rowDividerThickness ?? 0.03,
+              frame_thickness: win.frameThickness ?? 0.05,
+              frame_depth: win.frameDepth ?? 0.07,
+              sill: win.sill ?? true,
+              sill_depth: win.sillDepth ?? 0.08,
+              sill_thickness: win.sillThickness ?? 0.03,
             })
           }
         }

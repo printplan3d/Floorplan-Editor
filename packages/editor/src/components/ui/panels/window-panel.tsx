@@ -7,6 +7,7 @@ import { useCallback, useMemo } from 'react'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import { ActionButton, ActionGroup } from '../controls/action-button'
 import { PanelSection } from '../controls/panel-section'
+import { SegmentedControl } from '../controls/segmented-control'
 import { SliderControl } from '../controls/slider-control'
 import { PanelWrapper } from './panel-wrapper'
 
@@ -191,6 +192,84 @@ export function WindowPanel() {
           step={1}
           value={numRows}
         />
+      </PanelSection>
+
+      {/* Ritn3D 2026-07-16 (Tier 2): expose mullion + frame + sill
+          controls that already existed in WindowNode but were unreachable
+          from the UI. Blender pipeline now honours all of these. */}
+      <PanelSection title="Frame & mullions">
+        <SliderControl
+          label="Frame thickness"
+          max={0.15}
+          min={0.02}
+          onChange={(v) => handleUpdate({ frameThickness: v })}
+          precision={2}
+          step={0.005}
+          unit="m"
+          value={Math.round((node.frameThickness ?? 0.05) * 1000) / 1000}
+        />
+        <SliderControl
+          label="Column mullion"
+          max={0.10}
+          min={0.01}
+          onChange={(v) => handleUpdate({ columnDividerThickness: v })}
+          precision={2}
+          step={0.005}
+          unit="m"
+          value={Math.round((node.columnDividerThickness ?? 0.03) * 1000) / 1000}
+        />
+        <SliderControl
+          label="Row mullion"
+          max={0.10}
+          min={0.01}
+          onChange={(v) => handleUpdate({ rowDividerThickness: v })}
+          precision={2}
+          step={0.005}
+          unit="m"
+          value={Math.round((node.rowDividerThickness ?? 0.03) * 1000) / 1000}
+        />
+      </PanelSection>
+
+      <PanelSection title="Sill">
+        <div className="flex flex-col gap-2 px-1 pb-1">
+          <div className="space-y-1">
+            <span className="font-mono text-[10px] text-ink/50 uppercase tracking-[0.06em]">
+              Show sill
+            </span>
+            <SegmentedControl
+              onChange={(v) => handleUpdate({ sill: v === 'on' })}
+              options={[
+                { label: 'On', value: 'on' as const },
+                { label: 'Off', value: 'off' as const },
+              ]}
+              value={node.sill === false ? 'off' : 'on'}
+            />
+          </div>
+          {node.sill !== false && (
+            <>
+              <SliderControl
+                label="Sill depth"
+                max={0.25}
+                min={0.02}
+                onChange={(v) => handleUpdate({ sillDepth: v })}
+                precision={2}
+                step={0.005}
+                unit="m"
+                value={Math.round((node.sillDepth ?? 0.08) * 1000) / 1000}
+              />
+              <SliderControl
+                label="Sill thickness"
+                max={0.10}
+                min={0.01}
+                onChange={(v) => handleUpdate({ sillThickness: v })}
+                precision={2}
+                step={0.005}
+                unit="m"
+                value={Math.round((node.sillThickness ?? 0.03) * 1000) / 1000}
+              />
+            </>
+          )}
+        </div>
       </PanelSection>
 
       <PanelSection title="Actions">
