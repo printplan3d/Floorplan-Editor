@@ -148,14 +148,19 @@ function SidebarToolbar() {
   const [showClearModal, setShowClearModal] = useState(false)
   const [isMarqueeActive, setIsMarqueeActive] = useState(false)
   const [showDownloadMenu, setShowDownloadMenu] = useState(false)
+  // Ritn3D 2026-07-17: was scoped to the ACTIVE level. That meant
+  // clicking "Add level" / "Add mezzanine" / "Add building" (which
+  // switch selection to the freshly-created empty level) instantly
+  // dropped wallCount to 0, which re-showed the "Start from template"
+  // panel below, and the user read it as "my plan got wiped".
+  // Count walls across the WHOLE project so templates only appear when
+  // the project has literally nothing drawn yet.
   const wallCount = useScene((s) => {
-    const levelId = useViewer.getState().selection.levelId
-    if (!levelId) return 0
-    const level = s.nodes[levelId as any]
-    if (!level || level.type !== 'level') return 0
-    return ((level as any).children || [])
-      .map((id: string) => s.nodes[id as any])
-      .filter((n: any) => n?.type === 'wall').length
+    let total = 0
+    for (const node of Object.values(s.nodes)) {
+      if ((node as any)?.type === 'wall') total++
+    }
+    return total
   })
 
   useEffect(() => {
