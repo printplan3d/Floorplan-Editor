@@ -593,25 +593,25 @@ export function AppSidebar({
             onPanelChange={setActivePanel}
           />
 
-          {/* Panel Content — Ritn3D 2026-07-13: outer column is now the
-              scroll host (was overflow-hidden, which clipped everything
-              below the ~viewport-height toolbar). SidebarContent below
-              drops its own overflow so we don't get two nested scrollbars
-              fighting for wheel events. */}
-          <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
-            {sidebarTop && (
-              <SidebarHeader className="relative flex-col items-start justify-center gap-1 border-border/50 border-b px-3 py-3">
-                {sidebarTop}
-              </SidebarHeader>
-            )}
-
-            {/* Drawing tools + Reset View */}
-            <SidebarToolbar />
-
-            <SidebarContent className={cn('flex flex-1 flex-col overflow-visible')}>
-              {renderPanelContent()}
-            </SidebarContent>
-          </div>
+          {/* Ritn3D 2026-07-19: minimal-mode. Wide panel (SidebarToolbar
+              with symbols/outdoor-tools/templates, SidebarContent with
+              the Site tree / Add-building / Add-mezzanine) intentionally
+              hidden for first-story-only launch. Comes back in a later
+              version. Wall/door/window/etc. PROPERTY panels still open
+              on selection because they're floating overlays anchored to
+              top-right of the canvas (PanelWrapper: fixed top-20 right-4),
+              not inside this wide panel. */}
+          {/* Suppress unused-var warnings by referencing the props we
+              accept but don't render — the outer Editor still passes
+              settingsPanelProps / sitePanelProps / sidebarTop and we
+              want the API to stay stable when the wide panel returns. */}
+          {false && sidebarTop && (
+            <SidebarHeader>{sidebarTop}</SidebarHeader>
+          )}
+          {false && (
+            <SidebarContent>{renderPanelContent()}</SidebarContent>
+          )}
+          {false && <SidebarToolbar />}
         </div>
       </Sidebar>
       <EditorCommands />

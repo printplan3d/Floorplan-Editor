@@ -26,17 +26,30 @@ export function exportFloorPlanJSON(): object {
     for (const child of children) {
       if (child.type === 'wall') {
         const w = child as WallNode
+        // Ritn3D 2026-07-19: pre-flip X (and bulge sign) client-side to
+        // match the mobile Flutter editor's `maybeFlip(p) => [-p[0], p[1]]`.
+        // The pascal-editor stores planPoint = -svgClick (toSvgX = -value),
+        // so a wall drawn on-screen-right has stored X negative. The
+        // backend translator's [-x, -y] would then leave X negative in
+        // Blender -> viewer shows the wall on the LEFT -> left-right
+        // flipped for the user. Flipping X here (and the bulge sign to
+        // keep arcs curving the correct way after mirror) lines webapp's
+        // POST body up with mobile's, which the translator handles
+        // correctly. Bulge sign follows the same rule the mobile editor
+        // uses at [editor_scene.dart:250].
+        const flipX = ([x, y]: [number, number]): [number, number] => [-x, y]
+        const flipBulge = (b: number) => -b
         const wallExport = {
           id: w.id,
-          start: w.start,
-          end: w.end,
+          start: flipX(w.start as any),
+          end: flipX(w.end as any),
           thickness: w.thickness ?? 0.15,
           height: w.height ?? 2.5,
           type: w.frontSide === 'exterior' || w.backSide === 'exterior' ? 'exterior' : 'interior',
           // Ritn3D arc walls (DXF bulge: tan(arc_angle/4); 0 = straight).
           // Omitted from JSON when bulge is 0 so the Blender pipeline can
           // keep a simpler straight-wall code path for legacy plans.
-          ...(w.bulge && w.bulge !== 0 ? { bulge: w.bulge } : {}),
+          ...(w.bulge && w.bulge !== 0 ? { bulge: flipBulge(w.bulge) } : {}),
         }
         levelWalls.push(wallExport)
 

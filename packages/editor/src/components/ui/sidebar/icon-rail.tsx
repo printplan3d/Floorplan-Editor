@@ -11,6 +11,7 @@ import {
   TooltipTrigger,
 } from './../../../components/ui/primitives/tooltip'
 import { cn } from './../../../lib/utils'
+import useEditor, { type StructureTool } from './../../../store/use-editor'
 
 export type PanelId = 'site' | 'settings'
 
@@ -27,16 +28,51 @@ interface IconRailProps {
 // refactor.
 const panels: { id: PanelId; iconSrc: string; label: string }[] = []
 
+// Ritn3D 2026-07-19: minimal-mode tool rail. Wall / Arc Wall / Door /
+// Window. Room / outdoor surfaces / symbols / buildings / templates are
+// intentionally OFF for the first-story-only launch and will come back
+// in a later version. Icon path convention matches the existing horizontal
+// TOOLS row so no new asset copies are needed.
+const ArcWallIconNodeIR = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+    <path d="M4 20 Q 12 4 20 20" stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" fill="none"/>
+  </svg>
+)
+const MINIMAL_TOOLS: {
+  id: StructureTool
+  label: string
+  icon?: string
+  iconNode?: ReactNode
+}[] = [
+  { id: 'wall',     label: 'Wall',     icon: '/icons/wall.png' },
+  { id: 'arc-wall', label: 'Arc Wall', iconNode: ArcWallIconNodeIR },
+  { id: 'door',     label: 'Door',     icon: '/icons/door.png' },
+  { id: 'window',   label: 'Window',   icon: '/icons/window.png' },
+]
+
 export function IconRail({ activePanel, onPanelChange, appMenuButton, className }: IconRailProps) {
   const theme = useViewer((state) => state.theme)
   const setTheme = useViewer((state) => state.setTheme)
   const unit = useViewer((state) => state.unit)
   const setUnit = useViewer((state) => state.setUnit)
+  const mode = useEditor((s) => s.mode)
+  const tool = useEditor((s) => s.tool)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  const pickTool = (id: StructureTool) => {
+    // Match what the (now-hidden) horizontal tools row did: enter build
+    // mode on the structure/elements layer with the chosen tool.
+    useEditor.getState().setPhase('structure')
+    useEditor.getState().setStructureLayer('elements')
+    useEditor.getState().setCatalogCategory(null)
+    useEditor.getState().setMode('build')
+    useEditor.getState().setTool(id)
+  }
 
   return (
     <div
@@ -52,6 +88,41 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       {(appMenuButton || panels.length > 0) && (
         <div className="mb-1 h-px w-10 bg-hair" />
       )}
+
+      {/* Ritn3D 2026-07-19: minimal tools sit at the TOP of the rail so
+          they're always in the same spot regardless of viewport height.
+          Highlight when the user is currently drawing that tool. */}
+      {MINIMAL_TOOLS.map((t) => {
+        const isActive = mode === 'build' && tool === t.id
+        return (
+          <Tooltip key={t.id}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => pickTool(t.id)}
+                className={cn(
+                  'flex h-10 w-10 items-center justify-center rounded-md transition-all',
+                  isActive
+                    ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30'
+                    : 'text-ink/60 hover:bg-ink/[0.04] hover:text-ink',
+                )}
+              >
+                {t.icon ? (
+                  <img alt={t.label} src={t.icon}
+                       className={cn('h-5 w-5 object-contain transition-all',
+                                     !isActive && 'opacity-60 saturate-0')} />
+                ) : (
+                  <span className="block h-5 w-5">{t.iconNode}</span>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t.label}</TooltipContent>
+          </Tooltip>
+        )
+      })}
+
+      {/* Divider between tools and utility icons below */}
+      <div className="my-1 h-px w-10 bg-hair" />
 
       {panels.map((panel) => {
         const isActive = activePanel === panel.id
