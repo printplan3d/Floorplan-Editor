@@ -2716,29 +2716,105 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 }}
                 vectorEffect="non-scaling-stroke"
               />
-              <polygon
-                data-element="door"
-                fill={palette.doorFill}
-                points={points}
-                stroke={isSelected ? palette.selectedStroke : palette.doorStroke}
-                strokeOpacity={1}
-                strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
-              />
-              <line
-                stroke={isSelected ? palette.selectedStroke : palette.doorStroke}
-                strokeWidth={FLOORPLAN_OPENING_DETAIL_STROKE_WIDTH}
-                x1={hx}
-                x2={ox}
-                y1={hy}
-                y2={oy}
-              />
-              <path
-                d={`M ${ox} ${oy} A ${width} ${width} 0 0 ${sweepFlag} ${ox2} ${oy2}`}
-                fill="none"
-                stroke={isSelected ? palette.selectedStroke : palette.doorStroke}
-                strokeDasharray="0.1 0.1"
-                strokeWidth={FLOORPLAN_OPENING_DASHED_STROKE_WIDTH}
-              />
+              {/* Ritn3D 2026-07-19: differentiate door style on the 2D
+                  plan so users can see at a glance what they placed.
+                    - patio: two parallel sliding panels, NO swing arc,
+                      slide arrows along the wall.
+                    - glass: current leaf + swing arc but with translucent
+                      blue tint on the leaf polygon (matches 3D glass).
+                    - pedestrian / other: default leaf + swing arc. */}
+              {(() => {
+                const doorStyle = (opening as any).style ?? 'pedestrian'
+                const strokeColor = isSelected ? palette.selectedStroke : palette.doorStroke
+                if (doorStyle === 'patio') {
+                  // Two overlapping panels along the wall, offset in
+                  // perpendicular direction by ~30% of wall thickness.
+                  // Panel width = half the door width, positioned so each
+                  // panel occupies its half of the doorway.
+                  const halfW = width / 2
+                  const perpOffset = 0.06 // meters (~6 cm visual offset)
+                  const panelPoints = (
+                    startX: number, startY: number,
+                    lenAlong: number, sideMul: number,
+                  ) => {
+                    const ax = startX
+                    const ay = startY
+                    const bx = ax + nx * lenAlong
+                    const by = ay + ny * lenAlong
+                    const off = perpOffset * sideMul
+                    const wallThk = 0.15 // for visual width of panel
+                    const halfT = wallThk / 3
+                    return [
+                      [ax + px * (off - halfT), ay + py * (off - halfT)],
+                      [bx + px * (off - halfT), by + py * (off - halfT)],
+                      [bx + px * (off + halfT), by + py * (off + halfT)],
+                      [ax + px * (off + halfT), ay + py * (off + halfT)],
+                    ].map((p) => p.join(',')).join(' ')
+                  }
+                  // Left panel: from center-halfW to center, back-offset
+                  const leftPts = panelPoints(cx - nx * halfW, cy - ny * halfW, halfW, -1)
+                  // Right panel: from center to center+halfW, forward-offset
+                  const rightPts = panelPoints(cx, cy, halfW, +1)
+                  return (
+                    <>
+                      <polygon
+                        data-element="door"
+                        fill="rgba(140, 190, 220, 0.5)"
+                        points={leftPts}
+                        stroke={strokeColor}
+                        strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
+                      />
+                      <polygon
+                        data-element="door"
+                        fill="rgba(140, 190, 220, 0.5)"
+                        points={rightPts}
+                        stroke={strokeColor}
+                        strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
+                      />
+                      {/* Slide-arrow hint under the panels */}
+                      <line
+                        stroke={strokeColor}
+                        strokeOpacity={0.45}
+                        strokeWidth={FLOORPLAN_OPENING_DASHED_STROKE_WIDTH}
+                        strokeDasharray="0.05 0.05"
+                        x1={cx - nx * halfW * 0.9}
+                        y1={cy - ny * halfW * 0.9}
+                        x2={cx + nx * halfW * 0.9}
+                        y2={cy + ny * halfW * 0.9}
+                      />
+                    </>
+                  )
+                }
+                // pedestrian / glass share the same leaf + swing arc.
+                // Glass gets a blue-tinted fill so users can distinguish.
+                const leafFill = doorStyle === 'glass'
+                  ? 'rgba(140, 190, 220, 0.55)'
+                  : palette.doorFill
+                return (
+                  <>
+                    <polygon
+                      data-element="door"
+                      fill={leafFill}
+                      points={points}
+                      stroke={strokeColor}
+                      strokeOpacity={1}
+                      strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
+                    />
+                    <line
+                      stroke={strokeColor}
+                      strokeWidth={FLOORPLAN_OPENING_DETAIL_STROKE_WIDTH}
+                      x1={hx} x2={ox} y1={hy} y2={oy}
+                    />
+                    <path
+                      d={`M ${ox} ${oy} A ${width} ${width} 0 0 ${sweepFlag} ${ox2} ${oy2}`}
+                      fill="none"
+                      stroke={strokeColor}
+                      strokeDasharray="0.1 0.1"
+                      strokeWidth={FLOORPLAN_OPENING_DASHED_STROKE_WIDTH}
+                    />
+                  </>
+                )
+              })()}
             </g>
           )
         }

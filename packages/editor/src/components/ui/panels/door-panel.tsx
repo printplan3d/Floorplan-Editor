@@ -186,54 +186,11 @@ export function DoorPanel() {
         </div>
       </PanelSection>
 
-      {/* Ritn3D 2026-07-16 (Tier 2): expose the render toggles that were
-          already in DoorNode but had no UI. Handle side follows hinge by
-          default (see pipeline), user can override. Threshold on/off. */}
-      <PanelSection title="Handle & threshold">
-        <div className="flex flex-col gap-2 px-1 pb-1">
-          <div className="space-y-1">
-            <span className="font-mono text-[10px] text-ink/50 uppercase tracking-[0.06em]">
-              Handle
-            </span>
-            <SegmentedControl
-              onChange={(v) => handleUpdate({ handle: v === 'on' })}
-              options={[
-                { label: 'On', value: 'on' as const },
-                { label: 'Off', value: 'off' as const },
-              ]}
-              value={node.handle === false ? 'off' : 'on'}
-            />
-          </div>
-          {node.handle !== false && (
-            <div className="space-y-1">
-              <span className="font-mono text-[10px] text-ink/50 uppercase tracking-[0.06em]">
-                Handle side
-              </span>
-              <SegmentedControl
-                onChange={(v) => handleUpdate({ handleSide: v })}
-                options={[
-                  { label: 'Left', value: 'left' as const },
-                  { label: 'Right', value: 'right' as const },
-                ]}
-                value={node.handleSide ?? (node.hingesSide === 'left' ? 'right' : 'left')}
-              />
-            </div>
-          )}
-          <div className="space-y-1">
-            <span className="font-mono text-[10px] text-ink/50 uppercase tracking-[0.06em]">
-              Threshold
-            </span>
-            <SegmentedControl
-              onChange={(v) => handleUpdate({ threshold: v === 'on' })}
-              options={[
-                { label: 'On', value: 'on' as const },
-                { label: 'Off', value: 'off' as const },
-              ]}
-              value={node.threshold === false ? 'off' : 'on'}
-            />
-          </div>
-        </div>
-      </PanelSection>
+      {/* Ritn3D 2026-07-19: Handle + Threshold controls removed from the
+          panel per user request for the minimal launch. Schema still
+          carries the fields (defaults: handle=true, threshold=true) and
+          the Blender pipeline still renders both. Controls will be
+          reintroduced when door variety expands beyond normal/glass/patio. */}
 
       <PanelSection title="Actions">
         <ActionGroup>

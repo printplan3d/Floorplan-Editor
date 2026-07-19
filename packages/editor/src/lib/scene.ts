@@ -396,10 +396,16 @@ export function loadSceneFromLocalStorage(projectId?: string | null): SceneGraph
   try {
     const raw = localStorage.getItem(draftKey(projectId))
     if (raw) return JSON.parse(raw) as SceneGraph
-    // Fallback to the legacy single-slot key so a pre-refactor draft doesn't
-    // vanish. Once the user re-saves, the new per-project key takes over.
-    const legacy = localStorage.getItem(LEGACY_LOCAL_STORAGE_KEY)
-    return legacy ? (JSON.parse(legacy) as SceneGraph) : null
+    // Ritn3D 2026-07-19: only fall back to the LEGACY single-slot key
+    // when the caller has no projectId. Previously we fell back for
+    // ANY projectId -> every new draft loaded the last drawing as its
+    // starter scene (which read as "why is there a plan already?" on
+    // a fresh project). New projectIds get a clean canvas now.
+    if (!projectId || projectId.length === 0) {
+      const legacy = localStorage.getItem(LEGACY_LOCAL_STORAGE_KEY)
+      return legacy ? (JSON.parse(legacy) as SceneGraph) : null
+    }
+    return null
   } catch {
     return null
   }

@@ -325,7 +325,12 @@ function Sidebar({
           data-slot="sidebar-inner"
         >
           {children}
-          <SidebarResizer side={side} />
+          {/* Ritn3D 2026-07-19: SidebarResizer hidden in minimal mode.
+              The drag handle is a 2 px invisible strip at the right edge
+              that only showed on hover; it let users resize between
+              288-800 px, but the wide panel is off and there's nothing
+              to resize anymore. Uncomment when the site tree returns. */}
+          {/* <SidebarResizer side={side} /> */}
         </div>
       </div>
     </div>
