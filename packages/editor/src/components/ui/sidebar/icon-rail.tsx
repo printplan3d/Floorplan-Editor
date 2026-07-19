@@ -11,7 +11,23 @@ import {
   TooltipTrigger,
 } from './../../../components/ui/primitives/tooltip'
 import { cn } from './../../../lib/utils'
+import { useStore } from 'zustand'
 import useEditor, { type StructureTool } from './../../../store/use-editor'
+
+// Ritn3D 2026-07-19: undo/redo state from the temporal middleware
+// (zundo). useScene.temporal is a StoreApi, not a hook -- wrap it in
+// zustand's `useStore(...)` to subscribe reactively so the buttons
+// enable/disable in real time as the user makes changes.
+function useUndoRedo() {
+  const pastLen = useStore(useScene.temporal, (s: any) => s.pastStates.length)
+  const futureLen = useStore(useScene.temporal, (s: any) => s.futureStates.length)
+  return {
+    canUndo: pastLen > 0,
+    canRedo: futureLen > 0,
+    undo: () => useScene.temporal.getState().undo(),
+    redo: () => useScene.temporal.getState().redo(),
+  }
+}
 
 export type PanelId = 'site' | 'settings'
 
@@ -51,6 +67,35 @@ const MINIMAL_TOOLS: {
   { id: 'window',   label: 'Window',   icon: '/icons/window.png' },
 ]
 
+// Ritn3D 2026-07-19: Select-mode icon (arrow cursor). Distinct from
+// build-mode tools -- Select doesn't draw, it manipulates existing
+// elements. Icon: standard 8-pixel cursor arrow.
+const SelectIconNode = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <path d="M4 3 L4 17 L8 14 L11 20 L13 19 L10 13 L15 13 Z"
+          stroke="currentColor" strokeWidth="1.6"
+          strokeLinejoin="round" fill="currentColor" fillOpacity="0.15"/>
+  </svg>
+)
+const UndoIconNode = (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
+    <path d="M9 6 L4 11 L9 16" stroke="currentColor" strokeWidth="1.8"
+          strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M4 11 H14 A5 5 0 0 1 19 16 V19"
+          stroke="currentColor" strokeWidth="1.8"
+          strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+  </svg>
+)
+const RedoIconNode = (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
+    <path d="M15 6 L20 11 L15 16" stroke="currentColor" strokeWidth="1.8"
+          strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M20 11 H10 A5 5 0 0 0 5 16 V19"
+          stroke="currentColor" strokeWidth="1.8"
+          strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+  </svg>
+)
+
 export function IconRail({ activePanel, onPanelChange, appMenuButton, className }: IconRailProps) {
   const theme = useViewer((state) => state.theme)
   const setTheme = useViewer((state) => state.setTheme)
@@ -58,6 +103,8 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
   const setUnit = useViewer((state) => state.setUnit)
   const mode = useEditor((s) => s.mode)
   const tool = useEditor((s) => s.tool)
+  const setMode = useEditor((s) => s.setMode)
+  const { canUndo, canRedo, undo, redo } = useUndoRedo()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -74,10 +121,51 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
     useEditor.getState().setTool(id)
   }
 
+  const pickSelect = () => {
+    useEditor.getState().setMode('select')
+  }
+
+  // Small helper for consistent styling of the icon+label buttons.
+  const RailButton = ({
+    isActive, onClick, disabled, label, iconNode, imgSrc,
+  }: {
+    isActive: boolean
+    onClick: () => void
+    disabled?: boolean
+    label: string
+    iconNode?: ReactNode
+    imgSrc?: string
+  }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'flex w-full flex-col items-center gap-0.5 px-1 py-1.5 transition-all',
+        disabled
+          ? 'opacity-35 cursor-not-allowed'
+          : isActive
+            ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)]'
+            : 'text-ink/70 hover:bg-ink/[0.04] hover:text-ink',
+      )}
+    >
+      {imgSrc ? (
+        <img alt={label} src={imgSrc}
+             className={cn('h-5 w-5 object-contain',
+                           !isActive && !disabled && 'opacity-60 saturate-0')} />
+      ) : (
+        <span className="flex h-5 w-5 items-center justify-center">{iconNode}</span>
+      )}
+      <span className="font-medium text-[9.5px] leading-tight">{label}</span>
+    </button>
+  )
+
   return (
     <div
       className={cn(
-        'flex h-full w-14 flex-col items-center gap-1.5 border-r border-hair bg-paper py-2',
+        // w-16 (64 px) gives room for the 5-char labels ("Arc W…" gets
+        // truncated at 5 chars, "Wall"/"Door"/"Win" fit comfortably).
+        'flex h-full w-16 flex-col items-stretch border-r border-hair bg-paper py-2',
         className,
       )}
     >
@@ -86,43 +174,49 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
 
       {/* Divider — only when there's something above it worth dividing from */}
       {(appMenuButton || panels.length > 0) && (
-        <div className="mb-1 h-px w-10 bg-hair" />
+        <div className="mb-1 h-px w-full bg-hair" />
       )}
 
-      {/* Ritn3D 2026-07-19: minimal tools sit at the TOP of the rail so
-          they're always in the same spot regardless of viewport height.
-          Highlight when the user is currently drawing that tool. */}
-      {MINIMAL_TOOLS.map((t) => {
-        const isActive = mode === 'build' && tool === t.id
-        return (
-          <Tooltip key={t.id}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => pickTool(t.id)}
-                className={cn(
-                  'flex h-10 w-10 items-center justify-center rounded-md transition-all',
-                  isActive
-                    ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30'
-                    : 'text-ink/60 hover:bg-ink/[0.04] hover:text-ink',
-                )}
-              >
-                {t.icon ? (
-                  <img alt={t.label} src={t.icon}
-                       className={cn('h-5 w-5 object-contain transition-all',
-                                     !isActive && 'opacity-60 saturate-0')} />
-                ) : (
-                  <span className="block h-5 w-5">{t.iconNode}</span>
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">{t.label}</TooltipContent>
-          </Tooltip>
-        )
-      })}
+      {/* Select tool -- always at the very top so it's the default
+          "back to safe mode" shortcut after any build action. */}
+      <RailButton
+        isActive={mode === 'select'}
+        onClick={pickSelect}
+        label="Select"
+        iconNode={SelectIconNode}
+      />
+
+      {/* Ritn3D 2026-07-19: minimal build tools with labels under each. */}
+      {MINIMAL_TOOLS.map((t) => (
+        <RailButton
+          key={t.id}
+          isActive={mode === 'build' && tool === t.id}
+          onClick={() => pickTool(t.id)}
+          label={t.label}
+          imgSrc={t.icon}
+          iconNode={t.iconNode}
+        />
+      ))}
+
+      {/* Undo / Redo — grouped just below the build tools */}
+      <div className="my-1 h-px w-full bg-hair" />
+      <RailButton
+        isActive={false}
+        onClick={undo}
+        disabled={!canUndo}
+        label="Undo"
+        iconNode={UndoIconNode}
+      />
+      <RailButton
+        isActive={false}
+        onClick={redo}
+        disabled={!canRedo}
+        label="Redo"
+        iconNode={RedoIconNode}
+      />
 
       {/* Divider between tools and utility icons below */}
-      <div className="my-1 h-px w-10 bg-hair" />
+      <div className="my-1 h-px w-full bg-hair" />
 
       {panels.map((panel) => {
         const isActive = activePanel === panel.id
@@ -155,43 +249,29 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Reset View */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            className="flex h-10 w-10 items-center justify-center rounded-md border border-hair bg-paper text-ink/60 transition-all hover:bg-ink/[0.04] hover:text-ink"
-            onClick={() => emitter.emit('floorplan:reset-view' as any)}
-            type="button"
-          >
-            <ResetViewIcon size={15} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">Reset View</TooltipContent>
-      </Tooltip>
+      {/* Utility icons at bottom -- Reset View, Clear, Units, Theme. */}
+      <RailButton
+        isActive={false}
+        onClick={() => emitter.emit('floorplan:reset-view' as any)}
+        label="Fit"
+        iconNode={<ResetViewIcon size={16} />}
+      />
+      <RailButton
+        isActive={false}
+        onClick={() => emitter.emit('floorplan:clear-canvas' as any)}
+        label="Clear"
+        iconNode={<TrashIcon size={15} />}
+      />
 
-      {/* Clear Canvas */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            className="flex h-10 w-10 items-center justify-center rounded-md border border-hair bg-paper text-ink/60 transition-all hover:bg-red-50 hover:text-red-700 hover:border-red-200"
-            onClick={() => emitter.emit('floorplan:clear-canvas' as any)}
-            type="button"
-          >
-            <TrashIcon size={15} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">Clear Canvas</TooltipContent>
-      </Tooltip>
-
-      {/* Unit Toggle — bigger segmented button */}
+      {/* Unit Toggle — segmented pair labelled m / ft */}
       {mounted && (
-        <div className="flex w-10 flex-col rounded-md border border-hair overflow-hidden">
+        <div className="mx-2 my-1 flex flex-col rounded-md border border-hair overflow-hidden">
           <button
             className={cn(
-              'flex h-8 items-center justify-center font-semibold text-xs transition-all',
+              'flex h-7 items-center justify-center font-semibold text-[11px] transition-all',
               unit === 'metric'
                 ? 'bg-ink text-paper'
-                : 'text-ink/50 hover:text-ink hover:bg-ink/[0.04]',
+                : 'text-ink/60 hover:text-ink hover:bg-ink/[0.04]',
             )}
             onClick={() => setUnit('metric')}
             type="button"
@@ -201,10 +281,10 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
           <div className="h-px bg-hair" />
           <button
             className={cn(
-              'flex h-8 items-center justify-center font-semibold text-xs transition-all',
+              'flex h-7 items-center justify-center font-semibold text-[11px] transition-all',
               unit === 'imperial'
                 ? 'bg-ink text-paper'
-                : 'text-ink/50 hover:text-ink hover:bg-ink/[0.04]',
+                : 'text-ink/60 hover:text-ink hover:bg-ink/[0.04]',
             )}
             onClick={() => setUnit('imperial')}
             type="button"
@@ -216,25 +296,21 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
 
       {/* Theme Toggle */}
       {mounted && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              className="mb-2 mt-1.5 flex h-10 w-10 items-center justify-center rounded-md border border-hair bg-paper text-ink/65 transition-all hover:bg-ink/[0.04] hover:text-ink"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              type="button"
+        <RailButton
+          isActive={false}
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          label={theme === 'dark' ? 'Light' : 'Dark'}
+          iconNode={
+            <motion.div
+              animate={{ rotate: 0, opacity: 1 }}
+              initial={{ rotate: -90, opacity: 0 }}
+              key={theme}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
             >
-              <motion.div
-                animate={{ rotate: 0, opacity: 1 }}
-                initial={{ rotate: -90, opacity: 0 }}
-                key={theme}
-                transition={{ duration: 0.25, ease: 'easeOut' }}
-              >
-                {theme === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
-              </motion.div>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">Toggle theme</TooltipContent>
-        </Tooltip>
+              {theme === 'dark' ? <SunIcon size={15} /> : <MoonIcon size={15} />}
+            </motion.div>
+          }
+        />
       )}
     </div>
   )

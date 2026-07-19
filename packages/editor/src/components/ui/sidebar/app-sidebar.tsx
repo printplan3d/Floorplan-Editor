@@ -564,11 +564,13 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const [activePanel, setActivePanel] = useState<PanelId>('site')
 
+  // Ritn3D 2026-07-19: minimal-mode. Shrink the sidebar to just the
+  // IconRail width. The persist layer may have cached the old 288/432
+  // value from before the min-clamp change; force 72 px on mount so
+  // returning users don't see the old wide empty strip.
   useEffect(() => {
     const store = useSidebarStore.getState()
-    if (store.width <= 288) {
-      store.setWidth(432)
-    }
+    if (store.width !== 72) store.setWidth(72)
   }, [])
 
   const renderPanelContent = () => {

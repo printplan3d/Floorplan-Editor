@@ -40,11 +40,17 @@ type SidebarStore = {
   setIsDragging: (isDragging: boolean) => void
 }
 
+// Ritn3D 2026-07-19: min clamp lowered 288 -> 56 for the minimal-mode
+// icon-rail-only layout. Previously the min was 288 to accommodate the
+// wide site tree + toolbar panel; those are hidden in first-story-only
+// launch, so the sidebar's actual visible content is just a 72 px rail.
+// Max is unchanged so the wide panel comes back to the same size when
+// the site tree is re-enabled.
 export const useSidebarStore = create<SidebarStore>()(
   persist(
     (set) => ({
-      width: 288, // 18rem = 288px
-      setWidth: (width) => set({ width: Math.max(288, Math.min(width, 800)) }),
+      width: 72, // matches IconRail's w-16 + 8 px total padding
+      setWidth: (width) => set({ width: Math.max(56, Math.min(width, 800)) }),
       isDragging: false,
       setIsDragging: (isDragging) => set({ isDragging }),
     }),
