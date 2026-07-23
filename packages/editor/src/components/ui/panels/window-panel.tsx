@@ -76,8 +76,9 @@ export function WindowPanel() {
     >
       {wallLength > 0 && (
         <PanelSection title="Position">
+          {/* Ritn3D 2026-07-24: single slider (iOS parity). */}
           <SliderControl
-            label="From start"
+            label="Position on wall"
             max={Math.max(0, wallLength - node.width / 2)}
             min={node.width / 2}
             onChange={(v) => {
@@ -88,20 +89,6 @@ export function WindowPanel() {
             step={0.01}
             unit="m"
             value={Math.round(node.position[0] * 100) / 100}
-          />
-          <SliderControl
-            label="From end"
-            max={Math.max(0, wallLength - node.width / 2)}
-            min={node.width / 2}
-            onChange={(v) => {
-              const posFromStart = wallLength - v
-              const clamped = Math.max(node.width / 2, Math.min(posFromStart, wallLength - node.width / 2))
-              handleUpdate({ position: [clamped, node.position[1], node.position[2]] })
-            }}
-            precision={2}
-            step={0.01}
-            unit="m"
-            value={Math.round((wallLength - node.position[0]) * 100) / 100}
           />
         </PanelSection>
       )}
@@ -194,83 +181,11 @@ export function WindowPanel() {
         />
       </PanelSection>
 
-      {/* Ritn3D 2026-07-16 (Tier 2): expose mullion + frame + sill
-          controls that already existed in WindowNode but were unreachable
-          from the UI. Blender pipeline now honours all of these. */}
-      <PanelSection title="Frame & mullions">
-        <SliderControl
-          label="Frame thickness"
-          max={0.15}
-          min={0.02}
-          onChange={(v) => handleUpdate({ frameThickness: v })}
-          precision={2}
-          step={0.005}
-          unit="m"
-          value={Math.round((node.frameThickness ?? 0.05) * 1000) / 1000}
-        />
-        <SliderControl
-          label="Column mullion"
-          max={0.10}
-          min={0.01}
-          onChange={(v) => handleUpdate({ columnDividerThickness: v })}
-          precision={2}
-          step={0.005}
-          unit="m"
-          value={Math.round((node.columnDividerThickness ?? 0.03) * 1000) / 1000}
-        />
-        <SliderControl
-          label="Row mullion"
-          max={0.10}
-          min={0.01}
-          onChange={(v) => handleUpdate({ rowDividerThickness: v })}
-          precision={2}
-          step={0.005}
-          unit="m"
-          value={Math.round((node.rowDividerThickness ?? 0.03) * 1000) / 1000}
-        />
-      </PanelSection>
-
-      <PanelSection title="Sill">
-        <div className="flex flex-col gap-2 px-1 pb-1">
-          <div className="space-y-1">
-            <span className="font-mono text-[10px] text-ink/50 uppercase tracking-[0.06em]">
-              Show sill
-            </span>
-            <SegmentedControl
-              onChange={(v) => handleUpdate({ sill: v === 'on' })}
-              options={[
-                { label: 'On', value: 'on' as const },
-                { label: 'Off', value: 'off' as const },
-              ]}
-              value={node.sill === false ? 'off' : 'on'}
-            />
-          </div>
-          {node.sill !== false && (
-            <>
-              <SliderControl
-                label="Sill depth"
-                max={0.25}
-                min={0.02}
-                onChange={(v) => handleUpdate({ sillDepth: v })}
-                precision={2}
-                step={0.005}
-                unit="m"
-                value={Math.round((node.sillDepth ?? 0.08) * 1000) / 1000}
-              />
-              <SliderControl
-                label="Sill thickness"
-                max={0.10}
-                min={0.01}
-                onChange={(v) => handleUpdate({ sillThickness: v })}
-                precision={2}
-                step={0.005}
-                unit="m"
-                value={Math.round((node.sillThickness ?? 0.03) * 1000) / 1000}
-              />
-            </>
-          )}
-        </div>
-      </PanelSection>
+      {/* Ritn3D 2026-07-24: Frame/mullion/sill sub-controls removed per
+          user request -- they're rarely used and clutter the panel. The
+          underlying WindowNode fields still exist (defaults applied by
+          the pipeline), we just no longer surface them in UI. Restore
+          the "Frame & mullions" + "Sill" PanelSections here if reintroducing. */}
 
       <PanelSection title="Actions">
         <ActionGroup>

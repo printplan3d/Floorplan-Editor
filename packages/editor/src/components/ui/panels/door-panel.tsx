@@ -71,8 +71,11 @@ export function DoorPanel() {
     >
       {wallLength > 0 && (
         <PanelSection title="Position">
+          {/* Ritn3D 2026-07-24: single "Position on wall" slider (iOS
+              parity). Prior double slider (From start + From end) was
+              redundant and confusing -- one axis is enough. */}
           <SliderControl
-            label="From start"
+            label="Position on wall"
             max={Math.max(0, wallLength - node.width / 2)}
             min={node.width / 2}
             onChange={(v) => {
@@ -83,20 +86,6 @@ export function DoorPanel() {
             step={0.01}
             unit="m"
             value={Math.round(node.position[0] * 100) / 100}
-          />
-          <SliderControl
-            label="From end"
-            max={Math.max(0, wallLength - node.width / 2)}
-            min={node.width / 2}
-            onChange={(v) => {
-              const posFromStart = wallLength - v
-              const clamped = Math.max(node.width / 2, Math.min(posFromStart, wallLength - node.width / 2))
-              handleUpdate({ position: [clamped, node.position[1], node.position[2]] })
-            }}
-            precision={2}
-            step={0.01}
-            unit="m"
-            value={Math.round((wallLength - node.position[0]) * 100) / 100}
           />
         </PanelSection>
       )}
