@@ -86,6 +86,25 @@ const UndoIconNode = (
           strokeLinecap="round" strokeLinejoin="round" fill="none"/>
   </svg>
 )
+
+// Ritn3D 2026-07-24 iOS parity: Calibrate + Trace as first-class rail
+// tools (iOS `PlanTool.swift` surfaces them in ToolPalette). Calibrate
+// fires the existing floorplan:calibrate-scale event -- user then
+// clicks two known-distance points on the canvas to set scale. Trace
+// opens the site panel where the guide/reference upload UI lives.
+const CalibrateIconNode = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <path d="M3 12 H21" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M6 9 V15 M12 9 V15 M18 9 V15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M4 6 L5 5 L5 6 M20 6 L19 5 L19 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+)
+const TraceIconNode = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <rect x="4" y="4" width="16" height="16" rx="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeDasharray="2.5 2"/>
+    <path d="M8 10 L11 15 L14 12 L16 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+  </svg>
+)
 const RedoIconNode = (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
     <path d="M15 6 L20 11 L15 16" stroke="currentColor" strokeWidth="1.8"
@@ -197,6 +216,20 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
           iconNode={t.iconNode}
         />
       ))}
+
+      {/* Ritn3D 2026-07-24 iOS parity: Calibrate + Trace rail tools. */}
+      <RailButton
+        isActive={false}
+        onClick={() => emitter.emit('floorplan:calibrate-scale' as any)}
+        label="Calibrate"
+        iconNode={CalibrateIconNode}
+      />
+      <RailButton
+        isActive={false}
+        onClick={() => onPanelChange('site')}
+        label="Trace"
+        iconNode={TraceIconNode}
+      />
 
       {/* Undo / Redo — grouped just below the build tools */}
       <div className="my-1 h-px w-full bg-hair" />

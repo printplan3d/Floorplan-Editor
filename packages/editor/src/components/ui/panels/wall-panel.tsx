@@ -3,6 +3,7 @@
 import { type AnyNode, type AnyNodeId, useScene, type WallNode } from '@ritn3d/core'
 import { useViewer } from '@ritn3d/viewer'
 import { useCallback } from 'react'
+import { cn } from '../../../lib/utils'
 import { PanelSection } from '../controls/panel-section'
 import { SliderControl } from '../controls/slider-control'
 import { PanelWrapper } from './panel-wrapper'
@@ -51,6 +52,27 @@ export function WallPanel() {
   const handleClose = useCallback(() => {
     setSelection({ selectedIds: [] })
   }, [setSelection])
+
+  const handleDelete = useCallback(() => {
+    if (!selectedId) return
+    useScene.getState().deleteNode(selectedId as AnyNodeId)
+    setSelection({ selectedIds: [] })
+  }, [selectedId, setSelection])
+
+  // Ritn3D 2026-07-24 iOS parity: interior/exterior toggle. The pipeline
+  // decides `is_exterior` from the wall's backSide === 'exterior' (see
+  // envelope classifier). We flip both sides together so the toggle is
+  // a simple boolean the user understands.
+  const isExterior = node?.backSide === 'exterior'
+  const setWallType = useCallback(
+    (exterior: boolean) => {
+      handleUpdate({
+        frontSide: 'interior',
+        backSide: exterior ? 'exterior' : 'interior',
+      })
+    },
+    [handleUpdate],
+  )
 
   if (!node || node.type !== 'wall' || selectedIds.length !== 1) return null
 
@@ -164,6 +186,45 @@ export function WallPanel() {
           unit="m"
           value={Math.round(thickness * 1000) / 1000}
         />
+      </PanelSection>
+
+      <PanelSection title="Type">
+        <div className="flex gap-1 px-1">
+          <button
+            type="button"
+            onClick={() => setWallType(false)}
+            className={cn(
+              'flex-1 rounded-md border px-3 py-1.5 text-[12px] font-medium transition-colors',
+              !isExterior
+                ? 'border-ink bg-ink text-paper'
+                : 'border-hair text-ink/60 hover:bg-ink/[0.04] hover:text-ink',
+            )}
+          >
+            Interior
+          </button>
+          <button
+            type="button"
+            onClick={() => setWallType(true)}
+            className={cn(
+              'flex-1 rounded-md border px-3 py-1.5 text-[12px] font-medium transition-colors',
+              isExterior
+                ? 'border-ink bg-ink text-paper'
+                : 'border-hair text-ink/60 hover:bg-ink/[0.04] hover:text-ink',
+            )}
+          >
+            Exterior
+          </button>
+        </div>
+      </PanelSection>
+
+      <PanelSection title="">
+        <button
+          type="button"
+          onClick={handleDelete}
+          className="w-full rounded-md border border-red-300/60 bg-red-50/40 px-3 py-1.5 text-[12px] font-medium text-red-700 transition-colors hover:bg-red-100/60"
+        >
+          Delete wall
+        </button>
       </PanelSection>
     </PanelWrapper>
   )
