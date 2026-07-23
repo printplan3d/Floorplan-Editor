@@ -30,7 +30,7 @@ export { SiteNode } from './nodes/site'
 export { SlabNode, SlabSurfaceType } from './nodes/slab'
 export { WallNode } from './nodes/wall'
 export { WindowNode } from './nodes/window'
-export { ZoneNode } from './nodes/zone'
+export { ZoneNode, RoomType } from './nodes/zone'
 export type { AnyNodeId, AnyNodeType } from './types'
 // Union types
 export { AnyNode } from './types'
