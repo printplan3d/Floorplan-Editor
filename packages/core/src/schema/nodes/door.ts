@@ -26,9 +26,14 @@ export type DoorSegment = z.infer<typeof DoorSegment>
 // render actual door leaves instead of just doorway frames.
 //   glass  = single hinged glass leaf in a frame (front door / office door)
 //   patio  = double sliding-glass door (living-room-to-yard style)
+//
+// Ritn3D 2026-07-24 iOS parity: 'double' added. Two hinged leaves that
+// meet at the middle of the opening. Common on wide interior doors
+// (living-to-dining transition) and formal entryways. Same panel/frame
+// style as 'pedestrian' but split into two mirrored leaves.
 // Existing scenes parse with style='pedestrian' (no migration).
 export const DoorStyle = z.enum([
-  'pedestrian', 'garage', 'sliding', 'glass', 'patio',
+  'pedestrian', 'garage', 'sliding', 'glass', 'patio', 'double',
 ])
 export type DoorStyle = z.infer<typeof DoorStyle>
 

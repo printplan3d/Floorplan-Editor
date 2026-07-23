@@ -110,6 +110,7 @@ export function DoorPanel() {
           onChange={(v) => handleUpdate({ style: v })}
           options={[
             { label: 'Normal', value: 'pedestrian' as const },
+            { label: 'Double', value: 'double' as const },
             { label: 'Glass', value: 'glass' as const },
             { label: 'Patio', value: 'patio' as const },
             { label: 'Sliding', value: 'sliding' as const },
