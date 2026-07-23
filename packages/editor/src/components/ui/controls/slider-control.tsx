@@ -4,6 +4,63 @@ import { useScene } from '@ritn3d/core'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '../../../lib/utils'
 
+// Ritn3D 2026-07-24: paper-themed range slider styles. Self-contained so
+// the component works whether embedded in the standalone editor app or
+// mounted inside the webapp. Injected once at module load; safe if the
+// module is evaluated multiple times because we key by an id.
+const SLIDER_STYLE_ID = 'ritn3d-slider-styles'
+if (typeof document !== 'undefined' && !document.getElementById(SLIDER_STYLE_ID)) {
+  const style = document.createElement('style')
+  style.id = SLIDER_STYLE_ID
+  style.textContent = `
+    .ritn3d-slider {
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent;
+      height: 14px;
+    }
+    .ritn3d-slider:focus { outline: none; }
+    .ritn3d-slider::-webkit-slider-runnable-track {
+      height: 2px;
+      background: rgb(from var(--color-ink, #171512) r g b / 0.15);
+      border-radius: 999px;
+    }
+    .ritn3d-slider::-moz-range-track {
+      height: 2px;
+      background: rgb(from var(--color-ink, #171512) r g b / 0.15);
+      border-radius: 999px;
+    }
+    .ritn3d-slider::-webkit-slider-thumb {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 12px; height: 12px;
+      background: var(--color-ink, #171512);
+      border-radius: 999px;
+      margin-top: -5px;
+      cursor: grab;
+      box-shadow: 0 0 0 3px rgb(from var(--color-paper, #f7f5f0) r g b / 1);
+      transition: transform 120ms ease;
+    }
+    .ritn3d-slider::-moz-range-thumb {
+      width: 12px; height: 12px;
+      background: var(--color-ink, #171512);
+      border: none;
+      border-radius: 999px;
+      cursor: grab;
+      box-shadow: 0 0 0 3px rgb(from var(--color-paper, #f7f5f0) r g b / 1);
+      transition: transform 120ms ease;
+    }
+    .ritn3d-slider:hover::-webkit-slider-thumb { transform: scale(1.15); }
+    .ritn3d-slider:hover::-moz-range-thumb { transform: scale(1.15); }
+    .ritn3d-slider:active::-webkit-slider-thumb { cursor: grabbing; }
+    .ritn3d-slider:active::-moz-range-thumb { cursor: grabbing; }
+    .ritn3d-slider:disabled { opacity: 0.5; }
+    .ritn3d-slider:disabled::-webkit-slider-thumb { cursor: not-allowed; }
+    .ritn3d-slider:disabled::-moz-range-thumb { cursor: not-allowed; }
+  `
+  document.head.appendChild(style)
+}
+
 interface SliderControlProps {
   label: React.ReactNode
   value: number
@@ -169,6 +226,41 @@ export function SliderControl({
     [submitValue, value, precision, step, clamp, onChange],
   )
 
+  // Ritn3D 2026-07-24: added a real <input type=range> track+thumb between
+  // the label grip and the value. When min/max are both finite the range
+  // is rendered and takes the horizontal space; otherwise falls back to
+  // a spacer (preserving the old drag-scrub-only layout for numeric
+  // fields with no bounds e.g. a stray Position field with no wall parent).
+  const hasBounds = Number.isFinite(min) && Number.isFinite(max)
+
+  const handleRangeInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newValue = clamp(Number.parseFloat(e.target.value))
+      const final = Number.parseFloat(newValue.toFixed(precision))
+      if (final !== valueRef.current) onChange(final)
+    },
+    [clamp, onChange, precision],
+  )
+  const handleRangeDown = useCallback(() => {
+    useScene.temporal.getState().pause()
+    dragRef.current = { startX: 0, startValue: valueRef.current }
+    setIsDragging(true)
+  }, [])
+  const handleRangeUp = useCallback(() => {
+    if (!dragRef.current) return
+    const { startValue } = dragRef.current
+    const finalVal = valueRef.current
+    dragRef.current = null
+    setIsDragging(false)
+    if (startValue !== finalVal) {
+      onChange(startValue)
+      useScene.temporal.getState().resume()
+      onChange(finalVal)
+    } else {
+      useScene.temporal.getState().resume()
+    }
+  }, [onChange])
+
   // Ritn3D 2026-06-18: paper-themed slider control. Hover bg is hair-tinted
   // (not white/5), label and value use ink with mono numerics for tabular
   // alignment. Same drag / wheel / arrow / click-to-edit mechanics.
@@ -205,7 +297,25 @@ export function SliderControl({
         <span className="font-medium">{label}</span>
       </div>
 
-      <div className="flex-1" />
+      {hasBounds ? (
+        <input
+          type="range"
+          className={cn(
+            'ritn3d-slider mx-2 flex-1 cursor-pointer',
+            isEditing && 'pointer-events-none opacity-50',
+          )}
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={handleRangeInput}
+          onPointerDown={handleRangeDown}
+          onPointerUp={handleRangeUp}
+          disabled={isEditing}
+        />
+      ) : (
+        <div className="flex-1" />
+      )}
 
       <div className="flex items-center text-[12px]">
         {isEditing ? (
