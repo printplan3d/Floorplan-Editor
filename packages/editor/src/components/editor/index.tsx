@@ -20,6 +20,7 @@ import { initSFXBus } from '../../lib/sfx-bus'
 import useEditor from '../../store/use-editor'
 import { CeilingSystem } from '../systems/ceiling/ceiling-system'
 import { RoofEditSystem } from '../systems/roof/roof-edit-system'
+import { AutoRoomDetector } from '../systems/zone/auto-room-detector'
 import { ZoneLabelEditorSystem } from '../systems/zone/zone-label-editor-system'
 import { ZoneSystem } from '../systems/zone/zone-system'
 import { ToolManager } from '../tools/tool-manager'
@@ -498,6 +499,7 @@ export default function Editor({
             </div>
           )}
           {!(isPreviewMode || isLoading) && needs3D && <ZoneLabelEditorSystem />}
+          {!(isPreviewMode || isLoading) && <AutoRoomDetector />}
         </ErrorBoundary>
       </div>
     </PresetsProvider>
