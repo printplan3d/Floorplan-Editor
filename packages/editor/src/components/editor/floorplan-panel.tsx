@@ -9244,6 +9244,77 @@ export function FloorplanPanel() {
               )
             })()}
 
+            {/* Ritn3D 2026-07-24 Batch 7: Figma-style alignment guides
+                during wall endpoint drag. Compares the moving endpoint
+                against every other wall endpoint on the level; if the X or
+                Y coordinate matches within ALIGN_TOL, draws a dashed guide
+                line spanning the visible plan area plus a marker at the
+                aligned endpoint. Purely visual -- doesn't affect the snap
+                logic (which is handled by snapWallDraftPoint elsewhere). */}
+            {wallEndpointDraft && (() => {
+              const ALIGN_TOL = 0.05 // 5cm
+              const draft = wallEndpointDraft
+              const moving: [number, number] = draft.endpoint === 'start'
+                ? [draft.start[0], draft.start[1]]
+                : [draft.end[0], draft.end[1]]
+              const otherEndpoints: [number, number][] = []
+              for (const w of walls) {
+                if (w.id === draft.wallId) continue
+                otherEndpoints.push([w.start[0], w.start[1]])
+                otherEndpoints.push([w.end[0], w.end[1]])
+              }
+              const xHits = otherEndpoints.filter((p) => Math.abs(p[0] - moving[0]) < ALIGN_TOL)
+              const yHits = otherEndpoints.filter((p) => Math.abs(p[1] - moving[1]) < ALIGN_TOL)
+              if (xHits.length === 0 && yHits.length === 0) return null
+              const guides: React.ReactElement[] = []
+              const mSvg = toSvgPoint({ x: moving[0], y: moving[1] })
+              // Vertical guide (X aligned) -- draw across the visible plan on
+              // that x, plus dot at each aligned endpoint.
+              if (xHits.length > 0) {
+                guides.push(
+                  <line
+                    key="align-x-line"
+                    x1={mSvg.x} x2={mSvg.x}
+                    y1={viewBox.minY} y2={viewBox.minY + viewBox.height}
+                    stroke="#ec4899" strokeWidth="1" strokeDasharray="6 4"
+                    strokeLinecap="round" vectorEffect="non-scaling-stroke"
+                    pointerEvents="none"
+                  />,
+                )
+                for (const p of xHits.slice(0, 5)) {
+                  const s = toSvgPoint({ x: p[0], y: p[1] })
+                  guides.push(
+                    <circle key={`align-x-dot-${p[0]}-${p[1]}`}
+                      cx={s.x} cy={s.y} r="0.10"
+                      fill="#ec4899" stroke="#fff" strokeWidth="0.03"
+                      vectorEffect="non-scaling-stroke" pointerEvents="none" />,
+                  )
+                }
+              }
+              if (yHits.length > 0) {
+                guides.push(
+                  <line
+                    key="align-y-line"
+                    x1={viewBox.minX} x2={viewBox.minX + viewBox.width}
+                    y1={mSvg.y} y2={mSvg.y}
+                    stroke="#ec4899" strokeWidth="1" strokeDasharray="6 4"
+                    strokeLinecap="round" vectorEffect="non-scaling-stroke"
+                    pointerEvents="none"
+                  />,
+                )
+                for (const p of yHits.slice(0, 5)) {
+                  const s = toSvgPoint({ x: p[0], y: p[1] })
+                  guides.push(
+                    <circle key={`align-y-dot-${p[0]}-${p[1]}`}
+                      cx={s.x} cy={s.y} r="0.10"
+                      fill="#ec4899" stroke="#fff" strokeWidth="0.03"
+                      vectorEffect="non-scaling-stroke" pointerEvents="none" />,
+                  )
+                }
+              }
+              return <g key="alignment-guides">{guides}</g>
+            })()}
+
             {/* Scale-calibration overlay: dots at P1/P2 + line between them.
                 Drawn last so it's on top of everything. */}
             {calibratingGuideId && calibrationP1 && (() => {
