@@ -1,8 +1,17 @@
 'use client'
 
 import { useScene } from '@ritn3d/core'
+import { useViewer } from '@ritn3d/viewer'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '../../../lib/utils'
+
+// Ritn3D 2026-07-24: metric <-> imperial conversion. The scene ALWAYS
+// stores metres internally (source of truth). SliderControl converts
+// on display and input when useViewer.unit === 'imperial' and the caller
+// passed unit='m' (i.e. the value is a linear metre quantity). Non-linear
+// units (deg, cm, %) pass through unchanged.
+const M_TO_FT = 3.280839895
+const FT_TO_M = 1 / M_TO_FT
 
 // Ritn3D 2026-07-24: paper-themed range slider styles. Self-contained so
 // the component works whether embedded in the standalone editor app or
@@ -75,15 +84,32 @@ interface SliderControlProps {
 
 export function SliderControl({
   label,
-  value,
-  onChange,
-  min = Number.NEGATIVE_INFINITY,
-  max = Number.POSITIVE_INFINITY,
-  precision = 0,
-  step = 1,
+  value: valueM,
+  onChange: onChangeM,
+  min: minM = Number.NEGATIVE_INFINITY,
+  max: maxM = Number.POSITIVE_INFINITY,
+  precision: precisionIn = 0,
+  step: stepIn = 1,
   className,
-  unit = '',
+  unit: unitIn = '',
 }: SliderControlProps) {
+  // Ritn3D 2026-07-24: transparent m<->ft conversion. The scene stores
+  // and passes metres; if the viewer is in imperial mode and the unit
+  // prop is a linear metre unit, we display feet, bump precision to
+  // keep the ft numbers meaningful, and convert user input back to
+  // metres before firing onChange.
+  const globalUnit = useViewer((s) => s.unit)
+  const isImperialLinear = globalUnit === 'imperial' && unitIn === 'm'
+  const value = isImperialLinear ? valueM * M_TO_FT : valueM
+  const min = isImperialLinear ? minM * M_TO_FT : minM
+  const max = isImperialLinear ? maxM * M_TO_FT : maxM
+  const step = isImperialLinear ? Math.max(stepIn * M_TO_FT, 0.01) : stepIn
+  const precision = isImperialLinear ? Math.max(precisionIn, 2) : precisionIn
+  const unit = isImperialLinear ? 'ft' : unitIn
+  const onChange = useCallback((v: number) => {
+    onChangeM(isImperialLinear ? v * FT_TO_M : v)
+  }, [onChangeM, isImperialLinear])
+
   const [isEditing, setIsEditing] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [isHovered, setIsHovered] = useState(false)

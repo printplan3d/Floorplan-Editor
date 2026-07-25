@@ -9,7 +9,11 @@ export const ZoneSystem = () => {
     const levelMode = useViewer.getState().levelMode
     const selectedLevelId = useViewer.getState().selection.levelId
 
-    const visible = structureLayer === 'zones'
+    // Ritn3D 2026-07-24: zones are always visible now so auto-detected
+    // rooms are always clickable (opens the ZonePanel room-type picker).
+    // Was `structureLayer === 'zones'`, but the layer picker was hidden
+    // in minimal-launch mode so users could never turn it on.
+    const visible = true
     const zones = sceneRegistry.byType.zone || new Set()
     const nodes = useScene.getState().nodes
 
