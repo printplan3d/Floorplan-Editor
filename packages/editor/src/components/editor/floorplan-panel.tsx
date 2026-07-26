@@ -9244,47 +9244,60 @@ export function FloorplanPanel() {
               )
             })()}
 
-            {/* Ritn3D 2026-07-24 Batch 7: Figma-style alignment guides
-                during wall endpoint drag. Compares the moving endpoint
-                against every other wall endpoint on the level; if the X or
-                Y coordinate matches within ALIGN_TOL, draws a dashed guide
-                line spanning the visible plan area plus a marker at the
-                aligned endpoint. Purely visual -- doesn't affect the snap
-                logic (which is handled by snapWallDraftPoint elsewhere). */}
-            {wallEndpointDraft && (() => {
-              const ALIGN_TOL = 0.20 // 20cm -- more forgiving so the guide
-                                      // actually appears as user drags near
-                                      // alignment. 5cm was too tight.
-              const draft = wallEndpointDraft
-              const moving: [number, number] = draft.endpoint === 'start'
-                ? [draft.start[0], draft.start[1]]
-                : [draft.end[0], draft.end[1]]
+            {/* Ritn3D Batch 7: alignment guides. Fires during:
+                (a) wall endpoint edit drag (wallEndpointDraft), OR
+                (b) new-wall drawing -- either first anchor placed and
+                    cursor moving (draftStart + cursorPoint), or preview
+                    end being nudged (draftStart + draftEnd).
+                Compares the moving point against every other wall
+                endpoint on the level; if X or Y matches within
+                ALIGN_TOL, draws a dashed guide line + endpoint dot.
+                Purely visual -- snap logic is in snapWallDraftPoint. */}
+            {(() => {
+              let moving: [number, number] | null = null
+              let excludeWallId: string | null = null
+              let sameWallOther: [number, number] | null = null
+
+              if (wallEndpointDraft) {
+                const d = wallEndpointDraft
+                moving = d.endpoint === 'start'
+                  ? [d.start[0], d.start[1]]
+                  : [d.end[0], d.end[1]]
+                excludeWallId = d.wallId
+                sameWallOther = d.endpoint === 'start'
+                  ? [d.end[0], d.end[1]]
+                  : [d.start[0], d.start[1]]
+              } else if (draftStart && (isWallBuildActive || isArcWallBuildActive)) {
+                const other = draftEnd ?? cursorPoint
+                if (other) {
+                  moving = [other[0], other[1]]
+                  sameWallOther = [draftStart[0], draftStart[1]]
+                }
+              }
+
+              if (!moving) return null
+
+              const ALIGN_TOL = 0.25 // 25cm
               const otherEndpoints: [number, number][] = []
-              // Include the fixed endpoint of the SAME wall so single-wall
-              // drags show a guide against their own other end.
-              const fixed: [number, number] = draft.endpoint === 'start'
-                ? [draft.end[0], draft.end[1]]
-                : [draft.start[0], draft.start[1]]
-              otherEndpoints.push(fixed)
+              if (sameWallOther) otherEndpoints.push(sameWallOther)
               for (const w of walls) {
-                if (w.id === draft.wallId) continue
+                if (excludeWallId && w.id === excludeWallId) continue
                 otherEndpoints.push([w.start[0], w.start[1]])
                 otherEndpoints.push([w.end[0], w.end[1]])
               }
-              const xHits = otherEndpoints.filter((p) => Math.abs(p[0] - moving[0]) < ALIGN_TOL)
-              const yHits = otherEndpoints.filter((p) => Math.abs(p[1] - moving[1]) < ALIGN_TOL)
+              const xHits = otherEndpoints.filter((p) => Math.abs(p[0] - moving![0]) < ALIGN_TOL)
+              const yHits = otherEndpoints.filter((p) => Math.abs(p[1] - moving![1]) < ALIGN_TOL)
               if (xHits.length === 0 && yHits.length === 0) return null
+
               const guides: React.ReactElement[] = []
               const mSvg = toSvgPoint({ x: moving[0], y: moving[1] })
-              // Vertical guide (X aligned) -- draw across the visible plan on
-              // that x, plus dot at each aligned endpoint.
               if (xHits.length > 0) {
                 guides.push(
                   <line
                     key="align-x-line"
                     x1={mSvg.x} x2={mSvg.x}
                     y1={viewBox.minY} y2={viewBox.minY + viewBox.height}
-                    stroke="#ec4899" strokeWidth="1" strokeDasharray="6 4"
+                    stroke="#ec4899" strokeWidth="1.5" strokeDasharray="8 5"
                     strokeLinecap="round" vectorEffect="non-scaling-stroke"
                     pointerEvents="none"
                   />,
@@ -9292,9 +9305,9 @@ export function FloorplanPanel() {
                 for (const p of xHits.slice(0, 5)) {
                   const s = toSvgPoint({ x: p[0], y: p[1] })
                   guides.push(
-                    <circle key={`align-x-dot-${p[0]}-${p[1]}`}
-                      cx={s.x} cy={s.y} r="0.10"
-                      fill="#ec4899" stroke="#fff" strokeWidth="0.03"
+                    <circle key={`align-x-dot-${p[0].toFixed(3)}-${p[1].toFixed(3)}`}
+                      cx={s.x} cy={s.y} r="0.12"
+                      fill="#ec4899" stroke="#ffffff" strokeWidth="0.03"
                       vectorEffect="non-scaling-stroke" pointerEvents="none" />,
                   )
                 }
@@ -9305,7 +9318,7 @@ export function FloorplanPanel() {
                     key="align-y-line"
                     x1={viewBox.minX} x2={viewBox.minX + viewBox.width}
                     y1={mSvg.y} y2={mSvg.y}
-                    stroke="#ec4899" strokeWidth="1" strokeDasharray="6 4"
+                    stroke="#ec4899" strokeWidth="1.5" strokeDasharray="8 5"
                     strokeLinecap="round" vectorEffect="non-scaling-stroke"
                     pointerEvents="none"
                   />,
@@ -9313,9 +9326,9 @@ export function FloorplanPanel() {
                 for (const p of yHits.slice(0, 5)) {
                   const s = toSvgPoint({ x: p[0], y: p[1] })
                   guides.push(
-                    <circle key={`align-y-dot-${p[0]}-${p[1]}`}
-                      cx={s.x} cy={s.y} r="0.10"
-                      fill="#ec4899" stroke="#fff" strokeWidth="0.03"
+                    <circle key={`align-y-dot-${p[0].toFixed(3)}-${p[1].toFixed(3)}`}
+                      cx={s.x} cy={s.y} r="0.12"
+                      fill="#ec4899" stroke="#ffffff" strokeWidth="0.03"
                       vectorEffect="non-scaling-stroke" pointerEvents="none" />,
                   )
                 }
