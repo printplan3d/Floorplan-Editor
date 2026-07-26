@@ -1,10 +1,10 @@
 'use client'
 
-import { emitter, useScene } from '@ritn3d/core'
+import { emitter, generateId, useScene } from '@ritn3d/core'
 import { useViewer } from '@ritn3d/viewer'
 import { MoonIcon, ResetViewIcon, SunIcon, TrashIcon } from '../primitives/sidebar-icons'
 import { motion } from 'motion/react'
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import {
   Tooltip,
   TooltipContent,
@@ -125,6 +125,44 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
   const setMode = useEditor((s) => s.setMode)
   const { canUndo, canRedo, undo, redo } = useUndoRedo()
   const [mounted, setMounted] = useState(false)
+  const traceInputRef = useRef<HTMLInputElement>(null)
+
+  // Ritn3D 2026-07-27: Trace tool now opens a file picker directly and
+  // creates a GuideNode from the chosen image on the active level.
+  // Previously it opened the Site panel which required extra clicks.
+  const handleTraceFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const isImage = file.type.startsWith('image/')
+    if (!isImage) {
+      // Fall back to opening the site panel for PDF uploads -- that
+      // path already handles pdf.js rendering.
+      onPanelChange('site')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      const state = useScene.getState() as any
+      const nodes = state.nodes as Record<string, any>
+      const level = Object.values(nodes).find((n: any) => n.type === 'level')
+      if (!level) return
+      const guide = {
+        id: generateId('guide'),
+        type: 'guide' as const,
+        parentId: level.id,
+        visible: true,
+        url: dataUrl,
+        position: [0, 0, 0] as [number, number, number],
+        rotation: [0, 0, 0] as [number, number, number],
+        scale: 5,
+        opacity: 40,
+      }
+      state.createNode(guide, level.id)
+    }
+    reader.readAsDataURL(file)
+  }
 
   useEffect(() => {
     setMounted(true)
@@ -226,9 +264,16 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       />
       <RailButton
         isActive={false}
-        onClick={() => onPanelChange('site')}
+        onClick={() => traceInputRef.current?.click()}
         label="Trace"
         iconNode={TraceIconNode}
+      />
+      <input
+        ref={traceInputRef}
+        type="file"
+        accept="image/*,application/pdf"
+        className="hidden"
+        onChange={handleTraceFile}
       />
 
       {/* Undo / Redo — grouped just below the build tools */}
@@ -291,7 +336,27 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       />
       <RailButton
         isActive={false}
-        onClick={() => emitter.emit('floorplan:clear-canvas' as any)}
+        onClick={() => {
+          // Ritn3D 2026-07-27: previous emit('floorplan:clear-canvas') went to
+          // AppSidebar which is hidden in minimal-launch mode -> the listener
+          // never fired. Inline the clear logic so it works from the rail alone.
+          const ok = window.confirm(
+            'Clear the whole canvas?\n\n' +
+            'This deletes every wall, door, window, room, guide, and item on ' +
+            'the active level. You can undo with Ctrl+Z.'
+          )
+          if (!ok) return
+          const { levelId } = useViewer.getState().selection
+          if (!levelId) return
+          const nodes = useScene.getState().nodes as any
+          const levelNode = nodes[levelId as any]
+          if (levelNode?.type !== 'level') return
+          const childIds = [...((levelNode as any).children || [])]
+          for (const cid of childIds) {
+            useScene.getState().deleteNode(cid as any)
+          }
+          useViewer.getState().setSelection({ selectedIds: [] })
+        }}
         label="Clear"
         iconNode={<TrashIcon size={15} />}
       />

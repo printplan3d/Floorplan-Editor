@@ -9252,12 +9252,20 @@ export function FloorplanPanel() {
                 aligned endpoint. Purely visual -- doesn't affect the snap
                 logic (which is handled by snapWallDraftPoint elsewhere). */}
             {wallEndpointDraft && (() => {
-              const ALIGN_TOL = 0.05 // 5cm
+              const ALIGN_TOL = 0.20 // 20cm -- more forgiving so the guide
+                                      // actually appears as user drags near
+                                      // alignment. 5cm was too tight.
               const draft = wallEndpointDraft
               const moving: [number, number] = draft.endpoint === 'start'
                 ? [draft.start[0], draft.start[1]]
                 : [draft.end[0], draft.end[1]]
               const otherEndpoints: [number, number][] = []
+              // Include the fixed endpoint of the SAME wall so single-wall
+              // drags show a guide against their own other end.
+              const fixed: [number, number] = draft.endpoint === 'start'
+                ? [draft.end[0], draft.end[1]]
+                : [draft.start[0], draft.start[1]]
+              otherEndpoints.push(fixed)
               for (const w of walls) {
                 if (w.id === draft.wallId) continue
                 otherEndpoints.push([w.start[0], w.start[1]])
