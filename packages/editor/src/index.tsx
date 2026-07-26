@@ -23,6 +23,12 @@ export {
   sceneGraphToCanonical,
 } from './lib/scene'
 export { exportFloorPlanJSON } from './lib/export-json'
+export {
+  type CanonicalScene,
+  canonicalToSceneGraph,
+  sceneGraphToCanonical,
+} from './lib/plan-scene'
+export { saveSceneToLocalStorage } from './lib/scene'
 export { default as useAudio } from './store/use-audio'
 export { type CommandAction, useCommandRegistry } from './store/use-command-registry'
 export { default as useEditor } from './store/use-editor'
