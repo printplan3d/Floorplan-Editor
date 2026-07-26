@@ -30,15 +30,15 @@ function polygonSignatureFrom(polygon: [number, number][]): string {
   if (polygon.length === 0) return ''
   let minIdx = 0
   for (let i = 1; i < polygon.length; i++) {
-    const [px, py] = polygon[i]
-    const [mx, my] = polygon[minIdx]
-    if (px < mx - 1e-6 || (Math.abs(px - mx) < 1e-6 && py < my - 1e-6)) minIdx = i
+    const p = polygon[i]!
+    const m = polygon[minIdx]!
+    if (p[0] < m[0] - 1e-6 || (Math.abs(p[0] - m[0]) < 1e-6 && p[1] < m[1] - 1e-6)) minIdx = i
   }
   const rotated: [number, number][] = []
   for (let i = 0; i < polygon.length; i++) {
-    rotated.push(polygon[(minIdx + i) % polygon.length])
+    rotated.push(polygon[(minIdx + i) % polygon.length]!)
   }
-  return rotated.map(([x, y]) => `${Math.round(x * 100)},${Math.round(y * 100)}`).join('|')
+  return rotated.map((p) => `${Math.round(p[0] * 100)},${Math.round(p[1] * 100)}`).join('|')
 }
 
 // Snapshot of the wall network we last processed. Skip re-detection

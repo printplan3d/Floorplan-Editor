@@ -15,9 +15,12 @@ export type { SaveStatus } from './hooks/use-auto-save'
 export type { SceneGraph } from './lib/scene'
 export {
   applySceneGraphToEditor,
+  canonicalToSceneGraph,
   deleteLocalDraft,
   listLocalDraftIds,
   loadSceneFromLocalStorage,
+  saveSceneToLocalStorage,
+  sceneGraphToCanonical,
 } from './lib/scene'
 export { exportFloorPlanJSON } from './lib/export-json'
 export { default as useAudio } from './store/use-audio'

@@ -6,7 +6,15 @@
   room chips with icon glyphs, plus area readout in m² and sq ft.
 */
 
-import { type AnyNode, type AnyNodeId, useScene, type ZoneNode, type RoomType } from '@ritn3d/core'
+import { type AnyNode, type AnyNodeId, useScene, type ZoneNode } from '@ritn3d/core'
+
+// Local type mirror of core's RoomType enum -- avoids a cross-package
+// type re-export quirk with Zod schemas. Values MUST stay in sync with
+// packages/core/src/schema/nodes/zone.ts.
+type RoomType =
+  | 'living' | 'kitchen' | 'dining' | 'bedroom' | 'bathroom'
+  | 'office' | 'hallway' | 'entryway' | 'closet' | 'laundry'
+  | 'garage' | 'outdoor' | 'other'
 import { useViewer } from '@ritn3d/viewer'
 import { useCallback } from 'react'
 import { cn } from '../../../lib/utils'
@@ -132,9 +140,9 @@ function polygonAreaM2(polygon: [number, number][]): number {
   if (n < 3) return 0
   let a = 0
   for (let i = 0; i < n; i++) {
-    const [x1, y1] = polygon[i]
-    const [x2, y2] = polygon[(i + 1) % n]
-    a += x1 * y2 - x2 * y1
+    const p = polygon[i]!
+    const q = polygon[(i + 1) % n]!
+    a += p[0] * q[1] - q[0] * p[1]
   }
   return Math.abs(a) * 0.5
 }

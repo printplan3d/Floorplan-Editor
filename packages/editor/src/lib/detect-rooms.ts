@@ -20,10 +20,8 @@
     6. Reject degenerate faces (< 3 unique nodes, near-zero area).
 */
 
-const SNAP = 0.15 // 15 cm -- editor plans are precise; larger snap merges
-                  // intentional close-wall details.
-const MIN_ROOM_AREA = 0.5 // m^2 -- reject slivers so drag-in-progress
-                          // walls don't briefly spawn tiny rooms.
+const SNAP = 0.15
+const MIN_ROOM_AREA = 0.5
 
 export interface WallSegment {
   id: string
@@ -32,12 +30,8 @@ export interface WallSegment {
 }
 
 export interface DetectedRoom {
-  /** Deterministic signature of the polygon so callers can dedup / match
-   *  against existing zones cheaply. */
   signature: string
-  /** CCW polygon in world units (metres). */
   polygon: [number, number][]
-  /** Metres^2. */
   areaM2: number
 }
 
@@ -50,37 +44,34 @@ function polygonSignedArea(poly: [number, number][]): number {
   let a = 0
   const n = poly.length
   for (let i = 0; i < n; i++) {
-    const [x1, y1] = poly[i]
-    const [x2, y2] = poly[(i + 1) % n]
-    a += x1 * y2 - x2 * y1
+    const p = poly[i]!
+    const q = poly[(i + 1) % n]!
+    a += p[0] * q[1] - q[0] * p[1]
   }
   return a * 0.5
 }
 
 function polygonSignature(poly: [number, number][]): string {
-  // Rotate so the lowest (x,y) vertex is first, then round to cm.
-  // Makes the signature stable regardless of traversal start point.
   let minIdx = 0
   for (let i = 1; i < poly.length; i++) {
-    const [px, py] = poly[i]
-    const [mx, my] = poly[minIdx]
-    if (px < mx - 1e-6 || (Math.abs(px - mx) < 1e-6 && py < my - 1e-6)) minIdx = i
+    const p = poly[i]!
+    const m = poly[minIdx]!
+    if (p[0] < m[0] - 1e-6 || (Math.abs(p[0] - m[0]) < 1e-6 && p[1] < m[1] - 1e-6)) minIdx = i
   }
   const rotated: [number, number][] = []
   for (let i = 0; i < poly.length; i++) {
-    rotated.push(poly[(minIdx + i) % poly.length])
+    rotated.push(poly[(minIdx + i) % poly.length]!)
   }
-  return rotated.map(([x, y]) => `${Math.round(x * 100)},${Math.round(y * 100)}`).join('|')
+  return rotated.map((p) => `${Math.round(p[0] * 100)},${Math.round(p[1] * 100)}`).join('|')
 }
 
 export function detectClosedRooms(walls: WallSegment[]): DetectedRoom[] {
   if (walls.length < 3) return []
 
-  // 1. Cluster endpoints
   const nodes: Node[] = []
   const canon = (x: number, y: number): number => {
     for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i]
+      const n = nodes[i]!
       if (Math.hypot(n.x - x, n.y - y) < SNAP) return i
     }
     nodes.push({ x, y })
@@ -91,50 +82,44 @@ export function detectClosedRooms(walls: WallSegment[]): DetectedRoom[] {
   for (const w of walls) {
     const a = canon(w.start[0], w.start[1])
     const b = canon(w.end[0], w.end[1])
-    if (a === b) continue // degenerate zero-length wall
+    if (a === b) continue
     edges.push({ from: a, to: b, wallId: w.id })
-    edges.push({ from: b, to: a, wallId: w.id }) // reverse half-edge
+    edges.push({ from: b, to: a, wallId: w.id })
   }
   if (edges.length === 0) return []
 
-  // 2. Adjacency: for each node, sorted list of outgoing edges by angle.
   const adj: number[][] = Array.from({ length: nodes.length }, () => [])
-  for (let i = 0; i < edges.length; i++) adj[edges[i].from].push(i)
+  for (let i = 0; i < edges.length; i++) adj[edges[i]!.from]!.push(i)
 
   const angleOf = (edgeIdx: number): number => {
-    const e = edges[edgeIdx]
-    return Math.atan2(nodes[e.to].y - nodes[e.from].y, nodes[e.to].x - nodes[e.from].x)
+    const e = edges[edgeIdx]!
+    const from = nodes[e.from]!
+    const to = nodes[e.to]!
+    return Math.atan2(to.y - from.y, to.x - from.x)
   }
   for (const list of adj) list.sort((a, b) => angleOf(a) - angleOf(b))
 
-  // 3. Half-edge face traversal. For each unvisited edge, find the "next
-  //    edge" by rotating CLOCKWISE from the reverse-of-incoming at the
-  //    target node. That walks the LEFT face of the current edge.
   const visited: boolean[] = new Array(edges.length).fill(false)
   const rooms: DetectedRoom[] = []
 
   const reverseOf = (edgeIdx: number): number => {
-    const e = edges[edgeIdx]
-    // Its reverse is on adj[e.to] pointing back to e.from with same wallId.
-    for (const idx of adj[e.to]) {
-      const c = edges[idx]
+    const e = edges[edgeIdx]!
+    for (const idx of adj[e.to]!) {
+      const c = edges[idx]!
       if (c.to === e.from && c.wallId === e.wallId) return idx
     }
     return -1
   }
 
   const nextEdgeInFace = (edgeIdx: number): number => {
-    const e = edges[edgeIdx]
+    const e = edges[edgeIdx]!
     const revIdx = reverseOf(edgeIdx)
-    const list = adj[e.to]
-    // Find revIdx in list and pick the PREVIOUS one (clockwise from reverse).
-    // The list is sorted by angle ascending; previous == largest smaller.
+    const list = adj[e.to]!
     const revAngle = angleOf(revIdx)
     let best = -1
     let bestDelta = Infinity
     for (const idx of list) {
       if (idx === revIdx) continue
-      // Clockwise turn from revAngle to angleOf(idx): (revAngle - a) mod 2pi
       const delta = (revAngle - angleOf(idx) + 2 * Math.PI) % (2 * Math.PI)
       if (delta < bestDelta - 1e-9 && delta > 1e-9) {
         bestDelta = delta
@@ -159,29 +144,25 @@ export function detectClosedRooms(walls: WallSegment[]): DetectedRoom[] {
     }
     if (faceEdges.length < 3) continue
 
-    // Build polygon from face edges (node .to of each edge, in order).
     const poly: [number, number][] = []
     const seenNodes = new Set<number>()
     for (const eIdx of faceEdges) {
-      const nIdx = edges[eIdx].to
+      const nIdx = edges[eIdx]!.to
       if (seenNodes.has(nIdx)) continue
       seenNodes.add(nIdx)
-      poly.push([nodes[nIdx].x, nodes[nIdx].y])
+      const node = nodes[nIdx]!
+      poly.push([node.x, node.y])
     }
     if (poly.length < 3) continue
 
     const signedA = polygonSignedArea(poly)
-    // Left-face traversal produces CCW rings for INTERIOR faces (positive
-    // signed area). The outer face comes out CW (negative area) -- skip it.
     if (signedA <= 0) continue
-
-    const areaM2 = signedA
-    if (areaM2 < MIN_ROOM_AREA) continue
+    if (signedA < MIN_ROOM_AREA) continue
 
     rooms.push({
       signature: polygonSignature(poly),
       polygon: poly,
-      areaM2,
+      areaM2: signedA,
     })
   }
 

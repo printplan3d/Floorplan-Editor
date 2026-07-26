@@ -435,3 +435,20 @@ export function deleteLocalDraft(projectId: string): void {
     // ignore
   }
 }
+
+// Ritn3D 2026-07-24: cloud-sync canonical scene helpers.
+// The `scene` field stored server-side is the exact SceneGraph document
+// the editor uses locally -- iOS and Flutter agreed on the same JSON
+// shape (nodes + rootNodeIds). These helpers are identity by design; the
+// call sites use them so if iOS/Flutter ever diverge (e.g. add a wire
+// format version) we can slot in a real translation without touching
+// every caller.
+export type CanonicalScene = SceneGraph
+
+export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
+  return scene
+}
+
+export function canonicalToSceneGraph(canonical: CanonicalScene): SceneGraph {
+  return canonical
+}
