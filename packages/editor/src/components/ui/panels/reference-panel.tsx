@@ -61,9 +61,19 @@ export function ReferencePanel() {
             type="button"
             onClick={() => {
               if (selectedReferenceId) {
+                // 2026-07-28: emit calibrate event, THEN close the panel
+                // and deselect the reference. Two reasons:
+                //   1. Selected guide renders large SVG handles that
+                //      swallow the user's 2-point clicks. Deselecting
+                //      leaves the image visible but non-interactive.
+                //   2. Panel takes up sidebar width -- closing gives
+                //      the user the full canvas to click on their
+                //      reference distance.
+                const gid = selectedReferenceId
+                setSelectedReferenceId(null)
                 emitter.emit(
                   'floorplan:calibrate-scale' as any,
-                  { guideId: selectedReferenceId },
+                  { guideId: gid },
                 )
               }
             }}

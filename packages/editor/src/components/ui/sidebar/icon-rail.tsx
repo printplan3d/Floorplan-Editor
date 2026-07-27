@@ -180,6 +180,14 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         opacity: 40,
       }
       state.createNode(guide, level.id)
+      // 2026-07-28: auto-start scale calibration right after upload.
+      // Without this, first-time users don't discover the calibrate
+      // flow and their trace ends up at editor-default scale (1 unit
+      // = 5m, way off). Small delay so the guide has time to render
+      // before the calibration overlay banner appears.
+      setTimeout(() => {
+        emitter.emit('floorplan:calibrate-scale' as any, { guideId: guide.id })
+      }, 200)
     }
     reader.readAsDataURL(file)
   }
@@ -242,7 +250,10 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       className={cn(
         // w-16 (64 px) gives room for the 5-char labels ("Arc W…" gets
         // truncated at 5 chars, "Wall"/"Door"/"Win" fit comfortably).
-        'flex h-full w-16 flex-col items-stretch border-r border-hair bg-paper py-2',
+        // 2026-07-28: overflow-y-auto so the rail scrolls when too many
+        // toggles push the theme + unit buttons off-screen (had this
+        // problem after adding grid-snap + ortho toggles).
+        'flex h-full w-16 flex-col items-stretch overflow-y-auto border-r border-hair bg-paper py-2 scrollbar-thin',
         className,
       )}
     >
@@ -317,21 +328,21 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         onChange={handleTraceFile}
       />
 
-      {/* 2026-07-27: persistent snap / ortho toggles. Active = on,
-          inactive = off. Shift key still works as a per-instance
-          override on top of these -- e.g. leaving grid snap ON but
-          pressing Shift disables it just for the current drag. */}
+      {/* 2026-07-27/28: persistent snap / ortho toggles. Compact labels
+          (just 'Grid' / 'Ortho') so the rail doesn't push the theme +
+          unit toggles off-screen. Shift key still overrides per-drag
+          -- tooltip shows current state on hover. */}
       <div className="my-1 h-px w-full bg-hair" />
       <RailButton
         isActive={gridSnapEnabled}
         onClick={() => setGridSnapEnabled(!gridSnapEnabled)}
-        label={gridSnapEnabled ? 'Grid snap: on (Shift = off)' : 'Grid snap: off (Shift = on)'}
+        label={gridSnapEnabled ? 'Grid snap on' : 'Grid snap off'}
         iconNode={GridSnapIconNode}
       />
       <RailButton
         isActive={orthoEnabled}
         onClick={() => setOrthoEnabled(!orthoEnabled)}
-        label={orthoEnabled ? 'Ortho: on (Shift = off)' : 'Ortho: off (Shift = on)'}
+        label={orthoEnabled ? 'Ortho on' : 'Ortho off'}
         iconNode={OrthoIconNode}
       />
 

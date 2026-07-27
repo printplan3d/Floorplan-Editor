@@ -1711,7 +1711,12 @@ function getVisibleGridSteps(
 
   return {
     minorStep,
-    majorStep: Math.max(MAJOR_GRID_STEP, minorStep * 5),
+    // 2026-07-28: was minorStep * 5 which gave a 2.5m major line at
+    // 0.5m minor -- too coarse for domestic plans. * 4 matches the
+    // [1,2,4] doubling pattern above, so major = 2m at 0.5m minor
+    // and 4m at 1m minor. A 3x4m bedroom now spans multiple major
+    // cells instead of hiding inside one.
+    majorStep: Math.max(MAJOR_GRID_STEP, minorStep * 4),
   }
 }
 
@@ -4177,7 +4182,13 @@ export function FloorplanPanel() {
     structureLayer !== 'zones'
   const canSelectElementFloorplanGeometry =
     (mode === 'select' || mode === 'delete') && floorplanSelectionTool === 'click' && !movingNode
-  const canInteractWithGuides = showGuides && canSelectElementFloorplanGeometry
+  // 2026-07-28: disable guide interactions while a calibration is in
+  // flight. Otherwise the guide image is a large SVG rect that catches
+  // clicks BEFORE the wall/background handlers, so the user's 2-point
+  // reference clicks get swallowed by "select this guide". Turning
+  // interactions off makes the guide render-only during calibration.
+  const canInteractWithGuides =
+    showGuides && canSelectElementFloorplanGeometry && !calibratingGuideId
   // Ritn3D 2026-07-27: zones are always selectable in select mode.
   // Was gated on structureLayer === 'zones' but the layer picker is
   // hidden in minimal launch mode, so users could see auto-detected
@@ -6253,6 +6264,8 @@ export function FloorplanPanel() {
       siteVertexDragState,
       slabVertexDragState,
       shiftPressed,
+      orthoActive,
+      snapActive,
       surfaceSize.height,
       surfaceSize.width,
       updateViewport,
@@ -6599,6 +6612,8 @@ export function FloorplanPanel() {
       setSelectedReferenceId,
       setSelection,
       shiftPressed,
+      orthoActive,
+      snapActive,
       structureLayer,
       visibleZonePolygons,
       walls,
@@ -6635,6 +6650,8 @@ export function FloorplanPanel() {
       isPolygonBuildActive,
       isZoneBuildActive,
       shiftPressed,
+      orthoActive,
+      snapActive,
     ],
   )
 

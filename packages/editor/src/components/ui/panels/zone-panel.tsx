@@ -183,18 +183,17 @@ export function ZonePanel() {
   const areaM2 = polygonAreaM2(node.polygon)
   const areaFt2 = areaM2 * 10.7639
 
+  // 2026-07-28: name + type are unified. User feedback: "Room type and
+  // name are same". Selecting Bedroom sets both name=Bedroom and
+  // roomType=bedroom. Users can still override the name freely (e.g.
+  // "Master bedroom") after selecting a type -- typing overrides just
+  // the name and keeps the type for downstream (Blender pipeline uses
+  // roomType for material selection). Detects "custom" as any name
+  // that doesn't match a type's default label.
+  const currentLabel = ROOM_TYPES.find((rt) => rt.value === currentType)?.label ?? 'Room'
+  const isCustomName = (node.name || '').trim() !== '' && node.name !== currentLabel
   return (
-    <PanelWrapper icon="/icons/wall.png" onClose={handleClose} title={node.name || 'Room'} width={280}>
-      <PanelSection title="Name">
-        <input
-          type="text"
-          value={node.name || ''}
-          onChange={(e) => handleUpdate({ name: e.target.value })}
-          className="w-full rounded-md border border-hair bg-transparent px-2 py-1 text-[12px] text-ink outline-none focus:border-ink/40"
-          placeholder="Room name"
-        />
-      </PanelSection>
-
+    <PanelWrapper icon="/icons/wall.png" onClose={handleClose} title={node.name || currentLabel} width={280}>
       <PanelSection title="Room type">
         <div className="grid grid-cols-3 gap-1.5">
           {ROOM_TYPES.map((rt) => {
@@ -203,7 +202,22 @@ export function ZonePanel() {
               <button
                 key={rt.value}
                 type="button"
-                onClick={() => handleUpdate({ roomType: rt.value } as any)}
+                onClick={() => {
+                  // Update BOTH type and name in a single call. If the
+                  // user had already typed a custom name (e.g. "Master
+                  // bedroom"), keep it -- only overwrite the name if
+                  // it's still the previous type's default label or
+                  // blank. Prevents wiping intentional custom names
+                  // when the user just wants to change the type.
+                  const prevLabel = ROOM_TYPES.find((r) => r.value === currentType)?.label ?? ''
+                  const currentName = (node.name || '').trim()
+                  const shouldRename =
+                    currentName === '' || currentName === prevLabel || currentName === 'Room'
+                  handleUpdate({
+                    roomType: rt.value,
+                    ...(shouldRename ? { name: rt.label } : {}),
+                  } as any)
+                }}
                 className={cn(
                   'flex flex-col items-center gap-1 rounded-md border py-2 text-[10.5px] font-medium transition-colors',
                   active
@@ -217,6 +231,16 @@ export function ZonePanel() {
             )
           })}
         </div>
+      </PanelSection>
+
+      <PanelSection title={isCustomName ? 'Custom name' : 'Name (defaults to type)'}>
+        <input
+          type="text"
+          value={node.name || ''}
+          onChange={(e) => handleUpdate({ name: e.target.value })}
+          className="w-full rounded-md border border-hair bg-transparent px-2 py-1 text-[12px] text-ink outline-none focus:border-ink/40"
+          placeholder={currentLabel}
+        />
       </PanelSection>
 
       <PanelSection title="Area">
