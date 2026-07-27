@@ -105,7 +105,6 @@ export function AutoRoomDetector() {
 
         const detected = detectClosedRooms(walls)
         const detectedSigs = new Set(detected.map((d) => d.signature))
-        console.log(`[auto-rooms] walls=${walls.length} detected=${detected.length} existing-auto=${existingAutoAll.length}`)
 
         // Delete stale auto zones.
         for (const z of existingAutoAll) {

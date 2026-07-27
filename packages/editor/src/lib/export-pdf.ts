@@ -222,13 +222,20 @@ async function generateMultiLevelPDF(
   const printWindow = window.open('', '_blank', 'width=1200,height=800')
   if (!printWindow) { alert('Please allow popups.'); return }
 
+  // HTML-escape user-typed level names before templating them into the
+  // pagesHtml block below. Without this a user-typed level name like
+  // `<script>` would execute inside the export window (same origin, so
+  // it can read cookies/localStorage). Self-XSS is still XSS.
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+
   const pagesHtml = svgPages.map((page, i) => `
     <div class="page ${i > 0 ? 'page-break' : ''}">
       <div class="drawing-area">${page.svgString}</div>
       <div class="title-block">
         <div class="title-left">
           <div class="logo">Ritn<span>3D</span></div>
-          <div class="project-info">${page.label}<br>${date}</div>
+          <div class="project-info">${escapeHtml(page.label)}<br>${escapeHtml(date)}</div>
         </div>
         <div class="title-right">
           <div class="scale-bar">
