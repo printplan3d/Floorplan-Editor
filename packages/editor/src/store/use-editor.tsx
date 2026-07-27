@@ -100,11 +100,20 @@ type EditorState = {
   // activating the slab tool. Reset to 'interior' on tool change.
   pendingSlabSurfaceType: SlabSurfaceType
   setPendingSlabSurfaceType: (t: SlabSurfaceType) => void
+  // Ritn3D 2026-07-27: persistent grid-snap + ortho toggles. Shift key
+  // still works as a per-instance override (XOR with the toggle) so
+  // users can temporarily flip either during a single drag without
+  // losing their preferred default. Both default true.
+  gridSnapEnabled: boolean
+  setGridSnapEnabled: (enabled: boolean) => void
+  orthoEnabled: boolean
+  setOrthoEnabled: (enabled: boolean) => void
 }
 
 export type PersistedEditorUiState = Pick<
   EditorState,
   'phase' | 'mode' | 'tool' | 'structureLayer' | 'catalogCategory' | 'isFloorplanOpen'
+  | 'gridSnapEnabled' | 'orthoEnabled'
 >
 
 export const DEFAULT_PERSISTED_EDITOR_UI_STATE: PersistedEditorUiState = {
@@ -114,6 +123,8 @@ export const DEFAULT_PERSISTED_EDITOR_UI_STATE: PersistedEditorUiState = {
   structureLayer: 'elements',
   catalogCategory: null,
   isFloorplanOpen: true,
+  gridSnapEnabled: true,
+  orthoEnabled: true,
 }
 
 function normalizeModeForPhase(phase: Phase, mode: Mode | undefined): Mode {
@@ -130,6 +141,10 @@ export function normalizePersistedEditorUiState(
   const phase = state?.phase === 'structure' || state?.phase === 'furnish' ? state.phase : 'site'
   const mode = normalizeModeForPhase(phase, state?.mode)
   const isFloorplanOpen = Boolean(state?.isFloorplanOpen)
+  // 2026-07-27: default true when not stored (first-run + legacy users
+  // both get the same on-by-default behavior as pre-toggle days).
+  const gridSnapEnabled = state?.gridSnapEnabled ?? true
+  const orthoEnabled = state?.orthoEnabled ?? true
 
   if (phase === 'site') {
     return {
@@ -137,6 +152,8 @@ export function normalizePersistedEditorUiState(
       phase,
       mode,
       isFloorplanOpen,
+      gridSnapEnabled,
+      orthoEnabled,
     }
   }
 
@@ -148,6 +165,8 @@ export function normalizePersistedEditorUiState(
       structureLayer: 'elements',
       catalogCategory: mode === 'build' ? (state?.catalogCategory ?? 'furniture') : null,
       isFloorplanOpen,
+      gridSnapEnabled,
+      orthoEnabled,
     }
   }
 
@@ -161,6 +180,8 @@ export function normalizePersistedEditorUiState(
       structureLayer,
       catalogCategory: null,
       isFloorplanOpen,
+      gridSnapEnabled,
+      orthoEnabled,
     }
   }
 
@@ -172,6 +193,8 @@ export function normalizePersistedEditorUiState(
       structureLayer,
       catalogCategory: null,
       isFloorplanOpen,
+      gridSnapEnabled,
+      orthoEnabled,
     }
   }
 
@@ -183,6 +206,8 @@ export function normalizePersistedEditorUiState(
     structureLayer,
     catalogCategory: state?.tool === 'item' ? (state.catalogCategory ?? null) : null,
     isFloorplanOpen,
+    gridSnapEnabled,
+    orthoEnabled,
   }
 }
 
@@ -363,6 +388,12 @@ const useEditor = create<EditorState>()(
       setAllowUndergroundCamera: (enabled) => set({ allowUndergroundCamera: enabled }),
       pendingSlabSurfaceType: 'interior' as SlabSurfaceType,
       setPendingSlabSurfaceType: (t) => set({ pendingSlabSurfaceType: t }),
+
+      // 2026-07-27: snap + ortho persistent toggles. Both default on.
+      gridSnapEnabled: true,
+      setGridSnapEnabled: (enabled) => set({ gridSnapEnabled: enabled }),
+      orthoEnabled: true,
+      setOrthoEnabled: (enabled) => set({ orthoEnabled: enabled }),
     }),
     {
       name: 'pascal-editor-ui-preferences',
@@ -377,6 +408,8 @@ const useEditor = create<EditorState>()(
         structureLayer: state.structureLayer,
         catalogCategory: state.catalogCategory,
         isFloorplanOpen: state.isFloorplanOpen,
+        gridSnapEnabled: state.gridSnapEnabled,
+        orthoEnabled: state.orthoEnabled,
       }),
     },
   ),

@@ -3746,6 +3746,14 @@ export function FloorplanPanel() {
     null,
   )
   const [shiftPressed, setShiftPressed] = useState(false)
+  // 2026-07-27: persistent snap/ortho toggles from the sidebar. Shift
+  // still works as a per-instance override (XOR). Effective values are
+  // derived here and threaded into every snapWallDraftPoint call below
+  // so both toggle + shift agree on a single interpretation.
+  const gridSnapEnabled = useEditor((s) => s.gridSnapEnabled)
+  const orthoEnabled = useEditor((s) => s.orthoEnabled)
+  const orthoActive = orthoEnabled !== shiftPressed
+  const snapActive = gridSnapEnabled !== shiftPressed
   const [rotationModifierPressed, setRotationModifierPressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [isDraggingPanel, setIsDraggingPanel] = useState(false)
@@ -5483,8 +5491,8 @@ export function FloorplanPanel() {
         point: planPoint,
         walls,
         start: dragState.fixedPoint,
-        angleSnap: !shiftPressed,
-        freehand: shiftPressed,
+        angleSnap: orthoActive,
+        freehand: !snapActive,
         ignoreWallIds: [dragState.wallId],
       })
 
@@ -6104,7 +6112,7 @@ export function FloorplanPanel() {
         const snappedPoint = snapPolygonDraftPoint({
           point: planPoint,
           start: activePolygonDraftPoints[activePolygonDraftPoints.length - 1],
-          angleSnap: activePolygonDraftPoints.length > 0 && !shiftPressed,
+          angleSnap: activePolygonDraftPoints.length > 0 && orthoActive,
         })
 
         setCursorPoint((previousPoint) => {
@@ -6185,8 +6193,8 @@ export function FloorplanPanel() {
             point: planPoint,
             walls,
             start: arcDraftStart,
-            angleSnap: !shiftPressed,
-            freehand: shiftPressed,
+            angleSnap: orthoActive,
+            freehand: !snapActive,
           })
           setCursorPoint(cursor)
           return
@@ -6207,8 +6215,8 @@ export function FloorplanPanel() {
         point: planPoint,
         walls,
         start: draftStart ?? undefined,
-        angleSnap: Boolean(draftStart) && !shiftPressed,
-        freehand: shiftPressed,
+        angleSnap: Boolean(draftStart) && orthoActive,
+        freehand: !snapActive,
       })
 
       setCursorPoint(snappedPoint)
@@ -6507,7 +6515,7 @@ export function FloorplanPanel() {
         const snappedPoint = snapPolygonDraftPoint({
           point: planPoint,
           start: activePolygonDraftPoints[activePolygonDraftPoints.length - 1],
-          angleSnap: activePolygonDraftPoints.length > 0 && !shiftPressed,
+          angleSnap: activePolygonDraftPoints.length > 0 && orthoActive,
         })
 
         if (isZoneBuildActive) {
@@ -6540,8 +6548,8 @@ export function FloorplanPanel() {
               point: planPoint,
               walls,
               start: arcDraftStart ?? undefined,
-              angleSnap: Boolean(arcDraftStart) && !shiftPressed,
-              freehand: shiftPressed,
+              angleSnap: Boolean(arcDraftStart) && orthoActive,
+              freehand: !snapActive,
             })
         handleArcWallPlacementPoint(snappedPoint)
         return
@@ -6562,8 +6570,8 @@ export function FloorplanPanel() {
         point: planPoint,
         walls,
         start: draftStart ?? undefined,
-        angleSnap: Boolean(draftStart) && !shiftPressed,
-        freehand: shiftPressed,
+        angleSnap: Boolean(draftStart) && orthoActive,
+        freehand: !snapActive,
       })
 
       handleWallPlacementPoint(snappedPoint)
@@ -6610,7 +6618,7 @@ export function FloorplanPanel() {
       const snappedPoint = snapPolygonDraftPoint({
         point: planPoint,
         start: activePolygonDraftPoints[activePolygonDraftPoints.length - 1],
-        angleSnap: activePolygonDraftPoints.length > 0 && !shiftPressed,
+        angleSnap: activePolygonDraftPoints.length > 0 && orthoActive,
       })
 
       if (isZoneBuildActive) {
@@ -8091,7 +8099,7 @@ export function FloorplanPanel() {
           is currently held, show a subtle bottom-right chip advertising the
           Shift-for-freehand shortcut. Critical for tracing scanned plans
           where walls fall between grid nodes. */}
-      {(tool === 'wall' || tool === 'arc-wall') && mode === 'build' && !shiftPressed && (
+      {(tool === 'wall' || tool === 'arc-wall') && mode === 'build' && orthoActive && (
         <div className="pointer-events-none fixed bottom-4 right-4 z-30 rounded-[5px] border border-hair bg-paper/90 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.05em] text-ink/55 backdrop-blur-sm">
           Hold Shift for freehand · off-grid
         </div>

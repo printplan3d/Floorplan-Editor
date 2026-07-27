@@ -114,6 +114,22 @@ const RedoIconNode = (
           strokeLinecap="round" strokeLinejoin="round" fill="none"/>
   </svg>
 )
+const GridSnapIconNode = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <path d="M4 4h16v16H4z" stroke="currentColor" strokeWidth="1.2" strokeOpacity="0.35" fill="none"/>
+    <path d="M9 4v16 M15 4v16 M4 9h16 M4 15h16" stroke="currentColor" strokeWidth="1" strokeOpacity="0.35"/>
+    <circle cx="9" cy="9" r="1.4" fill="currentColor"/>
+    <circle cx="15" cy="9" r="1.4" fill="currentColor"/>
+    <circle cx="9" cy="15" r="1.4" fill="currentColor"/>
+    <circle cx="15" cy="15" r="1.4" fill="currentColor"/>
+  </svg>
+)
+const OrthoIconNode = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <path d="M6 18 V6 H18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M6 18 L18 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeOpacity="0.35"/>
+  </svg>
+)
 
 export function IconRail({ activePanel, onPanelChange, appMenuButton, className }: IconRailProps) {
   const theme = useViewer((state) => state.theme)
@@ -123,6 +139,10 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
   const mode = useEditor((s) => s.mode)
   const tool = useEditor((s) => s.tool)
   const setMode = useEditor((s) => s.setMode)
+  const gridSnapEnabled = useEditor((s) => s.gridSnapEnabled)
+  const setGridSnapEnabled = useEditor((s) => s.setGridSnapEnabled)
+  const orthoEnabled = useEditor((s) => s.orthoEnabled)
+  const setOrthoEnabled = useEditor((s) => s.setOrthoEnabled)
   const { canUndo, canRedo, undo, redo } = useUndoRedo()
   const [mounted, setMounted] = useState(false)
   const traceInputRef = useRef<HTMLInputElement>(null)
@@ -295,6 +315,24 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         accept="image/*,application/pdf"
         className="hidden"
         onChange={handleTraceFile}
+      />
+
+      {/* 2026-07-27: persistent snap / ortho toggles. Active = on,
+          inactive = off. Shift key still works as a per-instance
+          override on top of these -- e.g. leaving grid snap ON but
+          pressing Shift disables it just for the current drag. */}
+      <div className="my-1 h-px w-full bg-hair" />
+      <RailButton
+        isActive={gridSnapEnabled}
+        onClick={() => setGridSnapEnabled(!gridSnapEnabled)}
+        label={gridSnapEnabled ? 'Grid snap: on (Shift = off)' : 'Grid snap: off (Shift = on)'}
+        iconNode={GridSnapIconNode}
+      />
+      <RailButton
+        isActive={orthoEnabled}
+        onClick={() => setOrthoEnabled(!orthoEnabled)}
+        label={orthoEnabled ? 'Ortho: on (Shift = off)' : 'Ortho: off (Shift = on)'}
+        iconNode={OrthoIconNode}
       />
 
       {/* Undo / Redo — grouped just below the build tools */}
