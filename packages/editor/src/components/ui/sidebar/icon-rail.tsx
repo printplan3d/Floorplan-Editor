@@ -255,10 +255,31 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         />
       ))}
 
-      {/* Ritn3D 2026-07-24 iOS parity: Calibrate + Trace rail tools. */}
+      {/* Ritn3D 2026-07-24 iOS parity: Calibrate + Trace rail tools.
+          2026-07-27: Calibrate must fire with a guideId or the panel
+          handler noops. Auto-pick the first guide (underlay image) on
+          the active level; alert if none is loaded so users know they
+          need to upload a trace first. */}
       <RailButton
         isActive={false}
-        onClick={() => emitter.emit('floorplan:calibrate-scale' as any)}
+        onClick={() => {
+          const state = useScene.getState()
+          const activeLevelId = useViewer.getState().selection.levelId
+          const guide = Object.values(state.nodes).find(
+            (n: any) => n.type === 'guide' && n.parentId === activeLevelId,
+          ) as any
+          if (!guide) {
+            alert(
+              'No trace image to calibrate. Click the Trace button and pick a photo first, then calibrate its scale.',
+            )
+            return
+          }
+          // Also select the guide so the ReferencePanel opens with the
+          // Set-Scale button visible and highlighted -- confirms the
+          // click did something even before the user places the 2 points.
+          useViewer.getState().setSelection({ selectedIds: [guide.id] })
+          emitter.emit('floorplan:calibrate-scale' as any, { guideId: guide.id })
+        }}
         label="Calibrate"
         iconNode={CalibrateIconNode}
       />

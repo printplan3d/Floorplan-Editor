@@ -4166,11 +4166,14 @@ export function FloorplanPanel() {
   const canSelectElementFloorplanGeometry =
     (mode === 'select' || mode === 'delete') && floorplanSelectionTool === 'click' && !movingNode
   const canInteractWithGuides = showGuides && canSelectElementFloorplanGeometry
+  // Ritn3D 2026-07-27: zones are always selectable in select mode.
+  // Was gated on structureLayer === 'zones' but the layer picker is
+  // hidden in minimal launch mode, so users could see auto-detected
+  // zones but never click them to change the room type.
   const canSelectFloorplanZones =
     mode === 'select' &&
     floorplanSelectionTool === 'click' &&
-    !movingNode &&
-    structureLayer === 'zones'
+    !movingNode
   // Ritn3D: always show site boundary so users can see plot while drawing
   const visibleSitePolygon = displaySitePolygon
   const shouldShowSiteBoundaryHandles = isSiteEditActive && visibleSitePolygon !== null
@@ -6112,6 +6115,16 @@ export function FloorplanPanel() {
 
       if (isOpeningPlacementActive) {
         const closest = findClosestWallPoint(planPoint, walls)
+        // 2026-07-27: skip preview on arc walls -- placement rejects
+        // them on click, so previewing is misleading.
+        if (closest && Math.abs(closest.wall.bulge ?? 0) > 1e-6) {
+          if (openingPreview) setOpeningPreview(null)
+          if (hoveredWallIdRef.current) {
+            emitFloorplanWallLeave(hoveredWallIdRef.current)
+            hoveredWallIdRef.current = null
+          }
+          return
+        }
         if (closest) {
           const length = arcLength(closest.wall.start, closest.wall.end, closest.wall.bulge ?? 0)
           const distance = closest.t * length
@@ -6432,12 +6445,16 @@ export function FloorplanPanel() {
       }
 
       if (isOpeningPlacementActive) {
-        // Ritn3D 2026-06-18: doors/windows are created HERE directly on the
-        // 2D click. Previously the 3D door-tool/window-tool listened for
-        // 'wall:click' events and did the create; after the 3D-strip they no
-        // longer exist. Since the click landed on a wall and we already know
-        // the local position, do the create inline.
         const closest = findClosestWallPoint(planPoint, walls)
+        // 2026-07-27: block opening placement on arc walls. iOS/Flutter
+        // do the same: doors and windows only sample the wall as a
+        // straight rectangle for the boolean cutter, so a bulged wall
+        // creates a mis-cut hole (visible sliver + wrong-angle door
+        // hinge). Silently ignore the click; the wall:enter preview
+        // logic already avoided lighting up arc walls (guarded below).
+        if (closest && Math.abs(closest.wall.bulge ?? 0) > 1e-6) {
+          return
+        }
         if (closest) {
           const length = arcLength(closest.wall.start, closest.wall.end, closest.wall.bulge ?? 0)
           const distance = closest.t * length
@@ -9279,6 +9296,14 @@ export function FloorplanPanel() {
                 // yet, so compare cursor position against every existing
                 // wall endpoint on the level.
                 moving = [cursorPoint[0], cursorPoint[1]]
+              } else if (isOpeningPlacementActive && openingPreview) {
+                // 2026-07-27: alignment guides while placing a door or
+                // window. `openingPreview.point` is the projected point
+                // on the wall centerline. Guides show when the opening's
+                // center X or Y matches an existing opening's center on
+                // another wall (typical scenario: aligning a window with
+                // a door on the parallel wall of the same room).
+                moving = [openingPreview.point[0], openingPreview.point[1]]
               }
 
               if (!moving) return null

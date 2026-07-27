@@ -67,9 +67,10 @@ export function ReferencePanel() {
                 )
               }
             }}
-            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 font-medium text-amber-200 text-xs transition-colors hover:bg-amber-500/20"
+            className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-amber-500 bg-amber-500 px-3 py-2.5 font-semibold text-black text-[12.5px] uppercase tracking-[0.08em] shadow-[0_0_0_3px_rgba(245,158,11,0.25)] transition-all hover:bg-amber-400 hover:shadow-[0_0_0_5px_rgba(245,158,11,0.3)]"
           >
-            Set scale by 2-point reference
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-black animate-pulse"/>
+            Set scale — click 2 points
           </button>
         </PanelSection>
       )}
