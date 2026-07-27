@@ -1692,8 +1692,12 @@ function getVisibleGridSteps(
   const pixelsPerUnit = surfaceWidth / Math.max(viewportWidth, Number.EPSILON)
   let minorStep = WALL_GRID_STEP
 
-  // 1-2-5 sequence: 0.5 → 1.0 → 2.5 → 5.0 → 10 → 25 → ...
-  const multipliers = [1, 2, 5]
+  // 2026-07-27: 1-2-4 sequence (was 1-2-5). 1-2-5 produced 2.5m boxes
+  // at typical domestic-plan zoom, which reads as huge for a house
+  // that's 12m across. 1-2-4 doubles each step so the sequence is
+  //   0.5 → 1.0 → 2.0 → 5.0 (via next decade) → 10 → 20 → 50 → ...
+  // dropping the awkward 2.5m stop.
+  const multipliers = [1, 2, 4]
   let scale = 1
   let mIdx = 0
   while (WALL_GRID_STEP * scale * multipliers[mIdx]! * pixelsPerUnit < MIN_GRID_SCREEN_SPACING) {
@@ -6778,6 +6782,26 @@ export function FloorplanPanel() {
 
   const handleWallClick = useCallback(
     (wall: WallNode, event: ReactMouseEvent<SVGElement>) => {
+      // 2026-07-27: calibration mode intercepts wall clicks -- the wall
+      // is exactly what you WANT to click on during calibration (its
+      // known length is your reference). Capture the point and let the
+      // handleBackgroundClick calibration logic take over instead of
+      // opening the WallPanel. Fixes "click Set Scale, then can't click
+      // two points" -- previously wall clicks stole the event.
+      if (calibratingGuideId) {
+        event.stopPropagation()
+        const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
+        if (!planPoint) return
+        if (!calibrationP1) {
+          setCalibrationP1(planPoint)
+        } else if (!calibrationP2) {
+          setCalibrationP2(planPoint)
+        } else {
+          setCalibrationP1(planPoint)
+          setCalibrationP2(null)
+        }
+        return
+      }
       // Ritn3D: delete mode — delete wall on click
       if (useEditor.getState().mode === 'delete') {
         event.stopPropagation()
@@ -6809,7 +6833,7 @@ export function FloorplanPanel() {
         nativeEvent: event.nativeEvent as any,
       } as any)
     },
-    [floorplanOpeningLocalY, isOpeningPlacementActive, setSelectedReferenceId, handleWallSelect],
+    [floorplanOpeningLocalY, isOpeningPlacementActive, setSelectedReferenceId, handleWallSelect, calibratingGuideId, calibrationP1, calibrationP2, getPlanPointFromClientPoint],
   )
 
   const handleWallDoubleClick = useCallback(
@@ -9315,6 +9339,28 @@ export function FloorplanPanel() {
                 if (excludeWallId && w.id === excludeWallId) continue
                 otherEndpoints.push([w.start[0], w.start[1]])
                 otherEndpoints.push([w.end[0], w.end[1]])
+              }
+              // 2026-07-27: when placing an opening, also compare against
+              // every existing door/window CENTER (world coord). Catches
+              // the "align this door with the window on the parallel
+              // wall" case that endpoint-only alignment misses.
+              if (isOpeningPlacementActive) {
+                const wallById = new Map(walls.map((w) => [w.id, w]))
+                const allNodes = useScene.getState().nodes
+                for (const n of Object.values(allNodes)) {
+                  const t = (n as any).type
+                  if (t !== 'door' && t !== 'window') continue
+                  const wid = (n as any).parentId || (n as any).wallId
+                  const w = wallById.get(wid)
+                  if (!w) continue
+                  const pos = (n as any).position?.[0]
+                  if (typeof pos !== 'number') continue
+                  const len = arcLength(w.start, w.end, w.bulge ?? 0)
+                  if (len <= 0) continue
+                  const t01 = Math.max(0, Math.min(1, pos / len))
+                  const { point } = pointAndTangentAtT(w.start, w.end, w.bulge ?? 0, t01)
+                  otherEndpoints.push([point[0], point[1]])
+                }
               }
               const xHits = otherEndpoints.filter((p) => Math.abs(p[0] - moving![0]) < ALIGN_TOL)
               const yHits = otherEndpoints.filter((p) => Math.abs(p[1] - moving![1]) < ALIGN_TOL)

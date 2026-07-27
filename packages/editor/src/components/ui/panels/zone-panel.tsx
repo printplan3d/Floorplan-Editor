@@ -148,12 +148,17 @@ function polygonAreaM2(polygon: [number, number][]): number {
 }
 
 export function ZonePanel() {
-  const selectedIds = useViewer((s) => s.selection.selectedIds)
+  // 2026-07-27: zones are selected via `selection.zoneId`, NOT
+  // `selection.selectedIds` (see floorplan-panel setSelection({ zoneId })
+  // at line 6523). Was reading from selectedIds -- panel never rendered
+  // for auto-detected rooms so users couldn't change room type. Read
+  // from zoneId instead. panel-manager also updated to check zoneId.
+  const zoneId = useViewer((s) => s.selection.zoneId)
   const setSelection = useViewer((s) => s.setSelection)
   const nodes = useScene((s) => s.nodes)
   const updateNode = useScene((s) => s.updateNode)
 
-  const selectedId = selectedIds[0]
+  const selectedId = zoneId
   const node = selectedId ? (nodes[selectedId as AnyNode['id']] as ZoneNode | undefined) : undefined
 
   const handleUpdate = useCallback(
@@ -164,15 +169,15 @@ export function ZonePanel() {
     [selectedId, updateNode],
   )
 
-  const handleClose = useCallback(() => setSelection({ selectedIds: [] }), [setSelection])
+  const handleClose = useCallback(() => setSelection({ zoneId: null }), [setSelection])
 
   const handleDelete = useCallback(() => {
     if (!selectedId) return
     useScene.getState().deleteNode(selectedId as AnyNodeId)
-    setSelection({ selectedIds: [] })
+    setSelection({ zoneId: null })
   }, [selectedId, setSelection])
 
-  if (!node || node.type !== 'zone' || selectedIds.length !== 1) return null
+  if (!node || node.type !== 'zone') return null
 
   const currentType = (node as any).roomType ?? 'other'
   const areaM2 = polygonAreaM2(node.polygon)
