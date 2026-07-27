@@ -9273,6 +9273,12 @@ export function FloorplanPanel() {
                   moving = [other[0], other[1]]
                   sameWallOther = [draftStart[0], draftStart[1]]
                 }
+              } else if ((isWallBuildActive || isArcWallBuildActive) && cursorPoint) {
+                // 2026-07-27: also fire during first-point placement --
+                // user requested guides for wall point A too. No anchor
+                // yet, so compare cursor position against every existing
+                // wall endpoint on the level.
+                moving = [cursorPoint[0], cursorPoint[1]]
               }
 
               if (!moving) return null

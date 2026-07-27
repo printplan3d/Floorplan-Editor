@@ -77,14 +77,57 @@ export function detectClosedRooms(walls: WallSegment[]): DetectedRoom[] {
     nodes.push({ x, y })
     return nodes.length - 1
   }
-  interface Edge { from: number; to: number; wallId: string }
-  const edges: Edge[] = []
+
+  // First pass: canonicalize every wall endpoint so nodes[] contains
+  // every user-drawn junction point.
+  const wallEnds: Array<{ a: number; b: number; id: string }> = []
   for (const w of walls) {
     const a = canon(w.start[0], w.start[1])
     const b = canon(w.end[0], w.end[1])
     if (a === b) continue
-    edges.push({ from: a, to: b, wallId: w.id })
-    edges.push({ from: b, to: a, wallId: w.id })
+    wallEnds.push({ a, b, id: w.id })
+  }
+
+  // Second pass: T-junction split. If any node lies on the interior
+  // of a wall segment (within T_SPLIT_TOL perpendicular distance and
+  // > SNAP from either endpoint), split that segment into two edges
+  // at the node. Without this, e.g. a bedroom wall meeting the hallway
+  // wall at a T never registers -- the hallway's monolithic wall has
+  // no node at the T-point, so the bedroom face fails to close.
+  //
+  // Matches the same fix the Blender pipeline uses to detect closed
+  // rooms in phase3 (blender_pipeline/generate_3d.py, 2026-07-27).
+  const T_SPLIT_TOL = 0.10
+  interface Edge { from: number; to: number; wallId: string }
+  const edges: Edge[] = []
+  for (const w of wallEnds) {
+    const ax = nodes[w.a]!.x, ay = nodes[w.a]!.y
+    const bx = nodes[w.b]!.x, by = nodes[w.b]!.y
+    const dx = bx - ax, dy = by - ay
+    const segLenSq = dx * dx + dy * dy
+    if (segLenSq < 1e-9) continue
+    const hits: Array<{ t: number; idx: number }> = []
+    for (let k = 0; k < nodes.length; k++) {
+      if (k === w.a || k === w.b) continue
+      const nx = nodes[k]!.x, ny = nodes[k]!.y
+      if (Math.hypot(nx - ax, ny - ay) < SNAP) continue
+      if (Math.hypot(nx - bx, ny - by) < SNAP) continue
+      const t = ((nx - ax) * dx + (ny - ay) * dy) / segLenSq
+      if (t <= 0 || t >= 1) continue
+      const perpX = ax + t * dx - nx
+      const perpY = ay + t * dy - ny
+      if (Math.hypot(perpX, perpY) > T_SPLIT_TOL) continue
+      hits.push({ t, idx: k })
+    }
+    hits.sort((h1, h2) => h1.t - h2.t)
+    let prev = w.a
+    for (const h of hits) {
+      edges.push({ from: prev, to: h.idx, wallId: w.id })
+      edges.push({ from: h.idx, to: prev, wallId: w.id })
+      prev = h.idx
+    }
+    edges.push({ from: prev, to: w.b, wallId: w.id })
+    edges.push({ from: w.b, to: prev, wallId: w.id })
   }
   if (edges.length === 0) return []
 
@@ -103,10 +146,13 @@ export function detectClosedRooms(walls: WallSegment[]): DetectedRoom[] {
   const rooms: DetectedRoom[] = []
 
   const reverseOf = (edgeIdx: number): number => {
+    // With T-junction splits (2026-07-27), a single wall can contribute
+    // several edges sharing a wallId. Match the reverse by node-pair
+    // AND wallId so we always find the correct twin sub-edge.
     const e = edges[edgeIdx]!
     for (const idx of adj[e.to]!) {
       const c = edges[idx]!
-      if (c.to === e.from && c.wallId === e.wallId) return idx
+      if (c.to === e.from && c.from === e.to && c.wallId === e.wallId) return idx
     }
     return -1
   }
