@@ -222,7 +222,9 @@ export function hasCustomPersistedEditorUiState(
     normalizedState.tool !== DEFAULT_PERSISTED_EDITOR_UI_STATE.tool ||
     normalizedState.structureLayer !== DEFAULT_PERSISTED_EDITOR_UI_STATE.structureLayer ||
     normalizedState.catalogCategory !== DEFAULT_PERSISTED_EDITOR_UI_STATE.catalogCategory ||
-    normalizedState.isFloorplanOpen !== DEFAULT_PERSISTED_EDITOR_UI_STATE.isFloorplanOpen
+    normalizedState.isFloorplanOpen !== DEFAULT_PERSISTED_EDITOR_UI_STATE.isFloorplanOpen ||
+    normalizedState.gridSnapEnabled !== DEFAULT_PERSISTED_EDITOR_UI_STATE.gridSnapEnabled ||
+    normalizedState.orthoEnabled !== DEFAULT_PERSISTED_EDITOR_UI_STATE.orthoEnabled
   )
 }
 

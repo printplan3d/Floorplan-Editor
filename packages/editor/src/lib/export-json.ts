@@ -119,10 +119,15 @@ export function exportFloorPlanJSON(): object {
 
       if (child.type === 'zone') {
         const z = child as ZoneNode
+        // 2026-07-28: pipe the ZonePanel's roomType through to the
+        // pipeline so Blender picks the right floor material
+        // (bathroom -> tiles, kitchen -> laminate, etc.). Was
+        // hardcoded 'other' so every room got the default material
+        // regardless of the type the user selected in the picker.
         levelRooms.push({
           id: z.id,
           label: z.name || 'Room',
-          type: 'other',
+          type: (z as any).roomType || 'other',
           wall_ids: [],
           area: 0, // calculated by pipeline
         })
