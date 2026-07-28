@@ -83,23 +83,34 @@ export function snapWallDraftPoint(args: {
   start?: WallPlanPoint
   angleSnap?: boolean
   ignoreWallIds?: string[]
-  // Ritn3D 2026-06-18: when the user holds Shift they get raw sub-grid
-  // precision — no 0.5m grid snap, no 45° angle snap. Wall-endpoint snap
-  // (for joining walls cleanly) still applies within the join radius.
-  // Needed for tracing scanned plans where walls fall between grid nodes.
+  // 2026-07-28: angleSnap (ortho) and freehand (grid off) are INDEPENDENT.
+  //   ortho on + snap on  -> 45deg direction locked to grid nodes
+  //   ortho on + snap off -> 45deg direction, arbitrary length
+  //   ortho off + snap on -> free direction, grid-snapped point
+  //   ortho off + snap off -> raw cursor point
+  // Wall-endpoint snap (for clean joins) always applies within the
+  // join radius regardless of these two flags.
   freehand?: boolean
 }): WallPlanPoint {
   const { point, walls, start, angleSnap = false, ignoreWallIds, freehand = false } = args
-  const basePoint = freehand
-    ? point
-    : start && angleSnap
-      ? snapPointTo45Degrees(start, point)
-      : snapPointToGrid(point)
-  return (
-    findWallSnapTarget(basePoint, walls, {
-      ignoreWallIds,
-    }) ?? basePoint
-  )
+  // Step 1: apply ortho direction lock while preserving cursor length.
+  let base: WallPlanPoint = point
+  if (start && angleSnap) {
+    const dx = point[0] - start[0]
+    const dz = point[1] - start[1]
+    const angle = Math.atan2(dz, dx)
+    const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+    const distance = Math.sqrt(dx * dx + dz * dz)
+    base = [
+      start[0] + Math.cos(snappedAngle) * distance,
+      start[1] + Math.sin(snappedAngle) * distance,
+    ]
+  }
+  // Step 2: apply grid snap if enabled, on top of ortho-locked point.
+  if (!freehand) {
+    base = snapPointToGrid(base)
+  }
+  return findWallSnapTarget(base, walls, { ignoreWallIds }) ?? base
 }
 export function isWallLongEnough(start: WallPlanPoint, end: WallPlanPoint): boolean {
   return distanceSquared(start, end) >= WALL_MIN_LENGTH * WALL_MIN_LENGTH

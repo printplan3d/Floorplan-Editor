@@ -68,7 +68,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/primitives/popove
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/primitives/tooltip'
 import { NodeActionMenu } from './node-action-menu'
 
-const FALLBACK_VIEW_SIZE = 12
+// 2026-07-28: bumped 12 -> 15 so a new empty plan opens with a bit
+// more breathing room around the origin. With the 1 m grid this
+// shows ~15 boxes across the viewport, comfortable for orienting a
+// typical home floor plan (12-15 m wide) before drawing.
+const FALLBACK_VIEW_SIZE = 15
 const FLOORPLAN_PADDING = 2
 const MIN_VIEWPORT_WIDTH_RATIO = 0.08
 const MAX_VIEWPORT_WIDTH_RATIO = 40
@@ -3737,6 +3741,15 @@ export function FloorplanPanel() {
     setCalibrationP1(null)
     setCalibrationP2(null)
     setCalibrationInput('')
+
+    // 2026-07-28: after calibration, the guide's world size just
+    // changed dramatically (e.g. 5m default -> 15m real). Fit-to-view
+    // so the user sees the whole trace instead of a tiny corner of a
+    // now-huge image. Small delay lets React commit the scale update
+    // before the fittedViewport memo recomputes.
+    window.setTimeout(() => {
+      emitter.emit('floorplan:reset-view' as any)
+    }, 50)
   }, [
     calibratingGuideId,
     calibrationP1,
