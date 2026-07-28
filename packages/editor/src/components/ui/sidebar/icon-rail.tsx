@@ -226,7 +226,10 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'flex w-full flex-col items-center gap-0.5 px-1 py-1.5 transition-all',
+        // 2026-07-28: tighter vertical rhythm so all icons fit on a
+        // typical laptop viewport without scrolling. py-1 + gap-0
+        // saves ~5 px per row across 15+ buttons.
+        'flex w-full flex-col items-center gap-0 px-1 py-1 transition-all',
         disabled
           ? 'opacity-35 cursor-not-allowed'
           : isActive
@@ -236,12 +239,12 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
     >
       {imgSrc ? (
         <img alt={label} src={imgSrc}
-             className={cn('h-5 w-5 object-contain',
+             className={cn('h-[18px] w-[18px] object-contain',
                            !isActive && !disabled && 'opacity-60 saturate-0')} />
       ) : (
-        <span className="flex h-5 w-5 items-center justify-center">{iconNode}</span>
+        <span className="flex h-[18px] w-[18px] items-center justify-center">{iconNode}</span>
       )}
-      <span className="font-medium text-[9.5px] leading-tight">{label}</span>
+      <span className="font-medium text-[9px] leading-[1.05]">{label}</span>
     </button>
   )
 
@@ -253,7 +256,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         // 2026-07-28: overflow-y-auto so the rail scrolls when too many
         // toggles push the theme + unit buttons off-screen (had this
         // problem after adding grid-snap + ortho toggles).
-        'flex h-full w-16 flex-col items-stretch overflow-y-auto border-r border-hair bg-paper py-2 scrollbar-thin',
+        'flex h-full w-16 flex-col items-stretch overflow-y-auto border-r border-hair bg-paper py-1 scrollbar-thin',
         className,
       )}
     >
@@ -332,7 +335,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
           (just 'Grid' / 'Ortho') so the rail doesn't push the theme +
           unit toggles off-screen. Shift key still overrides per-drag
           -- tooltip shows current state on hover. */}
-      <div className="my-1 h-px w-full bg-hair" />
+      <div className="my-0.5 h-px w-full bg-hair" />
       <RailButton
         isActive={gridSnapEnabled}
         onClick={() => setGridSnapEnabled(!gridSnapEnabled)}
@@ -347,7 +350,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       />
 
       {/* Undo / Redo — grouped just below the build tools */}
-      <div className="my-1 h-px w-full bg-hair" />
+      <div className="my-0.5 h-px w-full bg-hair" />
       <RailButton
         isActive={false}
         onClick={undo}
@@ -364,7 +367,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       />
 
       {/* Divider between tools and utility icons below */}
-      <div className="my-1 h-px w-full bg-hair" />
+      <div className="my-0.5 h-px w-full bg-hair" />
 
       {panels.map((panel) => {
         const isActive = activePanel === panel.id

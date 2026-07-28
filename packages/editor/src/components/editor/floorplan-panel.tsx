@@ -1711,12 +1711,11 @@ function getVisibleGridSteps(
 
   return {
     minorStep,
-    // 2026-07-28: was minorStep * 5 which gave a 2.5m major line at
-    // 0.5m minor -- too coarse for domestic plans. * 4 matches the
-    // [1,2,4] doubling pattern above, so major = 2m at 0.5m minor
-    // and 4m at 1m minor. A 3x4m bedroom now spans multiple major
-    // cells instead of hiding inside one.
-    majorStep: Math.max(MAJOR_GRID_STEP, minorStep * 4),
+    // 2026-07-28 (rev 2): user wants major = 1 m for domestic plans.
+    // With minor at 0.5 m and multiplier * 2, major = 1 m -- one grid
+    // box == 1 m, which matches how homeowners read plans. MAJOR_GRID_STEP
+    // floor stays at 1 m so we never go below.
+    majorStep: Math.max(MAJOR_GRID_STEP, minorStep * 2),
   }
 }
 
