@@ -3077,20 +3077,29 @@ const FloorplanZoneLayer = memo(function FloorplanZoneLayer({
               </>
             )}
 
+            {/* Ritn3D 2026-08-01: hit the room's INTERIOR, not its outline.
+                This was an 18px transparent stroke along the zone boundary.
+                Zone boundaries run along wall centrelines, so that put a
+                room-sized hit strip directly over every wall bounding a
+                room — and since this layer renders after the geometry layer,
+                it won. Clicking such a wall selected the room; only walls
+                that bounded no room stayed selectable.
+                Meanwhile fill="none" meant room interiors caught nothing, so
+                a click in open floor fell through to the guide image's
+                full-size rect and selected the background photo instead.
+                Filling instead of stroking fixes both: walls stay clickable
+                (they render above this layer now) and open floor selects the
+                room it's in. */}
             {canSelectZones && (
               <polygon
-                fill="none"
+                fill="transparent"
                 onClick={(event) => {
                   event.stopPropagation()
                   onZoneSelect(zone.id, event)
                 }}
-                pointerEvents="stroke"
+                pointerEvents="fill"
                 points={points}
-                stroke="transparent"
-                strokeLinejoin="round"
-                strokeWidth={FLOORPLAN_WALL_HIT_STROKE_WIDTH}
                 style={{ cursor: EDITOR_CURSOR }}
-                vectorEffect="non-scaling-stroke"
               />
             )}
           </g>
@@ -8815,6 +8824,23 @@ export function FloorplanPanel() {
 
             <FloorplanSiteLayer isEditing={isSiteEditActive} sitePolygon={visibleSitePolygon} unit={unit} showDimensions={isSiteEditActive} />
 
+            {/* Ritn3D 2026-08-01: zones render BELOW the geometry layer.
+                SVG hit-testing is top-down, so whatever renders last wins the
+                click. With zones last, the room hit area covered every wall
+                bounding it and those walls became unselectable — a user could
+                only click walls that bounded no room.
+                Rooms are areas and walls are precise targets, so walls must
+                win. Zone labels sit at room centroids, which walls don't
+                cover, so nothing is visually occluded by the swap. */}
+            <FloorplanZoneLayer
+              canSelectZones={canSelectFloorplanZones}
+              onZoneSelect={handleZoneSelect}
+              palette={palette}
+              selectedZoneId={selectedZoneId}
+              unit={unit}
+              zonePolygons={visibleZonePolygons}
+            />
+
             <FloorplanGeometryLayer
               canSelectGeometry={canSelectElementFloorplanGeometry}
               canSelectSlabs={canSelectElementFloorplanGeometry && structureLayer !== 'zones'}
@@ -8834,15 +8860,6 @@ export function FloorplanPanel() {
               slabPolygons={displaySlabPolygons}
               unit={unit}
               wallPolygons={displayWallPolygons}
-            />
-
-            <FloorplanZoneLayer
-              canSelectZones={canSelectFloorplanZones}
-              onZoneSelect={handleZoneSelect}
-              palette={palette}
-              selectedZoneId={selectedZoneId}
-              unit={unit}
-              zonePolygons={visibleZonePolygons}
             />
 
             <FloorplanPolygonHandleLayer
