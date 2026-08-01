@@ -2305,10 +2305,28 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   }
   const centerX = minX === Number.POSITIVE_INFINITY ? 0 : (minX + maxX) / 2
   const centerZ = minZ === Number.POSITIVE_INFINITY ? 0 : (minZ + maxZ) / 2
+  // Ritn3D 2026-08-01: annotate only the wall being worked on.
+  //
+  // Every wall used to render its own dimension set — four grey measurement
+  // lines (extensionStart, dimensionLineStart, dimensionLineEnd,
+  // extensionEnd) plus a label. On a 31-wall plan imported from a detection
+  // that is 124 grey lines laid over the drawing.
+  //
+  // They read as clickable geometry, but the group is pointerEvents="none",
+  // so a click on one falls through to the background zone hit-test and
+  // selects a room instead. A user reported exactly that — "each dot and grey
+  // line opens room selection" — and had to ask what the lines even were.
+  //
+  // Showing them on hover/selection keeps the measurement available precisely
+  // when it's wanted (placing or adjusting a wall) without burying the plan
+  // under its own annotations. Nothing is lost: hover any wall to read it.
   const wallMeasurements = wallPolygons.flatMap(({ wall }) => {
+    const isSelected = selectedIdSet.has(wall.id)
+    const isHovered = hoveredWallId === wall.id
+    if (!isSelected && !isHovered) return []
     const measurement = getWallMeasurementOverlay(wall, centerX, centerZ, unit)
     if (measurement) {
-      measurement.isSelected = selectedIdSet.has(wall.id)
+      measurement.isSelected = isSelected
     }
     return measurement ? [measurement] : []
   })
