@@ -4241,7 +4241,9 @@ export function FloorplanPanel() {
   // Ritn3D: always show site boundary so users can see plot while drawing
   const visibleSitePolygon = displaySitePolygon
   const shouldShowSiteBoundaryHandles = isSiteEditActive && visibleSitePolygon !== null
-  const shouldShowPersistentWallEndpointHandles = mode === 'select' && !movingNode
+  // 2026-08-01: retired. Wall endpoint handles are now per-wall (hover or
+  // selection) rather than shown for every wall at once — see the
+  // wallEndpointHandles memo for why.
   const shouldShowSlabBoundaryHandles =
     mode === 'select' &&
     !movingNode &&
@@ -4291,10 +4293,25 @@ export function FloorplanPanel() {
 
     return displayWallPolygons.flatMap(({ wall }) => {
       const isSelected = selectedIdSet.has(wall.id)
+      // Ritn3D 2026-08-01: endpoint handles follow the wall you're actually
+      // on, instead of every wall at once.
+      //
+      // Each handle's hit target is r≈0.14 plus an 18px non-scaling stroke,
+      // and handles render ABOVE the walls. Showing them persistently put two
+      // large targets on every wall — 62 of them on a 31-wall plan — and on a
+      // short wall the two ends' hit areas overlap and cover the whole
+      // segment. The wall body then can't be clicked at all: the handle eats
+      // it. A user hit exactly this ("some walls are only selected when I
+      // click on those dots") after importing a detected plan.
+      //
+      // Hover is enough to bring them back, so dragging an endpoint still
+      // takes one motion — move onto the wall, grab the dot. Selected walls
+      // and active drafts keep theirs regardless, and wall-build mode still
+      // shows all of them for snapping.
       const isVisible =
-        shouldShowPersistentWallEndpointHandles ||
         isWallBuildActive ||
         isSelected ||
+        hoveredWallId === wall.id ||
         wallEndpointDraft?.wallId === wall.id
       if (!isVisible) {
         return []
@@ -4310,11 +4327,11 @@ export function FloorplanPanel() {
     })
   }, [
     displayWallPolygons,
+    hoveredWallId,
     isOpeningPlacementActive,
     isWallBuildActive,
     movingNode,
     selectedIdSet,
-    shouldShowPersistentWallEndpointHandles,
     wallEndpointDraft,
   ])
   // Bulge handles. One per selected wall. Sits at the arc apex when
