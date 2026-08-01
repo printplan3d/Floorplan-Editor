@@ -1,4 +1,4 @@
-import { type AnyNodeId, arcLength, type DoorNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@ritn3d/core'
+import { type AnyNodeId, arcLength, DEFAULT_WALL_HEIGHT, DEFAULT_WALL_THICKNESS, type DoorNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@ritn3d/core'
 import { useViewer } from '@ritn3d/viewer'
 
 /**
@@ -43,8 +43,8 @@ export function exportFloorPlanJSON(): object {
           id: w.id,
           start: flipX(w.start as any),
           end: flipX(w.end as any),
-          thickness: w.thickness ?? 0.15,
-          height: w.height ?? 2.5,
+          thickness: w.thickness ?? DEFAULT_WALL_THICKNESS,
+          height: w.height ?? DEFAULT_WALL_HEIGHT,
           type: w.frontSide === 'exterior' || w.backSide === 'exterior' ? 'exterior' : 'interior',
           // Ritn3D arc walls (DXF bulge: tan(arc_angle/4); 0 = straight).
           // Omitted from JSON when bulge is 0 so the Blender pipeline can
@@ -181,8 +181,8 @@ export function exportFloorPlanJSON(): object {
           id: w.id,
           start: w.start,
           end: w.end,
-          thickness: w.thickness ?? 0.15,
-          height: w.height ?? 2.5,
+          thickness: w.thickness ?? DEFAULT_WALL_THICKNESS,
+          height: w.height ?? DEFAULT_WALL_HEIGHT,
           type: 'interior',
           ...(w.bulge && w.bulge !== 0 ? { bulge: w.bulge } : {}),
         })

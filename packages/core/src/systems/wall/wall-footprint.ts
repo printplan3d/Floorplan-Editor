@@ -1,9 +1,17 @@
 import { isStraight, tessellateArc } from '../../lib/arc-math'
 import type { WallNode } from '../../schema'
+import {
+  DEFAULT_WALL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
+} from '../../schema/nodes/wall'
 import { type Point2D, pointToKey, type WallMiterData } from './wall-mitering'
 
-export const DEFAULT_WALL_THICKNESS = 0.1
-export const DEFAULT_WALL_HEIGHT = 2.5
+// Ritn3D 2026-08-01: these moved to schema/nodes/wall so the schema owns its
+// own defaults, and were raised from 0.1 / 2.5 to 0.15 / 2.7. Re-exported
+// here so every existing consumer — wall-system, and anything importing from
+// the core barrel — is untouched. See the note on the schema constants for
+// why the values had to change.
+export { DEFAULT_WALL_HEIGHT, DEFAULT_WALL_THICKNESS }
 
 export function getWallThickness(wallNode: WallNode): number {
   return wallNode.thickness ?? DEFAULT_WALL_THICKNESS

@@ -23,6 +23,8 @@ import {
   SlabNode,
   useScene,
   type WallNode,
+  DEFAULT_WALL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
   WindowNode,
   ZoneNode as ZoneNodeSchema,
   type ZoneNode as ZoneNodeType,
@@ -1342,6 +1344,14 @@ function buildDraftWall(
     start,
     end,
     bulge,
+    // 2026-08-01: thickness/height became schema defaults rather than
+    // optional, so they're required on the inferred type. This literal is
+    // hand-built (not WallNode.parse'd) because it's a transient preview, so
+    // it has to carry them explicitly — and it must use the same values the
+    // committed wall will, or the ghost would be a different width to the
+    // wall it becomes.
+    thickness: DEFAULT_WALL_THICKNESS,
+    height: DEFAULT_WALL_HEIGHT,
     frontSide: 'unknown',
     backSide: 'unknown',
   }
@@ -1392,7 +1402,7 @@ function buildWallWithUpdatedEndpoints(
 }
 
 function getFloorplanWallThickness(wall: WallNode): number {
-  const baseThickness = wall.thickness ?? 0.1
+  const baseThickness = wall.thickness ?? DEFAULT_WALL_THICKNESS
   const scaledThickness = baseThickness * FLOORPLAN_WALL_THICKNESS_SCALE
 
   return Math.min(
@@ -1634,7 +1644,7 @@ function getWallMeasurementOverlay(
 
 function getOpeningFootprint(wall: WallNode, node: WindowNode | DoorNode): Point2D[] {
   const width = node.width
-  const depth = wall.thickness ?? 0.1
+  const depth = wall.thickness ?? DEFAULT_WALL_THICKNESS
   const halfWidth = width / 2
   const halfDepth = depth / 2
 
@@ -9191,7 +9201,7 @@ export function FloorplanPanel() {
               const width = tool === 'door'
                 ? NEW_OPENING_WIDTH_M.door
                 : NEW_OPENING_WIDTH_M.window
-              const depth = (wall.thickness ?? 0.1) + 0.06
+              const depth = (wall.thickness ?? DEFAULT_WALL_THICKNESS) + 0.06
               const wallAngle = Math.atan2(
                 wall.end[1] - wall.start[1],
                 wall.end[0] - wall.start[0],

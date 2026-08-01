@@ -6,13 +6,45 @@ import { ItemNode } from './item'
 // import { ItemNode } from "./item";
 // import { WindowNode } from "./window";
 
+/**
+ * Ritn3D 2026-08-01: canonical wall defaults, in metres.
+ *
+ * These were `optional()` with no default, and createWallOnCurrentLevel does
+ * not pass either — so EVERY wall drawn in the web editor carried
+ * thickness: undefined and height: undefined, and each consumer applied its
+ * own fallback. Those had drifted apart:
+ *
+ *   plan-view render   thickness 0.10   (floorplan-panel)
+ *   export to pipeline thickness 0.15, height 2.50  (export-json)
+ *   iOS / Flutter      height 2.70
+ *
+ * So a web-drawn wall was DRAWN at 0.10 and BUILT at 0.15, and the same
+ * drawing produced a 2.5 m ceiling on web against 2.7 m on iOS and Flutter —
+ * different buildings from identical input.
+ *
+ * 2.7 matches iOS (PlanWall.height, DetectionToPlan.defaultWallHeightM) and
+ * Flutter. 0.15 matches what the Blender pipeline actually builds, so the
+ * plan view now draws what gets rendered.
+ *
+ * Exported because scenes loaded from storage bypass schema parsing
+ * (applySceneGraphToEditor calls setScene directly), so legacy walls still
+ * arrive undefined and consumers need the same number to fall back to.
+ *
+ * Defined here rather than in systems/wall/wall-footprint (where they used to
+ * live, at 0.1 / 2.5) so the schema owns its own defaults with no dependency
+ * on the systems layer. wall-footprint re-exports these, so its existing
+ * consumers — including the 3D wall system — are unchanged.
+ */
+export const DEFAULT_WALL_THICKNESS = 0.15
+export const DEFAULT_WALL_HEIGHT = 2.7
+
 export const WallNode = BaseNode.extend({
   id: objectId('wall'),
   type: nodeType('wall'),
   children: z.array(ItemNode.shape.id).default([]),
   // Specific props
-  thickness: z.number().optional(),
-  height: z.number().optional(),
+  thickness: z.number().default(DEFAULT_WALL_THICKNESS),
+  height: z.number().default(DEFAULT_WALL_HEIGHT),
   // e.g., start/end points for path
   start: z.tuple([z.number(), z.number()]),
   end: z.tuple([z.number(), z.number()]),
