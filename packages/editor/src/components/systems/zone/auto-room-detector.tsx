@@ -106,6 +106,23 @@ export function AutoRoomDetector() {
         const detected = detectClosedRooms(walls)
         const detectedSigs = new Set(detected.map((d) => d.signature))
 
+        // Ritn3D 2026-08-01: report what a pass actually produced.
+        // A user importing a 31-wall plan saw room numbering reach ~30 and
+        // every click landing on a room. Two very different causes look
+        // identical from outside: genuinely detecting ~30 faces (a wall-graph
+        // problem), or detecting ~10 and CHURNING them across passes so
+        // roomCounterRef keeps climbing (a stability problem). The counter
+        // only ever increments, so room NAMES are not a count. Log the three
+        // numbers that separate the cases rather than inferring again.
+        if (detected.length !== existingAutoAll.length) {
+          console.info('[auto-rooms]', {
+            walls: walls.length,
+            detected: detected.length,
+            existingAuto: existingAutoAll.length,
+            nameCounter: roomCounterRef.current,
+          })
+        }
+
         // Delete stale auto zones.
         for (const z of existingAutoAll) {
           const sig = polygonSignatureFrom(z.polygon)
