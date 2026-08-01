@@ -87,6 +87,20 @@ const GRID_COORDINATE_PRECISION = 6
 const MAJOR_GRID_STEP = WALL_GRID_STEP * 2
 const FLOORPLAN_WALL_THICKNESS_SCALE = 1.18
 const FLOORPLAN_MIN_VISIBLE_WALL_THICKNESS = 0.13
+
+/**
+ * Width of a newly placed door / window, in metres.
+ *
+ * Ritn3D 2026-08-01: single source for BOTH the placement ghost and the node
+ * that gets created. They had drifted: the ghost drew a window 1.0 m wide
+ * while WindowNode's schema default made the actual window 1.5 m, so users
+ * got an opening 50% wider than the one they aimed with. Doors happened to
+ * agree at 0.9 only by coincidence.
+ *
+ * Creation now passes these explicitly instead of relying on the schema
+ * defaults, so the two cannot drift apart again.
+ */
+const NEW_OPENING_WIDTH_M = { door: 0.9, window: 1.5 } as const
 const FLOORPLAN_MAX_EXTRA_THICKNESS = 0.035
 const FLOORPLAN_PANEL_LAYOUT_STORAGE_KEY = 'pascal-editor-floorplan-panel-layout'
 const EMPTY_WALL_MITER_DATA = calculateLevelMiters([])
@@ -6577,6 +6591,10 @@ export function FloorplanPanel() {
               side: 'front',
               wallId: wall.id,
               parentId: wall.id,
+              // Set explicitly rather than leaning on the schema default, so
+              // the ghost the user aimed with and the node they get are
+              // driven by the same constant. See NEW_OPENING_WIDTH_M.
+              width: NEW_OPENING_WIDTH_M.door,
             })
             state.createNode(node, wall.id as AnyNodeId)
             useViewer.getState().setSelection({ selectedIds: [node.id] })
@@ -6588,6 +6606,7 @@ export function FloorplanPanel() {
               side: 'front',
               wallId: wall.id,
               parentId: wall.id,
+              width: NEW_OPENING_WIDTH_M.window,
             })
             state.createNode(node, wall.id as AnyNodeId)
             useViewer.getState().setSelection({ selectedIds: [node.id] })
@@ -9169,7 +9188,9 @@ export function FloorplanPanel() {
               const wall = wallById.get(openingPreview.wallId)
               if (!wall) return null
               const [px, py] = openingPreview.point
-              const width = tool === 'door' ? 0.9 : 1.0
+              const width = tool === 'door'
+                ? NEW_OPENING_WIDTH_M.door
+                : NEW_OPENING_WIDTH_M.window
               const depth = (wall.thickness ?? 0.1) + 0.06
               const wallAngle = Math.atan2(
                 wall.end[1] - wall.start[1],
