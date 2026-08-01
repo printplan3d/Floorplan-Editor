@@ -3625,6 +3625,14 @@ export function FloorplanPanel() {
     | { wallId: WallNode['id']; point: WallPlanPoint; normal: WallPlanPoint }
     | null
   >(null)
+  // Ritn3D 2026-08-01: doors/windows cannot be placed on arc walls. The
+  // translator maps an opening to the SINGLE arc sub-wall containing its
+  // centre (_remap_opening), and sub-walls are ~8cm at sagitta 1.5mm --
+  // so a 0.9m door asks the cutter to punch through an 8cm segment and
+  // produces a sliver. The block is correct; what was wrong is that it
+  // was SILENT, so the tool read as broken. This flag drives an
+  // explanatory chip while an opening tool hovers a curved wall.
+  const [arcOpeningBlocked, setArcOpeningBlocked] = useState(false)
   const [calibrationInput, setCalibrationInput] = useState('')
   const [calibrationUnit, setCalibrationUnit] = useState<'m' | 'ft'>('m')
   const [draftStart, setDraftStart] = useState<WallPlanPoint | null>(null)
@@ -4171,6 +4179,9 @@ export function FloorplanPanel() {
   // Clear the ghost preview when the tool goes away.
   useEffect(() => {
     if (!isOpeningBuildActive && openingPreview) setOpeningPreview(null)
+    // Drop the arc-block chip too -- it's only meaningful while an
+    // opening tool is live.
+    if (!isOpeningBuildActive && arcOpeningBlocked) setArcOpeningBlocked(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpeningBuildActive])
   const isOpeningMoveActive = movingOpeningType !== null
@@ -6152,14 +6163,18 @@ export function FloorplanPanel() {
         const closest = findClosestWallPoint(planPoint, walls)
         // 2026-07-27: skip preview on arc walls -- placement rejects
         // them on click, so previewing is misleading.
+        // 2026-08-01: raise `arcOpeningBlocked` so the UI can EXPLAIN the
+        // rejection instead of the click just doing nothing.
         if (closest && Math.abs(closest.wall.bulge ?? 0) > 1e-6) {
           if (openingPreview) setOpeningPreview(null)
+          if (!arcOpeningBlocked) setArcOpeningBlocked(true)
           if (hoveredWallIdRef.current) {
             emitFloorplanWallLeave(hoveredWallIdRef.current)
             hoveredWallIdRef.current = null
           }
           return
         }
+        if (arcOpeningBlocked) setArcOpeningBlocked(false)
         if (closest) {
           const length = arcLength(closest.wall.start, closest.wall.end, closest.wall.bulge ?? 0)
           const distance = closest.t * length
@@ -6487,9 +6502,12 @@ export function FloorplanPanel() {
         // do the same: doors and windows only sample the wall as a
         // straight rectangle for the boolean cutter, so a bulged wall
         // creates a mis-cut hole (visible sliver + wrong-angle door
-        // hinge). Silently ignore the click; the wall:enter preview
-        // logic already avoided lighting up arc walls (guarded below).
+        // hinge).
+        // 2026-08-01: keep the block, but stop swallowing the click in
+        // silence -- a user hit this and reported the door tool as
+        // inaccessible. `arcOpeningBlocked` renders an explanatory chip.
         if (closest && Math.abs(closest.wall.bulge ?? 0) > 1e-6) {
+          setArcOpeningBlocked(true)
           return
         }
         if (closest) {
@@ -8131,6 +8149,24 @@ export function FloorplanPanel() {
       {(tool === 'wall' || tool === 'arc-wall') && mode === 'build' && orthoActive && (
         <div className="pointer-events-none fixed bottom-4 right-4 z-30 rounded-[5px] border border-hair bg-paper/90 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.05em] text-ink/55 backdrop-blur-sm">
           Hold Shift for freehand · off-grid
+        </div>
+      )}
+
+      {/* Ritn3D 2026-08-01: arc-wall opening block, made visible.
+          Placing a door/window on a curved wall is rejected (see the
+          pointer-up handler). It used to fail silently, which reads as a
+          broken tool -- a trial user reported exactly that. Now we say
+          what happened and what to do instead. */}
+      {arcOpeningBlocked && isOpeningBuildActive && (
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2.5 rounded-[6px] border border-amber-300/70 bg-amber-50/95 px-3.5 py-2 text-amber-900 shadow-sm backdrop-blur-sm">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" className="shrink-0">
+            <circle cx="7" cy="7" r="5.75" stroke="currentColor" strokeWidth="1.15" />
+            <path d="M7 4V7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            <circle cx="7" cy="9.9" r="0.6" fill="currentColor" />
+          </svg>
+          <span className="text-[12.5px] leading-tight tracking-[-0.005em]">
+            {tool === 'door' ? 'Doors' : 'Windows'} can&rsquo;t be placed on curved walls yet — place it on a straight wall.
+          </span>
         </div>
       )}
 
