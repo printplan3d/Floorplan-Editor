@@ -2,6 +2,7 @@
 
 import { Icon } from '@iconify/react'
 import {
+  type AnyNode,
   type AnyNodeId,
   arcLength,
   arcMidpoint,
@@ -3496,6 +3497,9 @@ export function FloorplanPanel() {
   const tool = useEditor((state) => state.tool)
   const deleteNode = useScene((state) => state.deleteNode)
   const updateNode = useScene((state) => state.updateNode)
+  // Batch form -- used by scale calibration so rescaling the whole plan lands
+  // as a single undo step rather than one per wall.
+  const updateNodes = useScene((state) => state.updateNodes)
   const levelNode = useScene((state) =>
     levelId ? (state.nodes[levelId] as LevelNode | undefined) : undefined,
   )
@@ -3658,13 +3662,29 @@ export function FloorplanPanel() {
     }),
   )
 
-  // Trace-plan scale calibration. Two-point reference method (standard CAD
-  // pattern used by AutoCAD/Bluebeam/Acrobat): user clicks two points on the
-  // uploaded plan with a known real-world distance, types the distance, and
-  // we adjust guide.scale so plan units match reality. Without this an
-  // imported floor plan has arbitrary scale (default 5) and walls measure
-  // garbage like 150 m.
-  const [calibratingGuideId, setCalibratingGuideId] = useState<string | null>(null)
+  // Two-point scale calibration. Standard CAD pattern (AutoCAD/Bluebeam/
+  // Acrobat): the user clicks two points a known real-world distance apart,
+  // types that distance, and we rescale so plan units match reality.
+  //
+  // There are two things it can be pointed at, and which one is wrong depends
+  // on what is on the canvas:
+  //
+  //   guideId: string  -- TRACING. No geometry exists yet; the photo underlay
+  //                       is what needs sizing so the user traces at true
+  //                       scale. An uncalibrated guide defaults to scale 5,
+  //                       which makes walls measure garbage like 150 m.
+  //
+  //   guideId: null    -- A DETECTED OR DRAWN PLAN. The geometry itself
+  //                       carries the error: detection derives scale by
+  //                       assuming every door is 80 cm
+  //                       (floorplan_api.py STANDARD_DOOR_WIDTH_CM), so a plan
+  //                       drawn with 36" doors comes out ~12.5% small. Here we
+  //                       scale the PLAN, not the underlay.
+  //
+  // Was guide-only until 2026-08-02, which meant calibration silently did
+  // nothing on a plan that had walls but no photo. Mirrors iOS
+  // CalibrationOverlay.apply().
+  const [calibration, setCalibration] = useState<{ guideId: string | null } | null>(null)
   const [calibrationP1, setCalibrationP1] = useState<WallPlanPoint | null>(null)
   const [calibrationP2, setCalibrationP2] = useState<WallPlanPoint | null>(null)
   // Ritn3D 2026-06-18: door/window placement preview. Mirrors the AutoCAD
@@ -3737,15 +3757,39 @@ export function FloorplanPanel() {
     emitter.emit('floorplan:marquee-state' as any, { active: floorplanSelectionTool === 'marquee' })
   }, [floorplanSelectionTool])
 
-  // Scale-calibration trigger: `floorplan:calibrate-scale` event with the
-  // guideId starts the 2-point flow. Emitted from the Upload Trace button
-  // (auto-start on upload) and the ReferencePanel re-calibrate button.
+  // Scale-calibration trigger: `floorplan:calibrate-scale` starts the 2-point
+  // flow. Emitted from the Upload Trace button (auto-start on upload), the
+  // ReferencePanel re-calibrate button, and Wall Review's "Set scale".
+  //
+  // Omit guideId (or pass null) to calibrate the PLAN rather than an underlay.
+  // seedLongestWall pre-places both points on the longest wall so the common
+  // case is "type the number" instead of "work out what to click"; after the
+  // importer's collinear merge that wall is normally a full building side.
+  // Deliberately not the plan's overall diagonal — a diagonal is not something
+  // anyone can go and measure. Both points stay draggable. Mirrors iOS
+  // FloorPlanEditorView.armCalibration().
   useEffect(() => {
-    const handler = (data: { guideId: string }) => {
-      setCalibratingGuideId(data.guideId)
-      setCalibrationP1(null)
-      setCalibrationP2(null)
+    const handler = (data?: { guideId?: string | null; seedLongestWall?: boolean }) => {
+      setCalibration({ guideId: data?.guideId ?? null })
       setCalibrationInput('')
+      let p1: WallPlanPoint | null = null
+      let p2: WallPlanPoint | null = null
+      if (data?.seedLongestWall) {
+        const walls = Object.values(useScene.getState().nodes).filter(
+          (n): n is WallNode => (n as AnyNode)?.type === 'wall',
+        )
+        let best = 0
+        for (const w of walls) {
+          const len = Math.hypot(w.end[0] - w.start[0], w.end[1] - w.start[1])
+          if (len > best) {
+            best = len
+            p1 = [w.start[0], w.start[1]] as WallPlanPoint
+            p2 = [w.end[0], w.end[1]] as WallPlanPoint
+          }
+        }
+      }
+      setCalibrationP1(p1)
+      setCalibrationP2(p2)
     }
     emitter.on('floorplan:calibrate-scale' as any, handler)
     return () => { emitter.off('floorplan:calibrate-scale' as any, handler) }
@@ -3753,10 +3797,10 @@ export function FloorplanPanel() {
 
   // ESC cancels the calibration flow without applying.
   useEffect(() => {
-    if (!calibratingGuideId) return
+    if (!calibration) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setCalibratingGuideId(null)
+        setCalibration(null)
         setCalibrationP1(null)
         setCalibrationP2(null)
         setCalibrationInput('')
@@ -3764,19 +3808,123 @@ export function FloorplanPanel() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [calibratingGuideId])
+  }, [calibration])
 
-  // Apply the typed real-world distance to the guide's scale.
+  // Scale every plan coordinate by k, about the world origin.
+  //
+  // One shared origin, never per-wall: scaling each wall about its own centre
+  // would change every wall's length correctly and every junction's position
+  // wrongly, pulling the plan apart at the corners. A uniform scale about a
+  // single point is a similarity transform, so angles, junctions and arc
+  // shapes all survive.
+  //
+  // What does NOT scale:
+  //   heights (position[1], wall height, opening height) -- the error is
+  //     horizontal only. It comes from px -> m via door width; storey height
+  //     is a real-world default and is already correct.
+  //   wall thickness -- likewise a default (0.15 m), not detection-derived.
+  //   bulge -- tan(arc_angle/4), an angle. Similarity preserves it.
+  //   item dimensions -- a sofa is the size it is; only where it sits moves.
+  //
+  // Diverges from iOS scalePlan(by:) in one respect: iOS openings store
+  // positionAlongWall as a 0..1 RATIO, so they ride their wall for free and
+  // iOS only has to scale width. Web stores the along-wall distance in
+  // METRES, which does not survive a rescale on its own -- see the door case
+  // below.
+  //
+  // Single updateNodes call so zundo records it as ONE undo step.
+  const scalePlanBy = useCallback((k: number) => {
+    if (!Number.isFinite(k) || k <= 0 || Math.abs(k - 1) < 1e-9) return
+    const nodes = useScene.getState().nodes as Record<string, AnyNode>
+    const updates: { id: AnyNodeId; data: Partial<AnyNode> }[] = []
+
+    for (const node of Object.values(nodes)) {
+      const n = node as any
+      switch (n?.type) {
+        case 'wall':
+          updates.push({
+            id: n.id,
+            data: {
+              start: [n.start[0] * k, n.start[1] * k],
+              end: [n.end[0] * k, n.end[1] * k],
+            } as Partial<AnyNode>,
+          })
+          break
+        case 'door':
+        case 'window':
+          // position is WALL-LOCAL, not world: [0] is the centre's distance
+          // along the wall in metres, [1] is height off the floor, [2] is the
+          // offset across the wall's thickness. Only [0] scales -- a door 3 m
+          // along a wall that just grew to 3.36 m has to move with it, or it
+          // drifts toward the wall's start. [1] and [2] are vertical and
+          // thickness-wise, neither of which this correction touches.
+          updates.push({
+            id: n.id,
+            data: {
+              position: [n.position[0] * k, n.position[1], n.position[2]],
+              width: (n.width ?? 0) * k,
+            } as Partial<AnyNode>,
+          })
+          break
+        case 'zone':
+          updates.push({
+            id: n.id,
+            data: {
+              polygon: (n.polygon ?? []).map((p: [number, number]) => [p[0] * k, p[1] * k]),
+            } as Partial<AnyNode>,
+          })
+          break
+        case 'slab':
+          updates.push({
+            id: n.id,
+            data: {
+              polygon: (n.polygon ?? []).map((p: [number, number]) => [p[0] * k, p[1] * k]),
+              holes: (n.holes ?? []).map((h: [number, number][]) =>
+                h.map((p) => [p[0] * k, p[1] * k]),
+              ),
+            } as Partial<AnyNode>,
+          })
+          break
+        case 'guide':
+          // Position AND scale, so a plan that also has a photo underlay
+          // stays registered against the geometry instead of drifting.
+          updates.push({
+            id: n.id,
+            data: {
+              position: [n.position[0] * k, n.position[1], n.position[2] * k],
+              scale: (n.scale ?? 1) * k,
+            } as Partial<AnyNode>,
+          })
+          break
+        case 'item':
+          updates.push({
+            id: n.id,
+            data: {
+              position: [n.position[0] * k, n.position[1], n.position[2] * k],
+            } as Partial<AnyNode>,
+          })
+          break
+      }
+    }
+    if (updates.length) updateNodes(updates)
+  }, [updateNodes])
+
+  // Apply the typed real-world distance.
   //   observed = current plan distance between the two clicked points
   //   real     = user-entered distance in METERS (ft is converted)
-  //   newScale = currentScale × (real / observed)
-  // This linearity holds because guide width is FLOORPLAN_GUIDE_BASE_WIDTH × scale,
-  // and plan coordinates inside the guide scale proportionally.
+  //   ratio    = real / observed
+  //
+  // Calibrating a guide multiplies guide.scale by the ratio -- linear because
+  // guide width is FLOORPLAN_GUIDE_BASE_WIDTH × scale, so plan coordinates
+  // inside it scale proportionally. Calibrating the plan applies the same
+  // ratio to the geometry instead. Either way scale is a pure multiplier, so
+  // nothing needs re-detecting afterwards.
   const applyCalibration = useCallback(() => {
-    if (!(calibratingGuideId && calibrationP1 && calibrationP2)) return
+    if (!(calibration && calibrationP1 && calibrationP2)) return
     const raw = calibrationInput.trim()
     if (!raw) return
-    const parsed = parseFloat(raw)
+    // Accept a comma decimal separator -- most of Europe types 3,5 not 3.5.
+    const parsed = parseFloat(raw.replace(',', '.'))
     if (!Number.isFinite(parsed) || parsed <= 0) return
     const realMeters = calibrationUnit === 'ft' ? parsed * 0.3048 : parsed
 
@@ -3785,37 +3933,40 @@ export function FloorplanPanel() {
     const observed = Math.hypot(dxObs, dyObs)
     if (observed < 1e-6) return
 
-    const guide = useScene
-      .getState()
-      .nodes[calibratingGuideId as AnyNodeId] as GuideNode | undefined
-    if (!guide) return
-
-    const currentScale = guide.scale ?? 1
     const ratio = realMeters / observed
-    const newScale = currentScale * ratio
-    updateNode(calibratingGuideId as AnyNodeId, { scale: newScale })
+
+    if (calibration.guideId) {
+      const guide = useScene
+        .getState()
+        .nodes[calibration.guideId as AnyNodeId] as GuideNode | undefined
+      if (!guide) return
+      updateNode(calibration.guideId as AnyNodeId, { scale: (guide.scale ?? 1) * ratio })
+    } else {
+      scalePlanBy(ratio)
+    }
 
     // Exit calibration.
-    setCalibratingGuideId(null)
+    setCalibration(null)
     setCalibrationP1(null)
     setCalibrationP2(null)
     setCalibrationInput('')
 
-    // 2026-07-28: after calibration, the guide's world size just
-    // changed dramatically (e.g. 5m default -> 15m real). Fit-to-view
-    // so the user sees the whole trace instead of a tiny corner of a
-    // now-huge image. Small delay lets React commit the scale update
-    // before the fittedViewport memo recomputes.
+    // 2026-07-28: after calibration the world size just changed, often a
+    // lot (a guide goes 5m default -> 15m real; a plan can move 12%).
+    // Fit-to-view so the user sees the whole thing instead of a corner of a
+    // now-bigger drawing. Small delay lets React commit the update before
+    // the fittedViewport memo recomputes.
     window.setTimeout(() => {
       emitter.emit('floorplan:reset-view' as any)
     }, 50)
   }, [
-    calibratingGuideId,
+    calibration,
     calibrationP1,
     calibrationP2,
     calibrationInput,
     calibrationUnit,
     updateNode,
+    scalePlanBy,
   ])
 
   const [floorplanMarqueeState, setFloorplanMarqueeState] = useState<FloorplanMarqueeState | null>(
@@ -4262,7 +4413,7 @@ export function FloorplanPanel() {
   // reference clicks get swallowed by "select this guide". Turning
   // interactions off makes the guide render-only during calibration.
   const canInteractWithGuides =
-    showGuides && canSelectElementFloorplanGeometry && !calibratingGuideId
+    showGuides && canSelectElementFloorplanGeometry && !calibration
   // Ritn3D 2026-07-27: zones are always selectable in select mode.
   // Was gated on structureLayer === 'zones' but the layer picker is
   // hidden in minimal launch mode, so users could see auto-detected
@@ -6548,7 +6699,7 @@ export function FloorplanPanel() {
       // of tool actions. First click sets P1, second sets P2 and surfaces the
       // distance input. A third click after P2 is set restarts (drop both,
       // start over) — convenient if the user mis-clicked.
-      if (calibratingGuideId) {
+      if (calibration) {
         event.preventDefault?.()
         if (!calibrationP1) {
           setCalibrationP1(planPoint)
@@ -6695,7 +6846,7 @@ export function FloorplanPanel() {
     [
       arcDraftEnd,
       arcDraftStart,
-      calibratingGuideId,
+      calibration,
       calibrationP1,
       calibrationP2,
       draftStart,
@@ -6916,7 +7067,7 @@ export function FloorplanPanel() {
       // handleBackgroundClick calibration logic take over instead of
       // opening the WallPanel. Fixes "click Set Scale, then can't click
       // two points" -- previously wall clicks stole the event.
-      if (calibratingGuideId) {
+      if (calibration) {
         event.stopPropagation()
         const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
         if (!planPoint) return
@@ -6961,7 +7112,7 @@ export function FloorplanPanel() {
         nativeEvent: event.nativeEvent as any,
       } as any)
     },
-    [floorplanOpeningLocalY, isOpeningPlacementActive, setSelectedReferenceId, handleWallSelect, calibratingGuideId, calibrationP1, calibrationP2, getPlanPointFromClientPoint],
+    [floorplanOpeningLocalY, isOpeningPlacementActive, setSelectedReferenceId, handleWallSelect, calibration, calibrationP1, calibrationP2, getPlanPointFromClientPoint],
   )
 
   const handleWallDoubleClick = useCallback(
@@ -8266,7 +8417,7 @@ export function FloorplanPanel() {
       {/* Scale calibration banner — paper / ink system banner, ink fill so it
           reads as a top-of-app alert. Webapp aesthetic: ink bar with paper
           text, hairline accent stroke, mono caps for the inline action. */}
-      {calibratingGuideId && (
+      {calibration && (
         <div
           className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 bg-ink px-4 py-3 text-paper shadow-[0_4px_12px_rgba(22,24,28,0.12)]"
           style={{ paddingLeft: '320px' }}
@@ -8276,15 +8427,21 @@ export function FloorplanPanel() {
             <path d="M6 18 L 18 6" />
             <path d="M5 17 l 2 2 M 9 13 l 2 2 M 13 9 l 2 2 M 17 5 l 2 2" />
           </svg>
+          {/* Guidance matters more than the mechanics here: the failure mode
+              is not "user can't click twice", it's picking a span they can't
+              actually go and measure. Naming the two things that work — the
+              building's full width, or a wall already dimensioned on the
+              plan — is what makes the number they type trustworthy. A longer
+              span also dilutes endpoint error proportionally. */}
           <span className="font-medium text-[13.5px] tracking-[-0.005em]">
-            {!calibrationP1 && 'Set scale: click the first endpoint of a known wall on the plan.'}
-            {calibrationP1 && !calibrationP2 && 'Now click the second endpoint.'}
+            {!calibrationP1 && 'Set scale: click two points you know the real distance between — the full width of the building, or a wall with a dimension printed on the plan.'}
+            {calibrationP1 && !calibrationP2 && 'Now click the second point.'}
             {calibrationP1 && calibrationP2 && 'Enter the real distance to finish — or click again to redo.'}
           </span>
           <button
             type="button"
             onClick={() => {
-              setCalibratingGuideId(null)
+              setCalibration(null)
               setCalibrationP1(null)
               setCalibrationP2(null)
               setCalibrationInput('')
@@ -9571,7 +9728,7 @@ export function FloorplanPanel() {
 
             {/* Scale-calibration overlay: dots at P1/P2 + line between them.
                 Drawn last so it's on top of everything. */}
-            {calibratingGuideId && calibrationP1 && (() => {
+            {calibration && calibrationP1 && (() => {
               const a = toSvgPoint({ x: calibrationP1[0], y: calibrationP1[1] })
               const b = calibrationP2
                 ? toSvgPoint({ x: calibrationP2[0], y: calibrationP2[1] })
@@ -9604,7 +9761,7 @@ export function FloorplanPanel() {
             HTML overlay (NOT inside the SVG) so the <input> is a real text
             field with full keyboard handling. Positioned near the bottom of
             the canvas as a small floating card. */}
-        {calibratingGuideId && calibrationP1 && calibrationP2 && (
+        {calibration && calibrationP1 && calibrationP2 && (
           <div
             className="pointer-events-auto fixed bottom-10 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-md border border-hair bg-paper px-3 py-2 shadow-[0_8px_28px_rgba(22,24,28,0.10)]"
           >
