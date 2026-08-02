@@ -63,6 +63,18 @@ export function AutoRoomDetector() {
 
     const tick = () => {
       if (cancelled) return
+      // Auto rooms are DERIVED state, not user edits, so they must not enter
+      // undo history. Each room was a separate createNode, so importing a
+      // plan with 10 rooms buried the user's actual work under 10 undo steps
+      // they never performed -- and undoing one just made the next tick
+      // recreate it, since this pass re-derives rooms from the walls anyway.
+      //
+      // Paused for the whole tick and resumed in finally, so an early return
+      // or a throw can never leave history switched off; that would silently
+      // stop recording every real edit afterwards.
+      const temporal = useScene.temporal.getState()
+      const wasTracking = temporal.isTracking !== false
+      if (wasTracking) temporal.pause()
       try {
         const state = useScene.getState()
         const nodes = state.nodes
@@ -150,6 +162,8 @@ export function AutoRoomDetector() {
         }
       } catch (err) {
         console.error('[auto-rooms] tick failed', err)
+      } finally {
+        if (wasTracking) useScene.temporal.getState().resume()
       }
     }
 

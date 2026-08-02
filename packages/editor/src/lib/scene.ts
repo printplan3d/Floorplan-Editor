@@ -366,6 +366,17 @@ export function applySceneGraphToEditor(sceneGraph?: SceneGraph | null) {
     useScene.getState().clearScene()
   }
 
+  // Loading a scene is not an undoable action, and history from before the
+  // load describes a different plan entirely. Without this the store's
+  // pre-load state -- an EMPTY scene, with no Site/Building/Level -- sat at
+  // the bottom of the undo stack, so undoing past the first real edit wiped
+  // the canvas down to nothing and the editor fell back to "switch to
+  // building level" because no level node was left to render.
+  //
+  // Clearing here makes the loaded plan the floor of the undo stack: undo
+  // can walk back to "as opened" and stops there.
+  useScene.temporal.getState().clear()
+
   syncEditorSelectionFromCurrentScene()
 }
 
