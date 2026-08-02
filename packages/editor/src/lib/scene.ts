@@ -447,19 +447,15 @@ export function deleteLocalDraft(projectId: string): void {
   }
 }
 
-// Ritn3D 2026-07-24: cloud-sync canonical scene helpers.
-// The `scene` field stored server-side is the exact SceneGraph document
-// the editor uses locally -- iOS and Flutter agreed on the same JSON
-// shape (nodes + rootNodeIds). These helpers are identity by design; the
-// call sites use them so if iOS/Flutter ever diverge (e.g. add a wire
-// format version) we can slot in a real translation without touching
-// every caller.
-export type CanonicalScene = SceneGraph
-
-export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
-  return scene
-}
-
-export function canonicalToSceneGraph(canonical: CanonicalScene): SceneGraph {
-  return canonical
-}
+// Ritn3D 2026-08-02: the canonical-scene helpers that used to live here were
+// identity functions, written on the assumption that "iOS and Flutter agreed
+// on the same JSON shape (nodes + rootNodeIds)". Production data disproves it:
+// plans.scene holds SceneGraph for rows written by the webapp and
+// FloorPlanScene ({walls, doors, windows, rooms, ...}) for rows written by
+// iOS. Passing one through unchanged left applySceneGraphToEditor with no
+// `nodes`, so it cleared the canvas -- every cross-device plan opened empty in
+// BOTH directions while its geometry sat intact in the database.
+//
+// The real translation is in ./plan-scene, which is what the package exports.
+// Nothing is re-exported from here, so there is only one implementation and
+// the identity version cannot be imported by accident.

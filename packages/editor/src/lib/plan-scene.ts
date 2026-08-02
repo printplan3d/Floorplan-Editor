@@ -25,6 +25,8 @@
 import {
   arcLength,
   BuildingNode,
+  DEFAULT_WALL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
   DoorNode,
   LevelNode,
   SiteNode,
@@ -131,8 +133,8 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
         id: w.id,
         start: [w.start[0], w.start[1]],  // NO flip — native == canonical
         end: [w.end[0], w.end[1]],
-        thickness: w.thickness ?? 0.1,
-        height: w.height ?? 2.5,
+        thickness: w.thickness ?? DEFAULT_WALL_THICKNESS,
+        height: w.height ?? DEFAULT_WALL_HEIGHT,
         type: w.frontSide === 'exterior' || w.backSide === 'exterior' ? 'exterior' : 'interior',
       }
       if (Math.abs(bulge) > 1e-6) wall.bulge = bulge
@@ -240,8 +242,8 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
       children: [],
       start: [w.start[0], w.start[1]],   // NO flip — canonical == native
       end: [w.end[0], w.end[1]],
-      thickness: w.thickness ?? 0.1,
-      height: w.height ?? 2.5,
+      thickness: w.thickness ?? DEFAULT_WALL_THICKNESS,
+      height: w.height ?? DEFAULT_WALL_HEIGHT,
       bulge: typeof w.bulge === 'number' ? w.bulge : 0,
       frontSide: w.type === 'exterior' ? 'exterior' : 'unknown',
       backSide: w.type === 'exterior' ? 'exterior' : 'unknown',

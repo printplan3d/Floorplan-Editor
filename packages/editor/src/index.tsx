@@ -15,20 +15,20 @@ export type { SaveStatus } from './hooks/use-auto-save'
 export type { SceneGraph } from './lib/scene'
 export {
   applySceneGraphToEditor,
-  canonicalToSceneGraph,
   deleteLocalDraft,
   listLocalDraftIds,
   loadSceneFromLocalStorage,
   saveSceneToLocalStorage,
-  sceneGraphToCanonical,
 } from './lib/scene'
 export { exportFloorPlanJSON } from './lib/export-json'
+// Canonical <-> SceneGraph conversion comes from plan-scene ONLY. scene.ts
+// exported identity stubs under these names, which silently emptied every
+// plan synced from another platform.
 export {
   type CanonicalScene,
   canonicalToSceneGraph,
   sceneGraphToCanonical,
 } from './lib/plan-scene'
-export { saveSceneToLocalStorage } from './lib/scene'
 export { default as useAudio } from './store/use-audio'
 export { type CommandAction, useCommandRegistry } from './store/use-command-registry'
 export { default as useEditor } from './store/use-editor'
