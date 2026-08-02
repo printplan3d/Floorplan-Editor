@@ -97,6 +97,30 @@ const WEB_ROOM_TYPES = new Set([
   'hallway', 'entryway', 'closet', 'laundry', 'garage', 'outdoor', 'other',
 ])
 
+// ---------------------------------------------------------------------------
+// Coordinate frames.
+//
+// The canonical wire format is the MOBILE frame. iOS (EditorState.screenFromWorld)
+// and Flutter (Camera.worldToScreen) both map world -> screen as (+x, +y); the
+// webapp editor maps it as (-x, -y) (floorplan-panel toSvgX/toSvgY). So the
+// webapp's native frame is the mobile frame rotated 180 degrees, and a plan
+// handed between them unchanged shows up turned around. Two of the three
+// clients already use the mobile frame, and it is what the render translator
+// expects, so that is what goes on the wire.
+//
+// This file used to pass coordinates through untouched, on the note
+// "NO flip -- native == canonical". That was true of the SHAPE, never of the
+// orientation.
+//
+// Negating both axes is a 180-degree ROTATION, not a mirror, so:
+//   - arc bulge sign is preserved (handedness survives a rotation; it would
+//     only invert under a true mirror, which is why export-json.ts flips it
+//     there and this does not)
+//   - wall start/end order is untouched, so every opening's
+//     position_along_wall stays valid
+//   - the transform is its own inverse, so one helper serves both directions
+const rot180 = ([x, y]: [number, number]): [number, number] => [-x, -y]
+
 function styleToDoorType(style?: string): string {
   switch (style) {
     case 'double': return 'double'
@@ -131,8 +155,8 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
       const bulge = typeof w.bulge === 'number' ? w.bulge : 0
       const wall: CanonicalWall = {
         id: w.id,
-        start: [w.start[0], w.start[1]],  // NO flip — native == canonical
-        end: [w.end[0], w.end[1]],
+        start: rot180(w.start as [number, number]),
+        end: rot180(w.end as [number, number]),
         thickness: w.thickness ?? DEFAULT_WALL_THICKNESS,
         height: w.height ?? DEFAULT_WALL_HEIGHT,
         type: w.frontSide === 'exterior' || w.backSide === 'exterior' ? 'exterior' : 'interior',
@@ -180,7 +204,7 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
         type,
         wall_ids: [],
         area: 0,
-        polygon: (n.polygon || []).map((p: number[]) => [p[0], p[1]] as [number, number]),
+        polygon: (n.polygon || []).map((p: number[]) => rot180([p[0], p[1]])),
       })
     }
   }
@@ -240,8 +264,8 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
     const wall: any = WallNode.parse({
       parentId: level0.id,
       children: [],
-      start: [w.start[0], w.start[1]],   // NO flip — canonical == native
-      end: [w.end[0], w.end[1]],
+      start: rot180(w.start as [number, number]),
+      end: rot180(w.end as [number, number]),
       thickness: w.thickness ?? DEFAULT_WALL_THICKNESS,
       height: w.height ?? DEFAULT_WALL_HEIGHT,
       bulge: typeof w.bulge === 'number' ? w.bulge : 0,
@@ -294,7 +318,7 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
   }
 
   for (const r of canonical.rooms ?? []) {
-    const polygon = (r.polygon || []).map((p) => [p[0], p[1]] as [number, number])
+    const polygon = (r.polygon || []).map((p) => rot180([p[0], p[1]] as [number, number]))
     if (polygon.length < 3) continue
     const roomType = WEB_ROOM_TYPES.has(r.type ?? '') ? r.type : 'other'
     const zone: any = ZoneNode.parse({
