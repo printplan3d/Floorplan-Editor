@@ -3935,12 +3935,30 @@ export function FloorplanPanel() {
 
     const ratio = realMeters / observed
 
-    if (calibration.guideId) {
-      const guide = useScene
-        .getState()
-        .nodes[calibration.guideId as AnyNodeId] as GuideNode | undefined
+    // WHICH thing is wrong depends on what is on the canvas, NOT on how
+    // calibration was started. Deciding from the trigger was wrong: the
+    // ReferencePanel and icon-rail buttons pass a guideId, so re-calibrating
+    // a detected plan from inside the editor resized only the photo and left
+    // the geometry alone -- the plan appeared to ignore the second attempt.
+    //
+    // No walls  -> tracing. The geometry does not exist yet, so the underlay
+    //              is what needs sizing, and the user traces at true scale.
+    // Walls     -> a detected or drawn plan. The geometry itself carries the
+    //              error, so scale the plan; scalePlanBy takes any guide with
+    //              it, so a plan that has both stays registered.
+    //
+    // Same condition iOS uses in CalibrationOverlay.apply().
+    const sceneNodes = useScene.getState().nodes as Record<string, AnyNode>
+    const hasWalls = Object.values(sceneNodes).some((n) => (n as any)?.type === 'wall')
+
+    if (!hasWalls) {
+      const guideId =
+        calibration.guideId ??
+        Object.values(sceneNodes).find((n) => (n as any)?.type === 'guide')?.id
+      if (!guideId) return
+      const guide = sceneNodes[guideId as AnyNodeId] as GuideNode | undefined
       if (!guide) return
-      updateNode(calibration.guideId as AnyNodeId, { scale: (guide.scale ?? 1) * ratio })
+      updateNode(guideId as AnyNodeId, { scale: (guide.scale ?? 1) * ratio })
     } else {
       scalePlanBy(ratio)
     }
