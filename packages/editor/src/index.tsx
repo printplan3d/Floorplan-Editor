@@ -21,6 +21,10 @@ export {
   saveSceneToLocalStorage,
 } from './lib/scene'
 export { exportFloorPlanJSON } from './lib/export-json'
+// Needed outside the editor too: the webapp's upload -> processing flow stashes
+// the original file to offer "trace over your plan" after a failed detection,
+// and a PDF stored as raw bytes can never render as a guide image.
+export { pdfFileToImageDataUrl, type PdfRenderResult } from './lib/pdf-to-image'
 // Canonical <-> SceneGraph conversion comes from plan-scene ONLY. scene.ts
 // exported identity stubs under these names, which silently emptied every
 // plan synced from another platform.
