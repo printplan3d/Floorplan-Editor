@@ -6,31 +6,37 @@ import {
   type AnyNodeId,
   arcLength,
   arcMidpoint,
-  bulgeFromThreePoints,
   type BuildingNode,
+  bulgeFromThreePoints,
   calculateLevelMiters,
+  DEFAULT_WALL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
   DoorNode,
   emitter,
-  type GuideNode,
   getWallPlanFootprint,
+  type GuideNode,
   isStraight,
   ItemNode,
-  pointAndTangentAtT,
-  tessellateArc,
   type LevelNode,
   loadAssetUrl,
   type Point2D,
+  pointAndTangentAtT,
   type SiteNode,
   SlabNode,
+  StairNode,
+  suggestStairFootprint,
+  tessellateArc,
   useScene,
   type WallNode,
-  DEFAULT_WALL_HEIGHT,
-  DEFAULT_WALL_THICKNESS,
   WindowNode,
   ZoneNode as ZoneNodeSchema,
   type ZoneNode as ZoneNodeType,
 } from '@ritn3d/core'
-import { useViewer } from '@ritn3d/viewer'
+import {
+  DEFAULT_LEVEL_HEIGHT,
+  getLevelHeight,
+  useViewer,
+} from '@ritn3d/viewer'
 import { ChevronDown, Command, X } from 'lucide-react'
 import {
   memo,
@@ -243,7 +249,7 @@ type FloorplanCursorIndicator =
 // entry uses iconNode (inline SVG) since we don't have a PNG for the arc
 // wall yet — the render below conditionally uses iconNode when iconSrc is
 // missing.
-const FLOORPLAN_QUICK_BUILD_TOOL_IDS = ['wall', 'arc-wall', 'door', 'window', 'slab', 'zone'] as const
+const FLOORPLAN_QUICK_BUILD_TOOL_IDS = ['wall', 'arc-wall', 'door', 'window', 'slab', 'zone', 'stair'] as const
 
 type FloorplanQuickBuildTool = (typeof FLOORPLAN_QUICK_BUILD_TOOL_IDS)[number]
 
@@ -254,6 +260,7 @@ const FLOORPLAN_QUICK_BUILD_TOOL_LABELS: Record<FloorplanQuickBuildTool, string>
   window: 'Window',
   slab: 'Floor',
   zone: 'Zone',
+  stair: 'Stair',
 }
 
 const FLOORPLAN_QUICK_BUILD_TOOL_FALLBACK_ICONS: Record<FloorplanQuickBuildTool, string | undefined> = {
@@ -263,6 +270,7 @@ const FLOORPLAN_QUICK_BUILD_TOOL_FALLBACK_ICONS: Record<FloorplanQuickBuildTool,
   window: '/icons/window.png',
   slab: '/icons/floor.png',
   zone: '/icons/zone.png',
+  stair: '/symbols/stairs/staircase.svg',
 }
 
 const FLOORPLAN_QUICK_BUILD_TOOLS = FLOORPLAN_QUICK_BUILD_TOOL_IDS.map((id) => {
@@ -4392,6 +4400,10 @@ export function FloorplanPanel() {
   const isArcWallBuildActive = phase === 'structure' && mode === 'build' && tool === 'arc-wall'
   const isSlabBuildActive = phase === 'structure' && mode === 'build' && tool === 'slab'
   const isZoneBuildActive = phase === 'structure' && mode === 'build' && tool === 'zone'
+  // A stair is placed with ONE click, not a polygon — its shape comes
+  // from the variant and footprint in the panel, not from points the
+  // user traces. So it is deliberately not part of isPolygonBuildActive.
+  const isStairBuildActive = phase === 'structure' && mode === 'build' && tool === 'stair'
   const isDoorBuildActive = phase === 'structure' && mode === 'build' && tool === 'door'
   const isWindowBuildActive = phase === 'structure' && mode === 'build' && tool === 'window'
   const isPolygonBuildActive = isSlabBuildActive || isZoneBuildActive
@@ -5569,6 +5581,45 @@ export function FloorplanPanel() {
       sfxEmitter.emit('sfx:structure-build')
       setSelection({ selectedIds: [slab.id] })
       return slab.id
+    },
+    [levelId, setSelection],
+  )
+  const createStairOnCurrentLevel = useCallback(
+    (point: WallPlanPoint) => {
+      if (!levelId) {
+        return null
+      }
+
+      const { createNode, nodes } = useScene.getState()
+      const stairCount = Object.values(nodes).filter((node) => node.type === 'stair').length
+
+      // Sized to THIS storey on arrival rather than dropped at a fixed
+      // default. Step count is forced by the floor-to-floor height, so a
+      // one-size footprint is comfortable on a 2.4 m storey and punishing on
+      // a 3.6 m one — the stair would land already flagged as too steep,
+      // which is a poor first impression of a constraint the user has not
+      // even met yet.
+      const height = getLevelHeight(levelId as AnyNodeId, nodes) || DEFAULT_LEVEL_HEIGHT
+      const fit = suggestStairFootprint('straight', 1.0, height)
+
+      const stair = StairNode.parse({
+        name: `Stair ${stairCount + 1}`,
+        position: [point[0], point[1]] as [number, number],
+        variant: 'straight',
+        width: 1.0,
+        length: Math.round(fit.length * 100) / 100,
+        depth: Math.round(fit.depth * 100) / 100,
+      })
+
+      createNode(stair, levelId)
+      sfxEmitter.emit('sfx:structure-build')
+      setSelection({ selectedIds: [stair.id] })
+      // Straight back to select, so the panel opens on the stair just placed
+      // — the footprint almost always wants adjusting, and that is the point
+      // of placing it explicitly.
+      useEditor.getState().setMode('select')
+      useEditor.getState().setTool(null)
+      return stair.id
     },
     [levelId, setSelection],
   )
@@ -6796,6 +6847,15 @@ export function FloorplanPanel() {
         return
       }
 
+      // Placed on the CLICK handler, not pointer-move. The polygon
+      // branch this sits above appears in BOTH, because the move
+      // handler draws the rubber-band preview — putting stair
+      // creation in that one spawned a stair on every mouse move.
+      if (isStairBuildActive) {
+        createStairOnCurrentLevel(planPoint)
+        return
+      }
+
       if (isPolygonBuildActive) {
         const snappedPoint = snapPolygonDraftPoint({
           point: planPoint,
@@ -6881,6 +6941,8 @@ export function FloorplanPanel() {
       isPolygonBuildActive,
       isWallBuildActive,
       isZoneBuildActive,
+      isStairBuildActive,
+      createStairOnCurrentLevel,
       setSelectedReferenceId,
       setSelection,
       shiftPressed,

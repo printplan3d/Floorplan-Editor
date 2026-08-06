@@ -54,6 +54,7 @@ export const tools: ToolConfig[] = [
   { id: 'door', iconSrc: '/icons/door.png', label: 'Door' },
   { id: 'window', iconSrc: '/icons/window.png', label: 'Window' },
   { id: 'zone', iconSrc: '/icons/zone.png', label: 'Room' },
+  { id: 'stair', iconSrc: '/symbols/stairs/staircase.svg', label: 'Stair' },
 ]
 
 export function StructureTools() {
