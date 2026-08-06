@@ -63,6 +63,7 @@ import {
   type WallPlanPoint,
 } from '../tools/wall/wall-drafting'
 import { furnishTools } from '../ui/action-menu/furnish-tools'
+import { buildStairPlan, isPointInStairPlan, polygonToPath, type StairPlan } from '../../lib/stair-plan'
 import { tools as structureTools } from '../ui/action-menu/structure-tools'
 import { SliderControl } from '../ui/controls/slider-control'
 import { PALETTE_COLORS } from '../ui/primitives/color-dot'
@@ -2304,6 +2305,8 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   palette,
   selectedIdSet,
   slabPolygons,
+  stairPlans,
+  onStairSelect,
   wallPolygons,
   unit,
 }: {
@@ -2323,6 +2326,8 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   palette: FloorplanPalette
   selectedIdSet: ReadonlySet<string>
   slabPolygons: SlabPolygonEntry[]
+  stairPlans: StairPlan[]
+  onStairSelect: (stairId: StairNode['id'], event: ReactMouseEvent<SVGElement>) => void
   wallPolygons: WallPolygonEntry[]
   unit: 'metric' | 'imperial'
 }) {
@@ -2366,6 +2371,60 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
 
   return (
     <>
+      {/* Stairs. Drawn above slabs because a stair sits ON the floor, and
+          hit-tested in the same order — clicking one should select the stair,
+          not the slab underneath it. */}
+      {stairPlans.map((plan) => {
+        const isSelected = selectedIdSet.has(plan.stair.id)
+        const stroke = plan.warns ? '#f59e0b' : isSelected ? '#7c6cf7' : '#5b5b66'
+        return (
+          <g key={plan.stair.id}>
+            <path
+              d={polygonToPath(plan.outline)}
+              fill={isSelected ? 'rgba(124,108,247,0.16)' : 'rgba(120,116,110,0.10)'}
+              stroke={stroke}
+              strokeWidth={isSelected ? 0.05 : 0.03}
+              style={{ cursor: 'pointer' }}
+              onClick={(event) => onStairSelect(plan.stair.id, event)}
+            />
+            {plan.landing && (
+              <path
+                d={polygonToPath(plan.landing)}
+                fill={isSelected ? 'rgba(124,108,247,0.10)' : 'rgba(120,116,110,0.06)'}
+                stroke={stroke}
+                strokeWidth={0.02}
+                pointerEvents="none"
+              />
+            )}
+            {plan.treadLines.map((line, i) => (
+              <line
+                key={i}
+                pointerEvents="none"
+                stroke={stroke}
+                strokeWidth={0.02}
+                x1={line[0].x}
+                x2={line[1].x}
+                y1={line[0].y}
+                y2={line[1].y}
+              />
+            ))}
+            {plan.arrow && (
+              <g pointerEvents="none">
+                <line
+                  stroke={stroke}
+                  strokeWidth={0.035}
+                  x1={plan.arrow.shaft[0].x}
+                  x2={plan.arrow.shaft[1].x}
+                  y1={plan.arrow.shaft[0].y}
+                  y2={plan.arrow.shaft[1].y}
+                />
+                <path d={polygonToPath(plan.arrow.head)} fill={stroke} />
+              </g>
+            )}
+          </g>
+        )
+      })}
+
       {slabPolygons.map(({ slab, polygon, holes, path }) => {
         const isSelected = selectedIdSet.has(slab.id)
         // Ritn3D 2026-06-18: colour and label slabs by surface type so the
@@ -3637,6 +3696,20 @@ export function FloorplanPanel() {
         .filter((node): node is SlabNode => node?.type === 'slab')
     }),
   )
+  const stairs = useScene(
+    useShallow((state) => {
+      if (!levelId) {
+        return [] as StairNode[]
+      }
+      const node = state.nodes[levelId]
+      if (!node || node.type !== 'level') {
+        return [] as StairNode[]
+      }
+      return node.children
+        .map((childId) => state.nodes[childId])
+        .filter((child): child is StairNode => child?.type === 'stair')
+    }),
+  )
   const levelGuides = useScene(
     useShallow((state) => {
       if (!levelId) {
@@ -4322,6 +4395,19 @@ export function FloorplanPanel() {
       }),
     [slabs],
   )
+  // Tread count follows the storey height, so the symbol is rebuilt whenever
+  // the level's walls change — a taller storey genuinely has more steps and
+  // the plan should show them.
+  const stairLevelHeight = useScene(
+    useShallow((state) =>
+      levelId ? getLevelHeight(levelId, state.nodes) || DEFAULT_LEVEL_HEIGHT : DEFAULT_LEVEL_HEIGHT,
+    ),
+  )
+  const stairPlans = useMemo(
+    () => stairs.map((stair) => buildStairPlan(stair, stairLevelHeight)),
+    [stairs, stairLevelHeight],
+  )
+
   const displaySlabPolygons = useMemo(() => {
     if (!slabBoundaryDraft) {
       return slabPolygons
@@ -7091,6 +7177,13 @@ export function FloorplanPanel() {
         return wallHit.wall.id
       }
 
+      // Before slabs: a stair sits on top of the floor, so a click inside its
+      // footprint means the stair.
+      const stairHit = stairPlans.find((plan) => isPointInStairPlan(point, plan))
+      if (stairHit) {
+        return stairHit.stair.id
+      }
+
       const slabHit = displaySlabPolygons.find(({ polygon, holes }) =>
         isPointInsidePolygonWithHoles(point, polygon, holes),
       )
@@ -7103,6 +7196,7 @@ export function FloorplanPanel() {
     [
       displaySlabPolygons,
       displayWallPolygons,
+      stairPlans,
       floorplanOpeningHitTolerance,
       floorplanWallHitTolerance,
       openingsPolygons,
@@ -7214,7 +7308,7 @@ export function FloorplanPanel() {
   )
   const emitFloorplanNodeClick = useCallback(
     (
-      nodeId: SlabNode['id'] | OpeningNode['id'] | ZoneNodeType['id'],
+      nodeId: SlabNode['id'] | OpeningNode['id'] | ZoneNodeType['id'] | StairNode['id'],
       event: ReactMouseEvent<SVGElement>,
     ) => {
       const node = useScene.getState().nodes[nodeId as AnyNodeId]
@@ -7394,6 +7488,12 @@ export function FloorplanPanel() {
   const handleSlabSelect = useCallback(
     (slabId: SlabNode['id'], event: ReactMouseEvent<SVGElement>) => {
       emitFloorplanNodeClick(slabId, event)
+    },
+    [emitFloorplanNodeClick],
+  )
+  const handleStairSelect = useCallback(
+    (stairId: StairNode['id'], event: ReactMouseEvent<SVGElement>) => {
+      emitFloorplanNodeClick(stairId, event)
     },
     [emitFloorplanNodeClick],
   )
@@ -9124,6 +9224,8 @@ export function FloorplanPanel() {
               palette={palette}
               selectedIdSet={selectedIdSet}
               slabPolygons={displaySlabPolygons}
+              stairPlans={stairPlans}
+              onStairSelect={handleStairSelect}
               unit={unit}
               wallPolygons={displayWallPolygons}
             />
