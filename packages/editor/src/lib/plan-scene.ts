@@ -204,7 +204,7 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
         type,
         wall_ids: [],
         area: 0,
-        polygon: (n.polygon || []).map((p: number[]) => rot180([p[0], p[1]])),
+        polygon: (n.polygon || []).map((p: number[]) => rot180([p[0] ?? 0, p[1] ?? 0])),
       })
     }
   }

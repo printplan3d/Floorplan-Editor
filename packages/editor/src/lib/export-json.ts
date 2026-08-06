@@ -1,22 +1,41 @@
 import { type AnyNodeId, arcLength, DEFAULT_WALL_HEIGHT, DEFAULT_WALL_THICKNESS, type DoorNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@ritn3d/core'
-import { useViewer } from '@ritn3d/viewer'
+import { DEFAULT_LEVEL_HEIGHT, getLevelHeight, useViewer } from '@ritn3d/viewer'
 
 /**
  * Export the current floor plan as structured JSON matching the Ritn3D Blender pipeline format.
  * This JSON can be POST'd to /api/generate-from-drawing to create a 3D model.
  */
+/* Pre-flip X (and the arc bulge sign) to match the mobile editors and the
+   backend translator's [-x, -y]. Hoisted to module scope because slabs need
+   exactly the same correction as walls — a second copy inside another branch
+   is precisely how this codebase ended up with two encoders for one format. */
+const flipX = ([x, y]: [number, number]): [number, number] => [-x, y]
+const flipBulge = (b: number) => -b
+
 export function exportFloorPlanJSON(): object {
   const { nodes } = useScene.getState()
   const { selection } = useViewer.getState()
 
   const allNodes = Object.values(nodes)
 
-  // Collect walls per level
-  const levels = allNodes.filter((n) => n.type === 'level') as any[]
+  /* Sorted by level number, because `elevation` below is a running total —
+     iterating in scene order would stack floor 2 under floor 1 whenever the
+     nodes happened to be created out of order. */
+  const levels = (allNodes.filter((n) => n.type === 'level') as any[])
+    .sort((a, b) => (a.level ?? 0) - (b.level ?? 0))
+
   const floors: any[] = []
+  const allWalls: any[] = []
+  const allDoors: any[] = []
+  const allWindows: any[] = []
+  const allRooms: any[] = []
+  const allSlabs: any[] = []
+  /** Height of everything below this level — i.e. where this floor starts. */
+  let cumulativeElevation = 0
 
   for (const level of levels) {
     const levelWalls: any[] = []
+    const levelSlabs: any[] = []
     const levelDoors: any[] = []
     const levelWindows: any[] = []
     const levelRooms: any[] = []
@@ -37,8 +56,6 @@ export function exportFloorPlanJSON(): object {
         // POST body up with mobile's, which the translator handles
         // correctly. Bulge sign follows the same rule the mobile editor
         // uses at [editor_scene.dart:250].
-        const flipX = ([x, y]: [number, number]): [number, number] => [-x, y]
-        const flipBulge = (b: number) => -b
         const wallExport = {
           id: w.id,
           start: flipX(w.start as any),
@@ -134,98 +151,66 @@ export function exportFloorPlanJSON(): object {
       }
     }
 
+    /* Slabs are the multi-storey primitive the pipeline needs and the export
+       has never sent: a level's slab IS the ceiling of the level below where
+       it overlaps, and its `holes` are the stair openings and double-height
+       voids. Emitted in level-local coordinates with the same flipX the walls
+       get, so the pipeline sees one consistent frame. */
+    for (const child of children) {
+      if (child.type !== 'slab') continue
+      const sl = child as any
+      levelSlabs.push({
+        id: sl.id,
+        polygon: (sl.polygon || []).map((pt: [number, number]) => flipX(pt)),
+        holes: (sl.holes || []).map((h: [number, number][]) => h.map((pt) => flipX(pt))),
+        elevation: sl.elevation ?? 0.05,
+        thickness: sl.thickness ?? 0.2,
+      })
+    }
+
+    /* Real height, not a hardcoded 2.7. getLevelHeight reads the tallest wall
+       or ceiling on the level, so a storey with 3 m walls stacks at 3 m — and
+       `elevation` is the running total, which is what lets the pipeline place
+       floor 2 on top of floor 1 instead of through it. */
+    const levelHeight = getLevelHeight(level.id, nodes) || DEFAULT_LEVEL_HEIGHT
+
     floors.push({
       id: level.id,
       level: level.level ?? 0,
       label: `Level ${level.level ?? 0}`,
-      height: 2.7,
+      height: levelHeight,
+      elevation: cumulativeElevation,
       walls: levelWalls.map((w: any) => w.id),
       doors: levelDoors.map((d: any) => d.id),
       windows: levelWindows.map((w: any) => w.id),
       rooms: levelRooms.map((r: any) => r.id),
+      slabs: levelSlabs.map((s: any) => s.id),
     })
+    cumulativeElevation += levelHeight
 
-    // Flatten into top-level arrays (first floor for now)
-    if (floors.length === 1) {
-      return {
-        walls: levelWalls,
-        doors: levelDoors,
-        windows: levelWindows,
-        rooms: levelRooms,
-        floors,
-        stairs: [],
-        furniture: [],
-        metadata: {
-          unit: 'meters',
-          scale: 1.0,
-          created_at: new Date().toISOString(),
-          source: 'web_editor',
-          version: '1.0',
-        },
-      }
-    }
-  }
-
-  // Multi-floor: return all
-  const allWalls: any[] = []
-  const allDoors: any[] = []
-  const allWindows: any[] = []
-  const allRooms: any[] = []
-
-  for (const level of levels) {
-    const children = (level.children || []).map((id: string) => nodes[id as AnyNodeId]).filter(Boolean)
-    for (const child of children) {
-      if (child.type === 'wall') {
-        const w = child as WallNode
-        allWalls.push({
-          id: w.id,
-          start: w.start,
-          end: w.end,
-          thickness: w.thickness ?? DEFAULT_WALL_THICKNESS,
-          height: w.height ?? DEFAULT_WALL_HEIGHT,
-          type: 'interior',
-          ...(w.bulge && w.bulge !== 0 ? { bulge: w.bulge } : {}),
-        })
-        const wallChildren = (w.children || []).map((id: string) => nodes[id as AnyNodeId]).filter(Boolean)
-        for (const wc of wallChildren) {
-          if (!wc) continue  // .filter(Boolean) doesn't narrow the TS type
-          if (wc.type === 'door') {
-            const d = wc as DoorNode
-            // For curved walls, "position_along_wall" is parametric over arc
-            // length, not chord. For straight walls bulge=0 so arcLength
-            // collapses to chord length — same answer as before.
-            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
-            allDoors.push({
-              id: d.id, wall_id: w.id,
-              position_along_wall: wallLen > 0 ? d.position[0] / wallLen : 0.5,
-              width: d.width, height: d.height,
-              door_type: 'single', swing_direction: d.hingesSide === 'left' ? 'left' : 'right',
-            })
-          }
-          if (wc.type === 'window') {
-            const win = wc as WindowNode
-            // For curved walls, "position_along_wall" is parametric over arc
-            // length, not chord. For straight walls bulge=0 so arcLength
-            // collapses to chord length — same answer as before.
-            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
-            allWindows.push({
-              id: win.id, wall_id: w.id,
-              position_along_wall: wallLen > 0 ? win.position[0] / wallLen : 0.5,
-              width: win.width, height: win.height,
-              sill_height: Math.max(0, (win.position[1] ?? 0) - (win.height ?? 1.5) / 2),
-              pane_count: (win.columnRatios?.length ?? 1) * (win.rowRatios?.length ?? 1),
-            })
-          }
-        }
-      }
-    }
+    /* Accumulate rather than return. This used to `return` here whenever
+       floors.length === 1 — which is always true on the first pass — so every
+       level after the first was silently dropped and the "multi-floor" branch
+       below was unreachable. That branch was also a worse duplicate: it omitted
+       the flipX correction, never populated rooms, and typed every wall
+       'interior'. Deleted rather than revived; one loop, one coordinate
+       convention. */
+    allWalls.push(...levelWalls)
+    allDoors.push(...levelDoors)
+    allWindows.push(...levelWindows)
+    allRooms.push(...levelRooms)
+    allSlabs.push(...levelSlabs)
   }
 
   return {
+    // Flat arrays stay for the single-storey pipeline, which reads these and
+    // ignores `floors`. Multi-storey consumers should read `floors` and use
+    // these as the id lookup.
     walls: allWalls,
     doors: allDoors,
     windows: allWindows,
     rooms: allRooms,
+    slabs: allSlabs,
     floors,
     stairs: [],
     furniture: [],
@@ -235,6 +220,7 @@ export function exportFloorPlanJSON(): object {
       created_at: new Date().toISOString(),
       source: 'web_editor',
       version: '1.0',
+      level_count: floors.length,
     },
   }
 }
