@@ -17,7 +17,7 @@ import {
   type GuideNode,
   isStraight,
   ItemNode,
-  type LevelNode,
+  LevelNode,
   loadAssetUrl,
   type Point2D,
   pointAndTangentAtT,
@@ -37,7 +37,7 @@ import {
   getLevelHeight,
   useViewer,
 } from '@ritn3d/viewer'
-import { ChevronDown, Command, X } from 'lucide-react'
+import { ChevronDown, Command, Plus, X } from 'lucide-react'
 import {
   memo,
   type MouseEvent as ReactMouseEvent,
@@ -3696,6 +3696,58 @@ export function FloorplanPanel() {
         .filter((node): node is SlabNode => node?.type === 'slab')
     }),
   )
+  // Ritn3D 2026-08-07: levels, for the canvas level switcher.
+  //
+  // The sidebar's site tree — which is where Pascal put "Add level" — is hard
+  // disabled in app-sidebar.tsx behind `{false && ...}` for the first-storey
+  // launch. That left multi-storey completely unreachable: the pipeline could
+  // render a second floor, the exporter could describe one, and nothing in
+  // the UI could create or even show one. This puts it on the canvas, where
+  // the rest of this editor lives, rather than reviving that panel.
+  const levelsOnBuilding = useScene(
+    useShallow((state) => {
+      if (!buildingId) {
+        return [] as LevelNode[]
+      }
+      const building = state.nodes[buildingId]
+      if (!building || building.type !== 'building') {
+        return [] as LevelNode[]
+      }
+      return building.children
+        .map((childId) => state.nodes[childId])
+        .filter((child): child is LevelNode => child?.type === 'level')
+        .slice()
+        .sort((a, b) => (a.level ?? 0) - (b.level ?? 0))
+    }),
+  )
+
+  const handleSelectLevel = useCallback(
+    (id: LevelNode['id']) => {
+      setSelection({ levelId: id, selectedIds: [] })
+    },
+    [setSelection],
+  )
+
+  const handleAddLevel = useCallback(() => {
+    if (!buildingId) return
+    const { createNode, nodes } = useScene.getState()
+    const building = nodes[buildingId]
+    if (!building || building.type !== 'building') return
+
+    // Number from the highest EXISTING level, not the count. Deleting a middle
+    // storey would otherwise hand the next one a number already in use, and
+    // the exporter stacks storeys by that number.
+    const existing = building.children
+      .map((childId) => nodes[childId])
+      .filter((child): child is LevelNode => child?.type === 'level')
+    const nextNumber = existing.reduce((max, lvl) => Math.max(max, lvl.level ?? 0), -1) + 1
+
+    const level = LevelNode.parse({ level: nextNumber, children: [], parentId: buildingId })
+    createNode(level, buildingId)
+    setSelection({ levelId: level.id, selectedIds: [] })
+    sfxEmitter.emit('sfx:structure-build')
+  }, [buildingId, setSelection])
+
   const stairs = useScene(
     useShallow((state) => {
       if (!levelId) {
@@ -8931,6 +8983,60 @@ export function FloorplanPanel() {
               </PopoverContent>
             </Popover>
           </div>
+
+          {/* Level switcher. Same pill as the tool strip beside it so it reads
+              as part of the canvas furniture rather than a panel. Ground floor
+              is "G" because that is what people call it; everything above is
+              its storey number. */}
+          {levelsOnBuilding.length > 0 && (
+            <div className="flex items-center gap-1 rounded-xl border border-border/45 bg-background/92 p-1 shadow-[0_1px_2px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.04)]">
+              {levelsOnBuilding.map((lvl) => {
+                const isActive = lvl.id === levelId
+                const number = lvl.level ?? 0
+                return (
+                  <Tooltip key={lvl.id}>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={`Show level ${number}`}
+                        aria-pressed={isActive}
+                        className={cn(
+                          'flex h-8 min-w-8 items-center justify-center rounded-lg px-2 font-medium text-[12px] transition-[background-color,opacity,transform] duration-200 active:scale-[0.96]',
+                          isActive
+                            ? 'bg-accent text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+                            : 'text-muted-foreground opacity-75 hover:bg-accent hover:opacity-100',
+                        )}
+                        onClick={() => handleSelectLevel(lvl.id)}
+                        type="button"
+                      >
+                        {number === 0 ? 'G' : number}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={8}>
+                      {lvl.name || (number === 0 ? 'Ground floor' : `Level ${number}`)}
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })}
+
+              <div aria-hidden="true" className="mx-0.5 h-5 w-px bg-border/45" />
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label="Add a level above"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground opacity-75 transition-[background-color,opacity,transform] duration-200 hover:bg-accent hover:opacity-100 active:scale-[0.96]"
+                    onClick={handleAddLevel}
+                    type="button"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={8}>
+                  Add a level above
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
 
           <div className="flex items-center gap-1 rounded-xl border border-border/45 bg-background/92 p-1 shadow-[0_1px_2px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.04)]">
             {FLOORPLAN_QUICK_BUILD_TOOLS.map((quickTool) => {
