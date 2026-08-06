@@ -5,6 +5,7 @@ import { CeilingNode } from './ceiling'
 import { GuideNode } from './guide'
 import { RoofNode } from './roof'
 import { SlabNode } from './slab'
+import { StairNode } from './stair'
 import { WallNode } from './wall'
 import { ZoneNode } from './zone'
 
@@ -17,6 +18,7 @@ export const LevelNode = BaseNode.extend({
         WallNode.shape.id,
         ZoneNode.shape.id,
         SlabNode.shape.id,
+        StairNode.shape.id,
         CeilingNode.shape.id,
         RoofNode.shape.id,
         // ScanNode removed 2026-06-10 (Ritn3D cleanup): 3D-scan reference

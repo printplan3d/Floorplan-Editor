@@ -28,6 +28,22 @@ export { RoofSegmentNode, RoofType } from './nodes/roof-segment'
 // Nodes
 export { SiteNode } from './nodes/site'
 export { SlabNode, SlabSurfaceType } from './nodes/slab'
+export {
+  computeStairMetrics,
+  getStairFootprint,
+  STAIR_FLIGHT_GAP,
+  STAIR_MAX_ANGLE_DEG,
+  STAIR_MAX_RISER,
+  STAIR_MIN_RISER,
+  STAIR_MIN_TREAD,
+  STAIR_MIN_WIDTH,
+  STAIR_NOSING,
+  STAIR_TARGET_RISER,
+  StairNode,
+  type StairMetrics,
+  StairVariant,
+  suggestStairFootprint,
+} from './nodes/stair'
 export { WallNode } from './nodes/wall'
 export { WindowNode } from './nodes/window'
 export { ZoneNode, RoomType } from './nodes/zone'

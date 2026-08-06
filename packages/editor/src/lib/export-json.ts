@@ -1,4 +1,4 @@
-import { type AnyNodeId, arcLength, DEFAULT_WALL_HEIGHT, DEFAULT_WALL_THICKNESS, type DoorNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@ritn3d/core'
+import { type AnyNodeId, arcLength, computeStairMetrics, DEFAULT_WALL_HEIGHT, DEFAULT_WALL_THICKNESS, type DoorNode, getStairFootprint, type StairNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@ritn3d/core'
 import { DEFAULT_LEVEL_HEIGHT, getLevelHeight, useViewer } from '@ritn3d/viewer'
 
 /**
@@ -30,12 +30,14 @@ export function exportFloorPlanJSON(): object {
   const allWindows: any[] = []
   const allRooms: any[] = []
   const allSlabs: any[] = []
+  const allStairs: any[] = []
   /** Height of everything below this level — i.e. where this floor starts. */
   let cumulativeElevation = 0
 
   for (const level of levels) {
     const levelWalls: any[] = []
     const levelSlabs: any[] = []
+    const levelStairs: any[] = []
     const levelDoors: any[] = []
     const levelWindows: any[] = []
     const levelRooms: any[] = []
@@ -168,11 +170,47 @@ export function exportFloorPlanJSON(): object {
       })
     }
 
+    /* Stairs. The storey height is resolved here rather than further down
+       because a stair needs it, and the floors entry below reuses the value.
+
+       Each stair carries its own metrics. The pipeline must build exactly
+       what the editor showed the user — same step count, riser and tread —
+       instead of re-deriving them from a hardcoded floor-to-floor default,
+       which is how the old procedural stairs came out at the wrong height
+       and ran out through the wall. */
+    const stairLevelHeight = getLevelHeight(level.id, nodes) || DEFAULT_LEVEL_HEIGHT
+    for (const child of children) {
+      if (child.type !== 'stair') continue
+      const st = child as StairNode
+      const m = computeStairMetrics(st, stairLevelHeight)
+      const fp = getStairFootprint(st)
+      levelStairs.push({
+        id: st.id,
+        position: flipX(st.position as any),
+        /* Mirroring X flips the sense of rotation and of the turn, exactly as
+           it does for arc bulge. A U-stair exported without this turns the
+           wrong way in the render. */
+        rotation: -st.rotation,
+        variant: st.variant,
+        handedness: st.handedness === 'left' ? 'right' : 'left',
+        width: st.width,
+        length: fp.length,
+        depth: fp.width,
+        railing: st.railing ?? true,
+        floor_height: stairLevelHeight,
+        step_count: m.stepCount,
+        riser_height: m.riser,
+        tread_depth: m.tread,
+        angle_deg: m.angleDeg,
+        fits: m.fits,
+      })
+    }
+
     /* Real height, not a hardcoded 2.7. getLevelHeight reads the tallest wall
        or ceiling on the level, so a storey with 3 m walls stacks at 3 m — and
        `elevation` is the running total, which is what lets the pipeline place
        floor 2 on top of floor 1 instead of through it. */
-    const levelHeight = getLevelHeight(level.id, nodes) || DEFAULT_LEVEL_HEIGHT
+    const levelHeight = stairLevelHeight
 
     floors.push({
       id: level.id,
@@ -185,6 +223,7 @@ export function exportFloorPlanJSON(): object {
       windows: levelWindows.map((w: any) => w.id),
       rooms: levelRooms.map((r: any) => r.id),
       slabs: levelSlabs.map((s: any) => s.id),
+      stairs: levelStairs.map((s: any) => s.id),
     })
     cumulativeElevation += levelHeight
 
@@ -200,6 +239,7 @@ export function exportFloorPlanJSON(): object {
     allWindows.push(...levelWindows)
     allRooms.push(...levelRooms)
     allSlabs.push(...levelSlabs)
+    allStairs.push(...levelStairs)
   }
 
   return {
@@ -212,7 +252,7 @@ export function exportFloorPlanJSON(): object {
     rooms: allRooms,
     slabs: allSlabs,
     floors,
-    stairs: [],
+    stairs: allStairs,
     furniture: [],
     metadata: {
       unit: 'meters',
