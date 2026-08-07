@@ -245,14 +245,41 @@ export function suggestStairFootprint(
   width: number,
   levelHeight: number,
 ): { length: number; depth: number } {
+  /* The exact inverse of computeStairMetrics, so "fit to this storey" always
+     lands on fits === true.
+
+     The previous version was neither. It never reserved STAIR_NOSING, which
+     the metrics subtract from every available run — so a fitted stair came
+     back one nosing short and reported as slightly too steep. And for an L it
+     returned depth = width, the landing alone, leaving flight 2 with no run
+     at all: fitting an L produced a stair the panel immediately flagged. */
   const h = Math.max(0.1, levelHeight)
   const stepCount = Math.max(2, Math.ceil(h / STAIR_TARGET_RISER))
   const tread = 0.27
+  const round = (v: number) => Math.round(v * 100) / 100
+
   if (variant === 'straight') {
-    return { length: stepCount * tread, depth: width }
+    return { length: round(STAIR_NOSING + stepCount * tread), depth: round(width) }
   }
-  const perFlight = Math.ceil(stepCount / 2)
-  const length = perFlight * tread + width // + landing
-  const depth = variant === 'u' ? width * 2 + STAIR_FLIGHT_GAP : width
-  return { length, depth }
+
+  // Same split the metrics use: flight 1 takes the extra step on an odd count.
+  const firstRun = stepCount - Math.floor(stepCount / 2)
+  const secondRun = Math.floor(stepCount / 2)
+  const landing = width
+
+  if (variant === 'u') {
+    // Both flights run along the length; the longer one sets it.
+    const perFlight = Math.max(firstRun, secondRun)
+    return {
+      length: round(STAIR_NOSING + landing + perFlight * tread),
+      depth: round(width * 2 + STAIR_FLIGHT_GAP),
+    }
+  }
+
+  // 'l' — flight 1 along the length, flight 2 along the depth. Both need the
+  // landing and the nosing subtracted, which is what the metrics do.
+  return {
+    length: round(STAIR_NOSING + landing + firstRun * tread),
+    depth: round(STAIR_NOSING + landing + secondRun * tread),
+  }
 }

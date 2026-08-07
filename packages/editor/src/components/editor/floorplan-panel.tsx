@@ -3768,39 +3768,46 @@ export function FloorplanPanel() {
   // Walls and stair footprints only. Not floors or zones: the point is a
   // faint reference, and filled shapes at low opacity read as smudge rather
   // than structure.
-  const levelBelowGhost = useScene(
-    useShallow((state) => {
-      if (!levelId) return null
-      const lvl = state.nodes[levelId]
-      if (!lvl || lvl.type !== 'level') return null
-      const bId = lvl.parentId
-      if (!bId) return null
-      const building = state.nodes[bId as AnyNodeId]
-      if (!building || building.type !== 'building') return null
+  // NOT a useShallow selector. Returning a fresh object of fresh arrays from
+  // a store selector makes useShallow compare the ARRAY REFERENCES — new on
+  // every read — so the selector reads as changed every time and the
+  // component re-renders forever. That surfaced as the page crashing the
+  // moment a second level existed, since that is when this returns non-null.
+  //
+  // useMemo over the node map instead: recomputed when the scene actually
+  // changes, stable between renders when it has not.
+  const sceneNodes = useScene((state) => state.nodes)
+  const levelBelowGhost = useMemo(() => {
+    if (!levelId) return null
+    const lvl = sceneNodes[levelId]
+    if (!lvl || lvl.type !== 'level') return null
+    const bId = lvl.parentId
+    if (!bId) return null
+    const building = sceneNodes[bId as AnyNodeId]
+    if (!building || building.type !== 'building') return null
 
-      const mine = (lvl as LevelNode).level ?? 0
-      let below: LevelNode | null = null
-      for (const childId of building.children) {
-        const c = state.nodes[childId]
-        if (c?.type !== 'level') continue
-        const n = (c as LevelNode).level ?? 0
-        if (n < mine && (below === null || n > (below.level ?? 0))) below = c as LevelNode
-      }
-      if (!below) return null
+    const mine = (lvl as LevelNode).level ?? 0
+    let below: LevelNode | null = null
+    for (const childId of building.children) {
+      const c = sceneNodes[childId]
+      if (c?.type !== 'level') continue
+      const n = (c as LevelNode).level ?? 0
+      if (n < mine && (below === null || n > (below.level ?? 0))) below = c as LevelNode
+    }
+    if (!below) return null
 
-      const walls: { start: [number, number]; end: [number, number] }[] = []
-      const stairs: StairNode[] = []
-      for (const childId of below.children) {
-        const c = state.nodes[childId]
-        if (c?.type === 'wall') {
-          walls.push({ start: c.start as [number, number], end: c.end as [number, number] })
-        } else if (c?.type === 'stair') {
-          stairs.push(c as StairNode)
-        }
+    const walls: { start: [number, number]; end: [number, number] }[] = []
+    const stairs: StairNode[] = []
+    for (const childId of below.children) {
+      const c = sceneNodes[childId]
+      if (c?.type === 'wall') {
+        walls.push({ start: c.start as [number, number], end: c.end as [number, number] })
+      } else if (c?.type === 'stair') {
+        stairs.push(c as StairNode)
       }
-      return walls.length || stairs.length ? { walls, stairs } : null
-    }),
-  )
+    }
+    return walls.length || stairs.length ? { walls, stairs } : null
+  }, [levelId, sceneNodes])
 
   const levelsOnBuilding = useScene(
     useShallow((state) => {
