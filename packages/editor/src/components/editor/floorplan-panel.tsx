@@ -2381,6 +2381,107 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
 
   return (
     <>
+      {slabPolygons.map(({ slab, polygon, holes, path }) => {
+        const isSelected = selectedIdSet.has(slab.id)
+        // Ritn3D 2026-06-18: colour and label slabs by surface type so the
+        // user can tell a Patio from a Garage from a Driveway at a glance.
+        // Interior slabs keep the neutral palette so existing floor plans
+        // read the same.
+        const surfaceType = (slab as any).surfaceType ?? 'interior'
+        const surfaceFill =
+          surfaceType === 'patio' ? '#c8b78a'
+          : surfaceType === 'deck' ? '#a78458'
+          : surfaceType === 'driveway' ? '#8f9098'
+          : surfaceType === 'garage' ? '#9aa2ac'
+          : surfaceType === 'gravel' ? '#b8b4a5'
+          : surfaceType === 'grass' ? '#8ab073'
+          : surfaceType === 'wood' ? '#b7885a'
+          : null
+        const fillColour = isSelected
+          ? palette.selectedSlabFill
+          : (surfaceFill ?? palette.slabFill)
+        const { area, centroid } = getSlabArea(polygon, holes)
+        let slabLabel = null
+        if (area > 0) {
+          const showName = surfaceType !== 'interior'
+          const nameLine = showName ? (slab.name ?? surfaceType) : null
+          const areaLine = isSelected ? formatArea(area, unit) : null
+          const lines: Array<{ content: React.ReactNode; isName: boolean }> = []
+          if (nameLine) lines.push({ content: nameLine, isName: true })
+          if (areaLine) lines.push({ content: areaLine, isName: false })
+          if (lines.length > 0) {
+            const fs = getMeasureLabelFontSize()
+            slabLabel = (
+              <g pointerEvents="none" style={{ userSelect: 'none' }}>
+                {lines.map((line, i) => (
+                  <text
+                    key={i}
+                    dominantBaseline="central"
+                    fill={palette.measurementStroke}
+                    fontFamily={line.isName
+                      ? 'Inter Tight, Inter, sans-serif'
+                      : 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'}
+                    fontSize={fs}
+                    fontWeight={line.isName ? '600' : '500'}
+                    paintOrder="stroke"
+                    stroke={palette.surface}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={getMeasureLabelStrokeWidth()}
+                    textAnchor="middle"
+                    x={toSvgX(centroid.x)}
+                    y={toSvgY(centroid.y) + (i - (lines.length - 1) / 2) * fs * 1.2}
+                  >
+                    {line.content}
+                  </text>
+                ))}
+              </g>
+            )
+          }
+        }
+
+        return (
+          <g key={slab.id}>
+            <path
+              clipRule="evenodd"
+              d={path}
+              fill={fillColour}
+              fillRule="evenodd"
+              onClick={
+                canSelectSlabs
+                  ? (event) => {
+                      event.stopPropagation()
+                      onSlabSelect(slab.id, event)
+                    }
+                  : undefined
+              }
+              onDoubleClick={
+                canSelectSlabs
+                  ? (event) => {
+                      event.stopPropagation()
+                      onSlabDoubleClick(slab)
+                    }
+                  : undefined
+              }
+              pointerEvents={canSelectSlabs ? undefined : 'none'}
+              stroke={isSelected ? palette.selectedStroke : palette.slabStroke}
+              strokeOpacity={isSelected ? 0.92 : 0.84}
+              strokeWidth="0.05"
+              style={canSelectSlabs ? { cursor: EDITOR_CURSOR } : undefined}
+              vectorEffect="non-scaling-stroke"
+            />
+            {slabLabel}
+          </g>
+        )
+      })}
+
+      {/* Order matters, and this was wrong: the ghost and the stairs used to
+          be emitted BEFORE the slab map, so a level's own floor slab painted
+          straight over both. Adding a level — which now creates a slab — made
+          the whole canvas go solid and hid the storey below entirely.
+
+          Slabs are the floor, so they go under. Everything you place ON that
+          floor is drawn after it, and walls last of all. */}
       {/* The storey below, as a reference. Drawn first so everything on the
           current level sits over it, and non-interactive so it can never
           steal a click from the floor you are actually editing. */}
@@ -2477,100 +2578,6 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 <path d={polygonToPath(plan.arrow.head)} fill={stroke} />
               </g>
             )}
-          </g>
-        )
-      })}
-
-      {slabPolygons.map(({ slab, polygon, holes, path }) => {
-        const isSelected = selectedIdSet.has(slab.id)
-        // Ritn3D 2026-06-18: colour and label slabs by surface type so the
-        // user can tell a Patio from a Garage from a Driveway at a glance.
-        // Interior slabs keep the neutral palette so existing floor plans
-        // read the same.
-        const surfaceType = (slab as any).surfaceType ?? 'interior'
-        const surfaceFill =
-          surfaceType === 'patio' ? '#c8b78a'
-          : surfaceType === 'deck' ? '#a78458'
-          : surfaceType === 'driveway' ? '#8f9098'
-          : surfaceType === 'garage' ? '#9aa2ac'
-          : surfaceType === 'gravel' ? '#b8b4a5'
-          : surfaceType === 'grass' ? '#8ab073'
-          : surfaceType === 'wood' ? '#b7885a'
-          : null
-        const fillColour = isSelected
-          ? palette.selectedSlabFill
-          : (surfaceFill ?? palette.slabFill)
-        const { area, centroid } = getSlabArea(polygon, holes)
-        let slabLabel = null
-        if (area > 0) {
-          const showName = surfaceType !== 'interior'
-          const nameLine = showName ? (slab.name ?? surfaceType) : null
-          const areaLine = isSelected ? formatArea(area, unit) : null
-          const lines: Array<{ content: React.ReactNode; isName: boolean }> = []
-          if (nameLine) lines.push({ content: nameLine, isName: true })
-          if (areaLine) lines.push({ content: areaLine, isName: false })
-          if (lines.length > 0) {
-            const fs = getMeasureLabelFontSize()
-            slabLabel = (
-              <g pointerEvents="none" style={{ userSelect: 'none' }}>
-                {lines.map((line, i) => (
-                  <text
-                    key={i}
-                    dominantBaseline="central"
-                    fill={palette.measurementStroke}
-                    fontFamily={line.isName
-                      ? 'Inter Tight, Inter, sans-serif'
-                      : 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'}
-                    fontSize={fs}
-                    fontWeight={line.isName ? '600' : '500'}
-                    paintOrder="stroke"
-                    stroke={palette.surface}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={getMeasureLabelStrokeWidth()}
-                    textAnchor="middle"
-                    x={toSvgX(centroid.x)}
-                    y={toSvgY(centroid.y) + (i - (lines.length - 1) / 2) * fs * 1.2}
-                  >
-                    {line.content}
-                  </text>
-                ))}
-              </g>
-            )
-          }
-        }
-
-        return (
-          <g key={slab.id}>
-            <path
-              clipRule="evenodd"
-              d={path}
-              fill={fillColour}
-              fillRule="evenodd"
-              onClick={
-                canSelectSlabs
-                  ? (event) => {
-                      event.stopPropagation()
-                      onSlabSelect(slab.id, event)
-                    }
-                  : undefined
-              }
-              onDoubleClick={
-                canSelectSlabs
-                  ? (event) => {
-                      event.stopPropagation()
-                      onSlabDoubleClick(slab)
-                    }
-                  : undefined
-              }
-              pointerEvents={canSelectSlabs ? undefined : 'none'}
-              stroke={isSelected ? palette.selectedStroke : palette.slabStroke}
-              strokeOpacity={isSelected ? 0.92 : 0.84}
-              strokeWidth="0.05"
-              style={canSelectSlabs ? { cursor: EDITOR_CURSOR } : undefined}
-              vectorEffect="non-scaling-stroke"
-            />
-            {slabLabel}
           </g>
         )
       })}
@@ -2902,185 +2909,142 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                       blue tint on the leaf polygon (matches 3D glass).
                     - pedestrian / other: default leaf + swing arc. */}
               {(() => {
+                /* Door symbols, ported from the Flutter editor's painter on
+                   MASTER (lib/features/editor/ui/editor_painter.dart).
+
+                   Flutter is the reference because the same plan is drawn in
+                   the mobile app and in downloaded plans; a symbol that
+                   differs between them is worse than a plain one. Its five
+                   types map 1:1 onto the web's, with 'pedestrian' being the
+                   schema name for 'single':
+
+                     single/pedestrian  leaf + swing arc
+                     double             two half-width leaves, hinged at
+                                        OPPOSITE ends, tips meeting mid-opening
+                     glass              single swing plus three hatch strokes
+                                        across the leaf
+                     patio              two half-length panels at +/-0.03 m,
+                                        the fixed leaf one side and the sliding
+                                        leaf the other, plus a short arrow
+                     sliding            ONE panel on a track: a faint track
+                                        line at 0.06 m, the panel at 0.12 m,
+                                        and an arrow at 0.22 m. No swing arc —
+                                        the arrow is what separates it from a
+                                        fixed partition.
+
+                   Numbers are Flutter's, not approximations of them. 'garage'
+                   has no Flutter type and falls through to the plain leaf,
+                   which is what Flutter's own `default:` does. */
                 const doorStyle = (opening as any).style ?? 'pedestrian'
                 const strokeColor = isSelected ? palette.selectedStroke : palette.doorStroke
+                const sgn = swingDirection === 'inward' ? 1 : -1
+                const half = width / 2
+                // Ends of the opening, and the along-wall unit vector.
+                const aX = cx - nx * half
+                const aY = cy - ny * half
+                const bX = cx + nx * half
+                const bY = cy + ny * half
 
-                /* Ritn3D 2026-08-07: double, sliding and garage were falling
-                   through to the single-leaf default, so choosing them in the
-                   panel changed nothing on the plan.
-
-                   Conventions follow the Flutter editor's painter, which is
-                   the reference for how a door type reads in plan:
-                     - double : two leaves hinged at OPPOSITE ends, each half
-                                the opening, arcs meeting in the middle
-                     - sliding: one panel parked alongside the opening with a
-                                travel arrow, NO swing arc — it does not swing
-                     - garage : sectional, drawn as slats across the opening,
-                                no leaf and no arc — it lifts, not swings */
                 if (doorStyle === 'double') {
-                  const half = width / 2
-                  // Hinge at each end; each leaf sweeps inward to the middle.
-                  const aHx = cx - nx * half
-                  const aHy = cy - ny * half
-                  const bHx = cx + nx * half
-                  const bHy = cy + ny * half
-                  const sgn = swingDirection === 'inward' ? 1 : -1
-                  const aOx = aHx + px * half * sgn
-                  const aOy = aHy + py * half * sgn
-                  const bOx = bHx + px * half * sgn
-                  const bOy = bHy + py * half * sgn
-                  const sweepA = swingDirection === 'inward' ? 0 : 1
-                  const sweepB = swingDirection === 'inward' ? 1 : 0
+                  const aOx = aX + px * half * sgn
+                  const aOy = aY + py * half * sgn
+                  const bOx = bX + px * half * sgn
+                  const bOy = bY + py * half * sgn
                   return (
-                    <g>
-                      <line stroke={strokeColor} strokeWidth={0.03} vectorEffect="non-scaling-stroke"
-                        x1={aHx} x2={aOx} y1={aHy} y2={aOy} />
-                      <path d={`M ${aOx} ${aOy} A ${half} ${half} 0 0 ${sweepA} ${cx} ${cy}`}
-                        fill="none" stroke={strokeColor} strokeDasharray="0.1 0.08"
-                        strokeWidth={0.02} vectorEffect="non-scaling-stroke" />
-                      <line stroke={strokeColor} strokeWidth={0.03} vectorEffect="non-scaling-stroke"
-                        x1={bHx} x2={bOx} y1={bHy} y2={bOy} />
-                      <path d={`M ${bOx} ${bOy} A ${half} ${half} 0 0 ${sweepB} ${cx} ${cy}`}
-                        fill="none" stroke={strokeColor} strokeDasharray="0.1 0.08"
-                        strokeWidth={0.02} vectorEffect="non-scaling-stroke" />
-                    </g>
-                  )
-                }
-                if (doorStyle === 'sliding') {
-                  // Panel parked to one side, plus a travel arrow. No arc:
-                  // drawing one would say it swings, which it does not.
-                  const half = width / 2
-                  const off = 0.06
-                  const sgn = swingDirection === 'inward' ? 1 : -1
-                  const x1 = cx - nx * half + px * off * sgn
-                  const y1 = cy - ny * half + py * off * sgn
-                  const x2 = cx + px * off * sgn
-                  const y2 = cy + py * off * sgn
-                  const ax = cx + nx * (half * 0.7)
-                  const ay = cy + ny * (half * 0.7)
-                  return (
-                    <g>
-                      <line stroke={strokeColor} strokeWidth={0.055} vectorEffect="non-scaling-stroke"
-                        x1={x1} x2={x2} y1={y1} y2={y2} />
-                      <line stroke={strokeColor} strokeWidth={0.02} vectorEffect="non-scaling-stroke"
-                        x1={cx} x2={ax} y1={cy} y2={ay} />
-                      <path
-                        d={`M ${ax} ${ay} L ${ax - nx * 0.09 - px * 0.05} ${ay - ny * 0.09 - py * 0.05} L ${ax - nx * 0.09 + px * 0.05} ${ay - ny * 0.09 + py * 0.05} Z`}
-                        fill={strokeColor} />
-                    </g>
-                  )
-                }
-                if (doorStyle === 'garage') {
-                  // Sectional: slats across the opening. No leaf, no arc — a
-                  // garage door lifts.
-                  const half = width / 2
-                  const slats = 4
-                  const lines = []
-                  for (let i = 1; i <= slats; i++) {
-                    const t = -half + (width * i) / (slats + 1)
-                    lines.push(
-                      <line key={i} stroke={strokeColor} strokeWidth={0.02}
+                    <g data-element="door">
+                      <line stroke={strokeColor} strokeWidth={0.04}
                         vectorEffect="non-scaling-stroke"
-                        x1={cx + nx * t - px * 0.05} x2={cx + nx * t + px * 0.05}
-                        y1={cy + ny * t - py * 0.05} y2={cy + ny * t + py * 0.05} />,
-                    )
-                  }
-                  return (
-                    <g>
-                      <line stroke={strokeColor} strokeWidth={0.05} vectorEffect="non-scaling-stroke"
-                        x1={cx - nx * half} x2={cx + nx * half}
-                        y1={cy - ny * half} y2={cy + ny * half} />
-                      {lines}
+                        x1={aX} x2={aOx} y1={aY} y2={aOy} />
+                      <path d={`M ${aOx} ${aOy} A ${half} ${half} 0 0 ${sgn > 0 ? 0 : 1} ${cx} ${cy}`}
+                        fill="none" stroke={strokeColor} strokeDasharray="0.09 0.07"
+                        strokeWidth={0.025} vectorEffect="non-scaling-stroke" />
+                      <line stroke={strokeColor} strokeWidth={0.04}
+                        vectorEffect="non-scaling-stroke"
+                        x1={bX} x2={bOx} y1={bY} y2={bOy} />
+                      <path d={`M ${bOx} ${bOy} A ${half} ${half} 0 0 ${sgn > 0 ? 1 : 0} ${cx} ${cy}`}
+                        fill="none" stroke={strokeColor} strokeDasharray="0.09 0.07"
+                        strokeWidth={0.025} vectorEffect="non-scaling-stroke" />
                     </g>
                   )
                 }
+
                 if (doorStyle === 'patio') {
-                  // Two overlapping panels along the wall, offset in
-                  // perpendicular direction by ~30% of wall thickness.
-                  // Panel width = half the door width, positioned so each
-                  // panel occupies its half of the doorway.
-                  const halfW = width / 2
-                  const perpOffset = 0.06 // meters (~6 cm visual offset)
-                  const panelPoints = (
-                    startX: number, startY: number,
-                    lenAlong: number, sideMul: number,
-                  ) => {
-                    const ax = startX
-                    const ay = startY
-                    const bx = ax + nx * lenAlong
-                    const by = ay + ny * lenAlong
-                    const off = perpOffset * sideMul
-                    const wallThk = 0.15 // for visual width of panel
-                    const halfT = wallThk / 3
-                    return [
-                      [ax + px * (off - halfT), ay + py * (off - halfT)],
-                      [bx + px * (off - halfT), by + py * (off - halfT)],
-                      [bx + px * (off + halfT), by + py * (off + halfT)],
-                      [ax + px * (off + halfT), ay + py * (off + halfT)],
-                    ].map((p) => p.join(',')).join(' ')
-                  }
-                  // Left panel: from center-halfW to center, back-offset
-                  const leftPts = panelPoints(cx - nx * halfW, cy - ny * halfW, halfW, -1)
-                  // Right panel: from center to center+halfW, forward-offset
-                  const rightPts = panelPoints(cx, cy, halfW, +1)
+                  const off = 0.03
                   return (
-                    <>
-                      <polygon
-                        data-element="door"
-                        fill="rgba(140, 190, 220, 0.5)"
-                        points={leftPts}
-                        stroke={strokeColor}
-                        strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
-                      />
-                      <polygon
-                        data-element="door"
-                        fill="rgba(140, 190, 220, 0.5)"
-                        points={rightPts}
-                        stroke={strokeColor}
-                        strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
-                      />
-                      {/* Slide-arrow hint under the panels */}
-                      <line
-                        stroke={strokeColor}
-                        strokeOpacity={0.45}
-                        strokeWidth={FLOORPLAN_OPENING_DASHED_STROKE_WIDTH}
-                        strokeDasharray="0.05 0.05"
-                        x1={cx - nx * halfW * 0.9}
-                        y1={cy - ny * halfW * 0.9}
-                        x2={cx + nx * halfW * 0.9}
-                        y2={cy + ny * halfW * 0.9}
-                      />
-                    </>
+                    <g data-element="door">
+                      <line stroke={strokeColor} strokeWidth={0.05}
+                        vectorEffect="non-scaling-stroke"
+                        x1={aX + px * off} y1={aY + py * off}
+                        x2={cx + px * off} y2={cy + py * off} />
+                      <line stroke={strokeColor} strokeWidth={0.05}
+                        vectorEffect="non-scaling-stroke"
+                        x1={cx - px * off} y1={cy - py * off}
+                        x2={bX - px * off} y2={bY - py * off} />
+                      <line stroke={strokeColor} strokeWidth={0.03}
+                        vectorEffect="non-scaling-stroke"
+                        x1={cx} y1={cy}
+                        x2={cx + nx * width * 0.1} y2={cy + ny * width * 0.1} />
+                    </g>
                   )
                 }
-                // pedestrian / glass share the same leaf + swing arc.
-                // Glass gets a blue-tinted fill so users can distinguish.
-                const leafFill = doorStyle === 'glass'
-                  ? 'rgba(140, 190, 220, 0.55)'
-                  : palette.doorFill
+
+                if (doorStyle === 'sliding') {
+                  const trackOff = 0.06 * sgn
+                  const panelOff = 0.12 * sgn
+                  const arrowOff = 0.22 * sgn
+                  const headLen = 0.14
+                  const tipX = cx + nx * headLen + px * arrowOff
+                  const tipY = cy + ny * headLen + py * arrowOff
+                  const baseX = cx - nx * headLen + px * arrowOff
+                  const baseY = cy - ny * headLen + py * arrowOff
+                  return (
+                    <g data-element="door">
+                      <line opacity={0.45} stroke={strokeColor} strokeWidth={0.02}
+                        vectorEffect="non-scaling-stroke"
+                        x1={aX + px * trackOff} y1={aY + py * trackOff}
+                        x2={bX + px * trackOff} y2={bY + py * trackOff} />
+                      <line stroke={strokeColor} strokeWidth={0.05}
+                        vectorEffect="non-scaling-stroke"
+                        x1={aX + px * panelOff} y1={aY + py * panelOff}
+                        x2={bX + px * panelOff} y2={bY + py * panelOff} />
+                      <line opacity={0.45} stroke={strokeColor} strokeWidth={0.02}
+                        vectorEffect="non-scaling-stroke"
+                        x1={baseX} y1={baseY} x2={tipX} y2={tipY} />
+                      {[1, -1].map((s) => (
+                        <line key={s} opacity={0.45} stroke={strokeColor} strokeWidth={0.02}
+                          vectorEffect="non-scaling-stroke"
+                          x1={tipX} y1={tipY}
+                          x2={cx + nx * (headLen - 0.06) + px * (arrowOff + s * 0.05 * sgn)}
+                          y2={cy + ny * (headLen - 0.06) + py * (arrowOff + s * 0.05 * sgn)} />
+                      ))}
+                    </g>
+                  )
+                }
+
+                // single / pedestrian / glass / garage — leaf plus swing arc.
                 return (
-                  <>
-                    <polygon
-                      data-element="door"
-                      fill={leafFill}
-                      points={points}
-                      stroke={strokeColor}
-                      strokeOpacity={1}
-                      strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
-                    />
-                    <line
-                      stroke={strokeColor}
-                      strokeWidth={FLOORPLAN_OPENING_DETAIL_STROKE_WIDTH}
-                      x1={hx} x2={ox} y1={hy} y2={oy}
-                    />
-                    <path
-                      d={`M ${ox} ${oy} A ${width} ${width} 0 0 ${sweepFlag} ${ox2} ${oy2}`}
-                      fill="none"
-                      stroke={strokeColor}
-                      strokeDasharray="0.1 0.1"
-                      strokeWidth={FLOORPLAN_OPENING_DASHED_STROKE_WIDTH}
-                    />
-                  </>
+                  <g data-element="door">
+                    <line stroke={strokeColor} strokeWidth={0.04}
+                      vectorEffect="non-scaling-stroke"
+                      x1={hx} x2={ox} y1={hy} y2={oy} />
+                    <path d={`M ${ox} ${oy} A ${width} ${width} 0 0 ${sweepFlag} ${ox2} ${oy2}`}
+                      fill="none" stroke={strokeColor} strokeDasharray="0.09 0.07"
+                      strokeWidth={0.025} vectorEffect="non-scaling-stroke" />
+                    {doorStyle === 'glass' &&
+                      [1, 2, 3].map((i) => {
+                        const t = i / 4
+                        const alongX = aX + nx * width * t
+                        const alongY = aY + ny * width * t
+                        return (
+                          <line key={i} opacity={0.35} stroke={strokeColor}
+                            strokeWidth={0.02} vectorEffect="non-scaling-stroke"
+                            x1={alongX + px * width * 0.15 * sgn}
+                            y1={alongY + py * width * 0.15 * sgn}
+                            x2={alongX + px * width * 0.55 * sgn}
+                            y2={alongY + py * width * 0.55 * sgn} />
+                        )
+                      })}
+                  </g>
                 )
               })()}
             </g>

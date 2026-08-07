@@ -19,17 +19,28 @@ import { SegmentedControl } from '../controls/segmented-control'
 import { SliderControl } from '../controls/slider-control'
 import { PanelWrapper } from './panel-wrapper'
 
-/* Values map 1:1 to the DoorStyle enum; labels are user-facing. 'Normal' is
-   'pedestrian' in the schema — renamed for clarity, enum kept for scene
-   backwards-compat. Hints say how each one READS ON THE PLAN, because that is
-   the feedback the user gets after choosing. */
+/* Order and labels follow the Flutter editor's picker on master, so the two
+   apps present the same choices in the same sequence:
+
+     'single': 'Single', 'double': 'Double', 'glass': 'Glass',
+     'sliding': 'Sliding', 'patio': 'Patio'
+
+   The schema calls single 'pedestrian'; the enum is kept for scene
+   backwards-compat and only the label differs.
+
+   'garage' has no Flutter equivalent — it exists here because the pipeline
+   renders a sectional door — so it comes last and draws as a plain leaf,
+   which is what Flutter's `default:` does with a type it does not know.
+
+   Hints describe how each one READS ON THE PLAN, since that is the feedback
+   you get after choosing. */
 const DOOR_STYLES: { value: DoorStyle; label: string; hint: string }[] = [
-  { value: 'pedestrian', label: 'Normal', hint: 'One leaf with a swing arc.' },
+  { value: 'pedestrian', label: 'Single', hint: 'One leaf with a swing arc.' },
   { value: 'double', label: 'Double', hint: 'Two leaves hinged at opposite ends.' },
-  { value: 'glass', label: 'Glass', hint: 'One leaf, tinted, with a swing arc.' },
-  { value: 'patio', label: 'Patio', hint: 'Two sliding panels, no swing.' },
-  { value: 'sliding', label: 'Sliding', hint: 'One panel that slides aside, no swing.' },
-  { value: 'garage', label: 'Garage', hint: 'Sectional — lifts, so no leaf or arc.' },
+  { value: 'glass', label: 'Glass', hint: 'One leaf with a swing arc, hatched.' },
+  { value: 'sliding', label: 'Sliding', hint: 'One panel on a track, with a travel arrow.' },
+  { value: 'patio', label: 'Patio', hint: 'Two panels — one fixed, one sliding.' },
+  { value: 'garage', label: 'Garage', hint: 'Sectional. No Flutter symbol; draws as a plain leaf.' },
 ]
 
 export function DoorPanel() {

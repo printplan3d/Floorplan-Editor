@@ -95,6 +95,26 @@ export function StairPanel() {
 
      Only ever grows. Shrinking the depth when the user narrows a flight would
      undo a footprint they set deliberately. */
+  /* Changing the SHAPE has to change the footprint with it.
+
+     Switching a straight stair to a U left length and depth exactly as they
+     were — and a straight stair's depth is one flight wide, far too narrow
+     for two flights plus the gap. The metrics narrowed the flights to fit, so
+     the symbol barely moved and the stair looked unchanged until "fit to this
+     storey" was pressed. The button appeared to do nothing.
+
+     Refitting on switch is also just what the user means: pick a U, get a U.
+     Flight width is preserved because that is a deliberate choice; only the
+     box around it is re-derived. */
+  const handleVariantChange = useCallback(
+    (variant: StairVariant) => {
+      if (!node) return
+      const fit = suggestStairFootprint(variant, node.width, levelHeight)
+      handleUpdate({ variant, length: fit.length, depth: fit.depth })
+    },
+    [node, levelHeight, handleUpdate],
+  )
+
   const handleWidthChange = useCallback(
     (w: number) => {
       if (!node) return
@@ -153,7 +173,7 @@ export function StairPanel() {
                     : 'border-border/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground'
                 }`}
                 key={v.id}
-                onClick={() => handleUpdate({ variant: v.id })}
+                onClick={() => handleVariantChange(v.id)}
                 title={v.hint}
                 type="button"
               >
