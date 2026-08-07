@@ -2548,6 +2548,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   onStairPointerDown,
   wallPolygons,
   unit,
+  worldUnitsPerPixel,
 }: {
   canSelectSlabs: boolean;
   canSelectGeometry: boolean;
@@ -2589,7 +2590,31 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   ) => void;
   wallPolygons: WallPolygonEntry[];
   unit: "metric" | "imperial";
+  /** World units (metres) per screen pixel at the current zoom. Door symbols
+   *  need it to keep their across-wall offsets legible — see doorInflate. */
+  worldUnitsPerPixel: number;
 }) {
+  /* Flutter's door offsets are metres, scaled by its camera. On a phone you
+     are zoomed well in, so a 0.03 m panel gap lands as a few visible pixels.
+     With a whole storey on screen the same 0.03 m falls under one pixel while
+     the strokes stay a fixed 1.5, and patio and sliding collapse into a bare
+     line — which is exactly what they did.
+
+     So inflate a symbol's across-wall offsets, by ONE factor per symbol, only
+     as far as its smallest distinguishing feature needs to clear
+     DOOR_MIN_FEATURE_PX. The factor is 1 whenever the zoom already shows the
+     feature, so at reading zoom these are Flutter's numbers exactly and the
+     proportions never change — the symbol is the same, it just stops
+     disappearing when you zoom out. Capped so a zoomed-out plan cannot grow
+     a door symbol into the middle of the room. */
+  const DOOR_MIN_FEATURE_PX = 4;
+  const DOOR_MAX_INFLATE = 3;
+  const doorInflate = (featureMeters: number) => {
+    const px = featureMeters / Math.max(worldUnitsPerPixel, 1e-9);
+    if (!Number.isFinite(px) || px <= 0) return 1;
+    return Math.min(DOOR_MAX_INFLATE, Math.max(1, DOOR_MIN_FEATURE_PX / px));
+  };
+
   let minX = Number.POSITIVE_INFINITY,
     maxX = Number.NEGATIVE_INFINITY,
     minZ = Number.POSITIVE_INFINITY,
@@ -3354,7 +3379,9 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 }
 
                 if (doorStyle === "patio") {
-                  const off = 0.03;
+                  // The whole symbol is two panels staggered by 0.03 m. That
+                  // stagger IS the symbol, so it is the feature to keep legible.
+                  const off = 0.03 * doorInflate(0.03);
                   return (
                     <g data-element="door-symbol">
                       {jambs}
@@ -3390,9 +3417,14 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 }
 
                 if (doorStyle === "sliding") {
-                  const trackOff = 0.06 * sgn;
-                  const panelOff = 0.12 * sgn;
-                  const arrowOff = 0.22 * sgn;
+                  // Panel reads against its track, so the 0.06 m between
+                  // them is the feature. The arrow keeps Flutter's fixed
+                  // 0.10 m clearance beyond the panel rather than being
+                  // inflated too, or it swings out into the room.
+                  const k = doorInflate(0.06);
+                  const trackOff = 0.06 * k * sgn;
+                  const panelOff = 0.12 * k * sgn;
+                  const arrowOff = panelOff + 0.1 * sgn;
                   const headLen = 0.14;
                   const tipX = cx + nx * headLen + px * arrowOff;
                   const tipY = cy + ny * headLen + py * arrowOff;
@@ -3442,12 +3474,12 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                           x2={
                             cx +
                             nx * (headLen - 0.06) +
-                            px * (arrowOff + s * 0.05 * sgn)
+                            px * (arrowOff + s * 0.05 * k * sgn)
                           }
                           y2={
                             cy +
                             ny * (headLen - 0.06) +
-                            py * (arrowOff + s * 0.05 * sgn)
+                            py * (arrowOff + s * 0.05 * k * sgn)
                           }
                         />
                       ))}
@@ -10756,6 +10788,7 @@ export function FloorplanPanel() {
               onStairPointerDown={handleStairPointerDown}
               unit={unit}
               wallPolygons={displayWallPolygons}
+              worldUnitsPerPixel={floorplanWorldUnitsPerPixel}
             />
 
             <FloorplanPolygonHandleLayer
