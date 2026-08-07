@@ -7629,14 +7629,27 @@ export function FloorplanPanel() {
 
       const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
       if (!planPoint) return
+
+      // Snap the stair's ORIGIN, not the cursor. Snapping the cursor and then
+      // subtracting the grab offset lands the stair off-grid by whatever that
+      // offset happened to be — the stair would move in grid steps but never
+      // sit on a grid line. The origin is the corner the footprint is built
+      // from and the corner the pipeline places, so it is the thing that
+      // should land on the grid.
+      //
+      // Honours the same Grid-snap toggle as the wall tools, with Shift
+      // inverting it, via the shared `snapActive`.
+      const origin: WallPlanPoint = [
+        planPoint[0] - drag.grabOffset[0],
+        planPoint[1] - drag.grabOffset[1],
+      ]
+      const placed = snapActive ? snapPointToGrid(origin) : origin
+
       useScene.getState().updateNode(drag.stairId, {
-        position: [
-          planPoint[0] - drag.grabOffset[0],
-          planPoint[1] - drag.grabOffset[1],
-        ] as [number, number],
+        position: [placed[0], placed[1]] as [number, number],
       })
     },
-    [getPlanPointFromClientPoint],
+    [getPlanPointFromClientPoint, snapActive],
   )
 
   const handleStairPointerUp = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
