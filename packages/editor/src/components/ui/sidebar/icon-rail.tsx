@@ -1,6 +1,6 @@
 'use client'
 
-import { emitter, generateId, useScene } from '@ritn3d/core'
+import { type AnyNodeId, emitter, generateId, LevelNode, useScene } from '@ritn3d/core'
 import { useViewer } from '@ritn3d/viewer'
 import { MoonIcon, ResetViewIcon, SunIcon, TrashIcon } from '../primitives/sidebar-icons'
 import { motion } from 'motion/react'
@@ -12,6 +12,7 @@ import {
 } from './../../../components/ui/primitives/tooltip'
 import { cn } from './../../../lib/utils'
 import { useStore } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
 import useEditor, { type StructureTool } from './../../../store/use-editor'
 
 // Ritn3D 2026-07-19: undo/redo state from the temporal middleware
@@ -65,6 +66,7 @@ const MINIMAL_TOOLS: {
   { id: 'arc-wall', label: 'Arc Wall', iconNode: ArcWallIconNodeIR },
   { id: 'door',     label: 'Door',     icon: '/icons/door.png' },
   { id: 'window',   label: 'Window',   icon: '/icons/window.png' },
+  { id: 'stair',    label: 'Stair',    icon: '/symbols/stairs/staircase.svg' },
 ]
 
 // Ritn3D 2026-07-19: Select-mode icon (arrow cursor). Distinct from
@@ -132,6 +134,59 @@ const OrthoIconNode = (
 )
 
 export function IconRail({ activePanel, onPanelChange, appMenuButton, className }: IconRailProps) {
+  // Levels on the active building, ground-first. `useShallow` so switching
+  // tools does not re-render the rail on every unrelated scene write.
+  const activeLevelId = useViewer((state) => state.selection.levelId)
+  const activeBuildingId = useViewer((state) => state.selection.buildingId)
+  const setViewerSelection = useViewer((state) => state.setSelection)
+  const levelsOnBuilding = useScene(
+    useShallow((state) => {
+      // Fall back to the ACTIVE LEVEL's parent when no building is selected.
+      // selection.buildingId is not reliably set in the webapp's flow, and
+      // keying the control on it alone made the whole thing invisible.
+      const bId =
+        activeBuildingId ??
+        (activeLevelId ? (state.nodes[activeLevelId]?.parentId as string | null) : null)
+      if (!bId) return [] as LevelNode[]
+      const building = state.nodes[bId as AnyNodeId]
+      if (!building || building.type !== 'building') return [] as LevelNode[]
+      return building.children
+        .map((childId) => state.nodes[childId])
+        .filter((c): c is LevelNode => c?.type === 'level')
+        .slice()
+        .sort((a, b) => (a.level ?? 0) - (b.level ?? 0))
+    }),
+  )
+  const activeLevelNumber = useScene((state) =>
+    activeLevelId ? ((state.nodes[activeLevelId] as LevelNode | undefined)?.level ?? null) : null,
+  )
+
+  const selectLevel = (id: LevelNode['id']) => {
+    setViewerSelection({ levelId: id, selectedIds: [] })
+  }
+
+  const addLevel = () => {
+    const { createNode, nodes } = useScene.getState()
+    const bId =
+      activeBuildingId ??
+      (activeLevelId ? (nodes[activeLevelId]?.parentId as string | null) : null)
+    if (!bId) return
+    const building = nodes[bId as AnyNodeId]
+    if (!building || building.type !== 'building') return
+
+    // Numbered from the highest EXISTING level, not the count: deleting a
+    // middle storey would otherwise reuse a number, and the exporter stacks
+    // storeys by that number, so two levels would silently overlap.
+    const existing = building.children
+      .map((childId) => nodes[childId])
+      .filter((c): c is LevelNode => c?.type === 'level')
+    const next = existing.reduce((mx, l) => Math.max(mx, l.level ?? 0), -1) + 1
+
+    const level = LevelNode.parse({ level: next, children: [], parentId: bId })
+    createNode(level, bId as AnyNodeId)
+    setViewerSelection({ levelId: level.id, selectedIds: [] })
+  }
+
   const theme = useViewer((state) => state.theme)
   const setTheme = useViewer((state) => state.setTheme)
   const unit = useViewer((state) => state.unit)
@@ -288,6 +343,57 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
           iconNode={t.iconNode}
         />
       ))}
+
+      {/* Ritn3D 2026-08-07: levels.
+          The site tree that used to own "Add level" is disabled in
+          app-sidebar.tsx behind `{false && ...}` for the first-storey launch,
+          which left multi-storey unreachable — the pipeline could render a
+          second floor and nothing in the UI could create or show one. It
+          belongs on this rail because this rail IS the editor's menu in the
+          webapp; the horizontal quick-build strip in floorplan-panel is not
+          rendered here.
+
+          Ground floor reads "G" because that is what people call it. */}
+      {levelsOnBuilding.length > 1 || activeLevelNumber !== null ? (
+        <div className="mt-1 flex w-full flex-col items-center gap-1 border-border/40 border-t pt-2">
+          <span className="select-none text-[9px] text-muted-foreground/70 uppercase tracking-wide">
+            Level
+          </span>
+          <div className="flex w-full flex-col items-center gap-0.5">
+            {levelsOnBuilding.map((lvl) => {
+              const n = lvl.level ?? 0
+              const isActive = lvl.id === activeLevelId
+              return (
+                <button
+                  aria-label={`Show level ${n}`}
+                  aria-pressed={isActive}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-md font-medium text-[11px] transition-colors',
+                    isActive
+                      ? 'bg-accent text-foreground'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                  )}
+                  key={lvl.id}
+                  onClick={() => selectLevel(lvl.id)}
+                  title={lvl.name || (n === 0 ? 'Ground floor' : `Level ${n}`)}
+                  type="button"
+                >
+                  {n === 0 ? 'G' : n}
+                </button>
+              )
+            })}
+            <button
+              aria-label="Add a level above"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+              onClick={addLevel}
+              title="Add a level above"
+              type="button"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* Ritn3D 2026-07-24 iOS parity: Calibrate + Trace rail tools.
           2026-07-27: Calibrate must fire with a guideId or the panel
