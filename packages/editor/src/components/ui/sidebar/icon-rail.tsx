@@ -1,6 +1,6 @@
 'use client'
 
-import { type AnyNodeId, emitter, generateId, LevelNode, SlabNode, useScene } from '@ritn3d/core'
+import { type AnyNodeId, emitter, generateId, LevelNode, useScene } from '@ritn3d/core'
 import { useViewer } from '@ritn3d/viewer'
 import { MoonIcon, ResetViewIcon, SunIcon, TrashIcon } from '../primitives/sidebar-icons'
 import { motion } from 'motion/react'
@@ -234,51 +234,19 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
     const level = LevelNode.parse({ level: next, children: [], parentId: bId })
     createNode(level, bId as AnyNodeId)
 
-    // A new storey arrives with a SLAB over the one below it.
+    // No slab is created here, deliberately.
     //
-    // Without this the level is empty: no floor to stand on, no ceiling for
-    // the storey underneath, and the render comes back with the upper walls
-    // floating over open air. It also means a stair has nothing to arrive at
-    // and no opening gets cut, because openings are cut into slabs.
+    // An earlier version made one covering the level below's footprint, so a
+    // new storey would have a floor. It did give it one — and it also put a
+    // full-bleed filled rectangle over the entire canvas, which is the first
+    // thing you see after adding a level and which hides everything under it.
+    // Adding an opaque object the user did not ask for, to solve a problem
+    // they cannot see, is a bad trade.
     //
-    // Sized to the wall footprint of the storey below, which is the only
-    // sensible default — the user can reshape it, and a mezzanine is exactly
-    // that reshaping.
-    const below = existing
-      .slice()
-      .sort((a, b) => (b.level ?? 0) - (a.level ?? 0))
-      .find((l) => (l.level ?? 0) < next)
-    if (below) {
-      const pts: [number, number][] = []
-      for (const childId of below.children) {
-        const child = nodes[childId]
-        if (child?.type === 'wall') {
-          pts.push(child.start as [number, number], child.end as [number, number])
-        }
-      }
-      if (pts.length >= 2) {
-        const xs = pts.map((q) => q[0])
-        const ys = pts.map((q) => q[1])
-        const x0 = Math.min(...xs)
-        const x1 = Math.max(...xs)
-        const y0 = Math.min(...ys)
-        const y1 = Math.max(...ys)
-        if (x1 - x0 > 0.1 && y1 - y0 > 0.1) {
-          const slab = SlabNode.parse({
-            name: `Level ${next} floor`,
-            polygon: [
-              [x0, y0],
-              [x1, y0],
-              [x1, y1],
-              [x0, y1],
-            ],
-            elevation: 0,
-          })
-          createNode(slab, level.id)
-        }
-      }
-    }
-
+    // The floor is the PIPELINE's job now: any storey above the ground with
+    // no slab of its own gets one synthesised from the footprint below at
+    // render time. Drawing a slab by hand still works and still wins — that
+    // is how a mezzanine or a partial floor gets made.
     setViewerSelection({ levelId: level.id, selectedIds: [] })
   }
 

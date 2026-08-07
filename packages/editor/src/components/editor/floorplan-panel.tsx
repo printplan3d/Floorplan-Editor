@@ -2486,7 +2486,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
           current level sits over it, and non-interactive so it can never
           steal a click from the floor you are actually editing. */}
       {ghost && (
-        <g opacity={0.22} pointerEvents="none">
+        <g data-element="ghost" opacity={0.22} pointerEvents="none">
           {ghost.walls.map((w, i) => (
             <line
               key={`gw${i}`}
@@ -2530,6 +2530,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
         return (
           <g key={plan.stair.id}>
             <path
+              data-element="stair"
               d={polygonToPath(plan.outline)}
               fill={isSelected ? 'rgba(124,108,247,0.16)' : 'rgba(120,116,110,0.10)'}
               stroke={stroke}
@@ -2540,6 +2541,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
             />
             {plan.landing && (
               <path
+                data-element="stair"
                 d={polygonToPath(plan.landing)}
                 fill={isSelected ? 'rgba(124,108,247,0.10)' : 'rgba(120,116,110,0.06)'}
                 stroke={stroke}
@@ -2554,6 +2556,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               const b = toStairSvg(line[1])
               return (
                 <line
+                  data-element="stair"
                   key={i}
                   pointerEvents="none"
                   stroke={stroke}
@@ -2566,7 +2569,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               )
             })}
             {plan.arrow && (
-              <g pointerEvents="none">
+              <g data-element="stair" pointerEvents="none">
                 <line
                   stroke={stroke}
                   strokeWidth={0.035}
@@ -2935,6 +2938,12 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                    Numbers are Flutter's, not approximations of them. 'garage'
                    has no Flutter type and falls through to the plain leaf,
                    which is what Flutter's own `default:` does. */
+                /* Stroke widths are in SCREEN PIXELS, not metres, because
+                   these carry vector-effect="non-scaling-stroke". Written as
+                   0.04 / 0.025 they rendered at four hundredths of a pixel —
+                   present in the DOM, selectable on hover, and invisible.
+                   Flutter's paints are 1.5 for the panel and 1 for the track
+                   and hatch, so those are the numbers used here. */
                 const doorStyle = (opening as any).style ?? 'pedestrian'
                 const strokeColor = isSelected ? palette.selectedStroke : palette.doorStroke
                 const sgn = swingDirection === 'inward' ? 1 : -1
@@ -2951,19 +2960,19 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                   const bOx = bX + px * half * sgn
                   const bOy = bY + py * half * sgn
                   return (
-                    <g data-element="door">
-                      <line stroke={strokeColor} strokeWidth={0.04}
+                    <g data-element="door-symbol">
+                      <line stroke={strokeColor} strokeWidth={1.5}
                         vectorEffect="non-scaling-stroke"
                         x1={aX} x2={aOx} y1={aY} y2={aOy} />
                       <path d={`M ${aOx} ${aOy} A ${half} ${half} 0 0 ${sgn > 0 ? 0 : 1} ${cx} ${cy}`}
-                        fill="none" stroke={strokeColor} strokeDasharray="0.09 0.07"
-                        strokeWidth={0.025} vectorEffect="non-scaling-stroke" />
-                      <line stroke={strokeColor} strokeWidth={0.04}
+                        fill="none" stroke={strokeColor} strokeDasharray="4 3"
+                        strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                      <line stroke={strokeColor} strokeWidth={1.5}
                         vectorEffect="non-scaling-stroke"
                         x1={bX} x2={bOx} y1={bY} y2={bOy} />
                       <path d={`M ${bOx} ${bOy} A ${half} ${half} 0 0 ${sgn > 0 ? 1 : 0} ${cx} ${cy}`}
-                        fill="none" stroke={strokeColor} strokeDasharray="0.09 0.07"
-                        strokeWidth={0.025} vectorEffect="non-scaling-stroke" />
+                        fill="none" stroke={strokeColor} strokeDasharray="4 3"
+                        strokeWidth={1} vectorEffect="non-scaling-stroke" />
                     </g>
                   )
                 }
@@ -2971,16 +2980,16 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 if (doorStyle === 'patio') {
                   const off = 0.03
                   return (
-                    <g data-element="door">
-                      <line stroke={strokeColor} strokeWidth={0.05}
+                    <g data-element="door-symbol">
+                      <line stroke={strokeColor} strokeWidth={1.5}
                         vectorEffect="non-scaling-stroke"
                         x1={aX + px * off} y1={aY + py * off}
                         x2={cx + px * off} y2={cy + py * off} />
-                      <line stroke={strokeColor} strokeWidth={0.05}
+                      <line stroke={strokeColor} strokeWidth={1.5}
                         vectorEffect="non-scaling-stroke"
                         x1={cx - px * off} y1={cy - py * off}
                         x2={bX - px * off} y2={bY - py * off} />
-                      <line stroke={strokeColor} strokeWidth={0.03}
+                      <line stroke={strokeColor} strokeWidth={1}
                         vectorEffect="non-scaling-stroke"
                         x1={cx} y1={cy}
                         x2={cx + nx * width * 0.1} y2={cy + ny * width * 0.1} />
@@ -2998,20 +3007,20 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                   const baseX = cx - nx * headLen + px * arrowOff
                   const baseY = cy - ny * headLen + py * arrowOff
                   return (
-                    <g data-element="door">
-                      <line opacity={0.45} stroke={strokeColor} strokeWidth={0.02}
+                    <g data-element="door-symbol">
+                      <line opacity={0.45} stroke={strokeColor} strokeWidth={1}
                         vectorEffect="non-scaling-stroke"
                         x1={aX + px * trackOff} y1={aY + py * trackOff}
                         x2={bX + px * trackOff} y2={bY + py * trackOff} />
-                      <line stroke={strokeColor} strokeWidth={0.05}
+                      <line stroke={strokeColor} strokeWidth={1.5}
                         vectorEffect="non-scaling-stroke"
                         x1={aX + px * panelOff} y1={aY + py * panelOff}
                         x2={bX + px * panelOff} y2={bY + py * panelOff} />
-                      <line opacity={0.45} stroke={strokeColor} strokeWidth={0.02}
+                      <line opacity={0.45} stroke={strokeColor} strokeWidth={1}
                         vectorEffect="non-scaling-stroke"
                         x1={baseX} y1={baseY} x2={tipX} y2={tipY} />
                       {[1, -1].map((s) => (
-                        <line key={s} opacity={0.45} stroke={strokeColor} strokeWidth={0.02}
+                        <line key={s} opacity={0.45} stroke={strokeColor} strokeWidth={1}
                           vectorEffect="non-scaling-stroke"
                           x1={tipX} y1={tipY}
                           x2={cx + nx * (headLen - 0.06) + px * (arrowOff + s * 0.05 * sgn)}
@@ -3023,13 +3032,13 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
 
                 // single / pedestrian / glass / garage — leaf plus swing arc.
                 return (
-                  <g data-element="door">
-                    <line stroke={strokeColor} strokeWidth={0.04}
+                  <g data-element="door-symbol">
+                    <line stroke={strokeColor} strokeWidth={1.5}
                       vectorEffect="non-scaling-stroke"
                       x1={hx} x2={ox} y1={hy} y2={oy} />
                     <path d={`M ${ox} ${oy} A ${width} ${width} 0 0 ${sweepFlag} ${ox2} ${oy2}`}
-                      fill="none" stroke={strokeColor} strokeDasharray="0.09 0.07"
-                      strokeWidth={0.025} vectorEffect="non-scaling-stroke" />
+                      fill="none" stroke={strokeColor} strokeDasharray="4 3"
+                      strokeWidth={1} vectorEffect="non-scaling-stroke" />
                     {doorStyle === 'glass' &&
                       [1, 2, 3].map((i) => {
                         const t = i / 4
@@ -3037,7 +3046,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                         const alongY = aY + ny * width * t
                         return (
                           <line key={i} opacity={0.35} stroke={strokeColor}
-                            strokeWidth={0.02} vectorEffect="non-scaling-stroke"
+                            strokeWidth={1} vectorEffect="non-scaling-stroke"
                             x1={alongX + px * width * 0.15 * sgn}
                             y1={alongY + py * width * 0.15 * sgn}
                             x2={alongX + px * width * 0.55 * sgn}

@@ -412,6 +412,45 @@ export function cleanSvgForExport(svg: SVGSVGElement): SVGSVGElement {
     el.removeAttribute('data-element')
   })
 
+  // The storey-below underlay is an authoring aid, not part of the drawing.
+  // A downloaded plan of level 1 showing level 0's walls ghosted through it
+  // is just noise on paper.
+  clone.querySelectorAll('[data-element="ghost"]').forEach(el => el.remove())
+
+  // Stairs — outline and treads in dark line work, no fill. The on-screen
+  // fill is a selection affordance; on paper it prints as a grey smear over
+  // the treads that are the actual information.
+  clone.querySelectorAll('[data-element="stair"]').forEach(el => {
+    el.setAttribute('fill', 'none')
+    el.setAttribute('stroke', '#333333')
+    if (el.tagName.toLowerCase() === 'line') {
+      el.setAttribute('stroke-width', '0.015')
+    } else {
+      el.setAttribute('stroke-width', '0.025')
+    }
+    el.removeAttribute('data-element')
+  })
+  // The direction arrow is a filled head, so it keeps its fill.
+  clone.querySelectorAll('[data-element="stair"] path[fill]').forEach(el => {
+    el.setAttribute('fill', '#333333')
+  })
+
+  // Door symbols — leaf, arc, track, hatch. Tagged separately from the
+  // door OPENING (data-element="door", the white gap in the wall) because
+  // these are strokes, not a filled gap, and the generic dimension-line rule
+  // below would otherwise flatten them all to faint grey.
+  clone.querySelectorAll('[data-element="door-symbol"] *').forEach(el => {
+    el.setAttribute('stroke', '#333333')
+    // These are non-scaling strokes, so their widths are PIXELS (1.5 for a
+    // panel, 1 for track and hatch). Left alone they print at screen weight,
+    // which is about right; only the colour needs forcing for paper.
+    el.setAttribute('data-keep', '1')
+  })
+  clone.querySelectorAll('[data-element="door-symbol"]').forEach(el => {
+    el.removeAttribute('data-element')
+  })
+  // data-keep is stripped as the dimension rule passes over each line.
+
   // Door swing arcs — thin grey
   clone.querySelectorAll('path').forEach(path => {
     const d = path.getAttribute('d') || ''
@@ -423,6 +462,11 @@ export function cleanSvgForExport(svg: SVGSVGElement): SVGSVGElement {
 
   // Dimension lines — thin grey, remove outlines
   clone.querySelectorAll('line[vector-effect="non-scaling-stroke"]').forEach(line => {
+    // Skip anything already styled above. This rule exists for dimension
+    // witness lines; door symbols are drawn with the same vector-effect and
+    // were being flattened to the same faint grey, which is why a double
+    // door printed as a pair of hairlines.
+    if (line.getAttribute('data-keep')) { line.removeAttribute('data-keep'); return }
     const sw = parseFloat(line.getAttribute('stroke-width') || '0')
     if (sw >= 2) { line.remove() }
     else { line.setAttribute('stroke', '#aaaaaa'); line.setAttribute('stroke-width', '0.5') }
