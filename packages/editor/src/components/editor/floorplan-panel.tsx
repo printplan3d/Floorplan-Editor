@@ -2904,6 +2904,96 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               {(() => {
                 const doorStyle = (opening as any).style ?? 'pedestrian'
                 const strokeColor = isSelected ? palette.selectedStroke : palette.doorStroke
+
+                /* Ritn3D 2026-08-07: double, sliding and garage were falling
+                   through to the single-leaf default, so choosing them in the
+                   panel changed nothing on the plan.
+
+                   Conventions follow the Flutter editor's painter, which is
+                   the reference for how a door type reads in plan:
+                     - double : two leaves hinged at OPPOSITE ends, each half
+                                the opening, arcs meeting in the middle
+                     - sliding: one panel parked alongside the opening with a
+                                travel arrow, NO swing arc — it does not swing
+                     - garage : sectional, drawn as slats across the opening,
+                                no leaf and no arc — it lifts, not swings */
+                if (doorStyle === 'double') {
+                  const half = width / 2
+                  // Hinge at each end; each leaf sweeps inward to the middle.
+                  const aHx = cx - nx * half
+                  const aHy = cy - ny * half
+                  const bHx = cx + nx * half
+                  const bHy = cy + ny * half
+                  const sgn = swingDirection === 'inward' ? 1 : -1
+                  const aOx = aHx + px * half * sgn
+                  const aOy = aHy + py * half * sgn
+                  const bOx = bHx + px * half * sgn
+                  const bOy = bHy + py * half * sgn
+                  const sweepA = swingDirection === 'inward' ? 0 : 1
+                  const sweepB = swingDirection === 'inward' ? 1 : 0
+                  return (
+                    <g>
+                      <line stroke={strokeColor} strokeWidth={0.03} vectorEffect="non-scaling-stroke"
+                        x1={aHx} x2={aOx} y1={aHy} y2={aOy} />
+                      <path d={`M ${aOx} ${aOy} A ${half} ${half} 0 0 ${sweepA} ${cx} ${cy}`}
+                        fill="none" stroke={strokeColor} strokeDasharray="0.1 0.08"
+                        strokeWidth={0.02} vectorEffect="non-scaling-stroke" />
+                      <line stroke={strokeColor} strokeWidth={0.03} vectorEffect="non-scaling-stroke"
+                        x1={bHx} x2={bOx} y1={bHy} y2={bOy} />
+                      <path d={`M ${bOx} ${bOy} A ${half} ${half} 0 0 ${sweepB} ${cx} ${cy}`}
+                        fill="none" stroke={strokeColor} strokeDasharray="0.1 0.08"
+                        strokeWidth={0.02} vectorEffect="non-scaling-stroke" />
+                    </g>
+                  )
+                }
+                if (doorStyle === 'sliding') {
+                  // Panel parked to one side, plus a travel arrow. No arc:
+                  // drawing one would say it swings, which it does not.
+                  const half = width / 2
+                  const off = 0.06
+                  const sgn = swingDirection === 'inward' ? 1 : -1
+                  const x1 = cx - nx * half + px * off * sgn
+                  const y1 = cy - ny * half + py * off * sgn
+                  const x2 = cx + px * off * sgn
+                  const y2 = cy + py * off * sgn
+                  const ax = cx + nx * (half * 0.7)
+                  const ay = cy + ny * (half * 0.7)
+                  return (
+                    <g>
+                      <line stroke={strokeColor} strokeWidth={0.055} vectorEffect="non-scaling-stroke"
+                        x1={x1} x2={x2} y1={y1} y2={y2} />
+                      <line stroke={strokeColor} strokeWidth={0.02} vectorEffect="non-scaling-stroke"
+                        x1={cx} x2={ax} y1={cy} y2={ay} />
+                      <path
+                        d={`M ${ax} ${ay} L ${ax - nx * 0.09 - px * 0.05} ${ay - ny * 0.09 - py * 0.05} L ${ax - nx * 0.09 + px * 0.05} ${ay - ny * 0.09 + py * 0.05} Z`}
+                        fill={strokeColor} />
+                    </g>
+                  )
+                }
+                if (doorStyle === 'garage') {
+                  // Sectional: slats across the opening. No leaf, no arc — a
+                  // garage door lifts.
+                  const half = width / 2
+                  const slats = 4
+                  const lines = []
+                  for (let i = 1; i <= slats; i++) {
+                    const t = -half + (width * i) / (slats + 1)
+                    lines.push(
+                      <line key={i} stroke={strokeColor} strokeWidth={0.02}
+                        vectorEffect="non-scaling-stroke"
+                        x1={cx + nx * t - px * 0.05} x2={cx + nx * t + px * 0.05}
+                        y1={cy + ny * t - py * 0.05} y2={cy + ny * t + py * 0.05} />,
+                    )
+                  }
+                  return (
+                    <g>
+                      <line stroke={strokeColor} strokeWidth={0.05} vectorEffect="non-scaling-stroke"
+                        x1={cx - nx * half} x2={cx + nx * half}
+                        y1={cy - ny * half} y2={cy + ny * half} />
+                      {lines}
+                    </g>
+                  )
+                }
                 if (doorStyle === 'patio') {
                   // Two overlapping panels along the wall, offset in
                   // perpendicular direction by ~30% of wall thickness.

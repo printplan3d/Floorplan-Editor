@@ -1,6 +1,14 @@
 'use client'
 
-import { type AnyNode, type AnyNodeId, DEFAULT_WALL_HEIGHT, type DoorNode, useScene, type WallNode } from '@ritn3d/core'
+import {
+  type AnyNode,
+  type AnyNodeId,
+  DEFAULT_WALL_HEIGHT,
+  type DoorNode,
+  type DoorStyle,
+  useScene,
+  type WallNode,
+} from '@ritn3d/core'
 import { useViewer } from '@ritn3d/viewer'
 import { Trash2 } from 'lucide-react'
 import { useCallback, useMemo } from 'react'
@@ -10,6 +18,19 @@ import { PanelSection } from '../controls/panel-section'
 import { SegmentedControl } from '../controls/segmented-control'
 import { SliderControl } from '../controls/slider-control'
 import { PanelWrapper } from './panel-wrapper'
+
+/* Values map 1:1 to the DoorStyle enum; labels are user-facing. 'Normal' is
+   'pedestrian' in the schema — renamed for clarity, enum kept for scene
+   backwards-compat. Hints say how each one READS ON THE PLAN, because that is
+   the feedback the user gets after choosing. */
+const DOOR_STYLES: { value: DoorStyle; label: string; hint: string }[] = [
+  { value: 'pedestrian', label: 'Normal', hint: 'One leaf with a swing arc.' },
+  { value: 'double', label: 'Double', hint: 'Two leaves hinged at opposite ends.' },
+  { value: 'glass', label: 'Glass', hint: 'One leaf, tinted, with a swing arc.' },
+  { value: 'patio', label: 'Patio', hint: 'Two sliding panels, no swing.' },
+  { value: 'sliding', label: 'Sliding', hint: 'One panel that slides aside, no swing.' },
+  { value: 'garage', label: 'Garage', hint: 'Sectional — lifts, so no leaf or arc.' },
+]
 
 export function DoorPanel() {
   const selectedIds = useViewer((s) => s.selection.selectedIds)
@@ -94,19 +115,34 @@ export function DoorPanel() {
           DoorStyle enum; labels are user-facing. 'Normal' = pedestrian
           wooden slab door (renamed for clarity; enum stays as
           'pedestrian' for scene backwards-compat). */}
+      {/* Ritn3D 2026-08-07: a 2x3 button grid, not a SegmentedControl.
+          Six options in one horizontal strip squeezed every label to a few
+          overlapping pixels — "Normal|Double|Glass|Patio|Sliding|Garage" ran
+          together and none of them was readable or reliably tappable.
+
+          Same shape as the stair variant picker so the two panels feel like
+          one editor. */}
       <PanelSection title="Style">
-        <SegmentedControl
-          onChange={(v) => handleUpdate({ style: v })}
-          options={[
-            { label: 'Normal', value: 'pedestrian' as const },
-            { label: 'Double', value: 'double' as const },
-            { label: 'Glass', value: 'glass' as const },
-            { label: 'Patio', value: 'patio' as const },
-            { label: 'Sliding', value: 'sliding' as const },
-            { label: 'Garage', value: 'garage' as const },
-          ]}
-          value={node.style ?? 'pedestrian'}
-        />
+        <div className="grid grid-cols-3 gap-1 px-1 pb-1">
+          {DOOR_STYLES.map((opt) => {
+            const isActive = (node.style ?? 'pedestrian') === opt.value
+            return (
+              <button
+                className={`rounded-md border px-2 py-2 text-[11px] font-medium transition-colors ${
+                  isActive
+                    ? 'border-amber-500/50 bg-amber-500/20 text-amber-100'
+                    : 'border-border/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground'
+                }`}
+                key={opt.value}
+                onClick={() => handleUpdate({ style: opt.value })}
+                title={opt.hint}
+                type="button"
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
       </PanelSection>
 
       <PanelSection title="Dimensions">
