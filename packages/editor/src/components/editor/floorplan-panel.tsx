@@ -2748,18 +2748,24 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
           current level sits over it, and non-interactive so it can never
           steal a click from the floor you are actually editing. */}
       {ghost && (
-        /* 0.45, not 0.22: at the old value the ghost sat on the edge of
-           legibility, which is why it needed the canvas hue to be seen at
-           all. A distinct hue carries the "this is underneath" meaning, so
-           the opacity is free to rise until the outline is actually
-           readable. Still under half, so it stays an underlay. */
-        <g data-element="ghost" opacity={0.45} pointerEvents="none">
+        /* 0.55, not 0.22: at the old value the ghost sat on the edge of
+           legibility, which is why it leaned on the canvas hue to be seen at
+           all. A warm hue carries the "this is underneath" meaning on its
+           own, so the opacity is free to rise until the outline is actually
+           readable.
+
+           Strokes are in SCREEN pixels here, not metres. In world units the
+           width and dash shrank with the zoom, so the ghost thinned out
+           exactly when the whole storey was in frame — which is when you
+           most want to see what is under you. */
+        <g data-element="ghost" opacity={0.55} pointerEvents="none">
           {ghost.walls.map((w, i) => (
             <line
               key={`gw${i}`}
               stroke={palette.ghostStroke}
-              strokeDasharray="0.18 0.12"
-              strokeWidth={0.06}
+              strokeDasharray="7 5"
+              strokeWidth={1.6}
+              vectorEffect="non-scaling-stroke"
               x1={-w.start[0]}
               x2={-w.end[0]}
               y1={-w.start[1]}
@@ -2773,8 +2779,9 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 fill={palette.ghostStroke}
                 fillOpacity={0.16}
                 stroke={palette.ghostStroke}
-                strokeDasharray="0.18 0.12"
-                strokeWidth={0.05}
+                strokeDasharray="7 5"
+                strokeWidth={1.4}
+                vectorEffect="non-scaling-stroke"
               />
               {plan.treadLines.map((line, i) => {
                 const a = toStairSvg(line[0]);
@@ -2783,7 +2790,8 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                   <line
                     key={i}
                     stroke={palette.ghostStroke}
-                    strokeWidth={0.025}
+                    strokeWidth={0.9}
+                    vectorEffect="non-scaling-stroke"
                     x1={a.x}
                     x2={b.x}
                     y1={a.y}
@@ -6121,10 +6129,11 @@ export function FloorplanPanel() {
             draftFill: "#818cf8",
             draftStroke: "#c7d2fe",
             measurementStroke: "#cbd5e1",
-            // Sage: the only green on the plan. Walls/windows are sky, doors
-            // amber, selection indigo — so the storey below is never mistaken
-            // for something on the current level.
-            ghostStroke: "#7fae8f",
+            // Amber. Everything else on the plan is cool — sky walls and
+            // windows, indigo selection, blue-grey grid — so a warm outline
+            // is the one thing that cannot be misread as part of the current
+            // level. Sage was tried first and was still too easy to lose.
+            ghostStroke: "#e0a33c",
             cursor: "#818cf8",
             editCursor: "#8381ed",
             anchor: "#818cf8",
@@ -6157,8 +6166,8 @@ export function FloorplanPanel() {
             draftFill: "#6366f1",
             draftStroke: "#4338ca",
             measurementStroke: "#334155",
-            // Deeper than the dark theme's sage so it still carries on white.
-            ghostStroke: "#5f8f72",
+            // Deeper than the dark theme's amber so it still carries on white.
+            ghostStroke: "#b9791a",
             cursor: "#6366f1",
             editCursor: "#8381ed",
             anchor: "#4338ca",
