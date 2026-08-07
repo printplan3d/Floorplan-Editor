@@ -2313,6 +2313,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   slabPolygons,
   stairPlans,
   onStairSelect,
+  onStairPointerDown,
   wallPolygons,
   unit,
 }: {
@@ -2334,6 +2335,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   slabPolygons: SlabPolygonEntry[]
   stairPlans: StairPlan[]
   onStairSelect: (stairId: StairNode['id'], event: ReactMouseEvent<SVGElement>) => void
+  onStairPointerDown: (stairId: StairNode['id'], event: ReactPointerEvent<SVGElement>) => void
   wallPolygons: WallPolygonEntry[]
   unit: 'metric' | 'imperial'
 }) {
@@ -2390,8 +2392,9 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               fill={isSelected ? 'rgba(124,108,247,0.16)' : 'rgba(120,116,110,0.10)'}
               stroke={stroke}
               strokeWidth={isSelected ? 0.05 : 0.03}
-              style={{ cursor: 'pointer' }}
+              style={{ cursor: 'move' }}
               onClick={(event) => onStairSelect(plan.stair.id, event)}
+              onPointerDown={(event) => onStairPointerDown(plan.stair.id, event)}
             />
             {plan.landing && (
               <path
@@ -7569,6 +7572,81 @@ export function FloorplanPanel() {
     },
     [emitFloorplanNodeClick],
   )
+  // ── Dragging a stair ──────────────────────────────────────────────
+  // Pointer capture on the footprint itself, with the offset from the click
+  // to the stair's origin held for the duration — grabbing the middle and
+  // having it jump so its corner meets the cursor is the classic version of
+  // this bug.
+  //
+  // A drag only starts once the pointer has actually travelled; below that
+  // threshold the gesture stays a click, so selecting a stair by tapping it
+  // still works and does not nudge it by a pixel.
+  const stairDragRef = useRef<{
+    pointerId: number
+    stairId: StairNode['id']
+    grabOffset: [number, number]
+    startClientX: number
+    startClientY: number
+    moved: boolean
+  } | null>(null)
+
+  const handleStairPointerDown = useCallback(
+    (stairId: StairNode['id'], event: ReactPointerEvent<SVGElement>) => {
+      if (event.button !== 0) return
+      const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
+      if (!planPoint) return
+      const node = useScene.getState().nodes[stairId] as StairNode | undefined
+      if (!node) return
+
+      event.stopPropagation()
+      // One drag should be ONE undo step. Without pausing, a drag writes an
+      // update per frame and buries every earlier action in the history.
+      useScene.temporal.getState().pause()
+      stairDragRef.current = {
+        pointerId: event.pointerId,
+        stairId,
+        grabOffset: [planPoint[0] - node.position[0], planPoint[1] - node.position[1]],
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        moved: false,
+      }
+      ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
+    },
+    [getPlanPointFromClientPoint],
+  )
+
+  const handleStairPointerMove = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      const drag = stairDragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+
+      if (!drag.moved) {
+        const dx = event.clientX - drag.startClientX
+        const dy = event.clientY - drag.startClientY
+        if (Math.hypot(dx, dy) < 3) return    // still a click, not a drag
+        drag.moved = true
+      }
+
+      const planPoint = getPlanPointFromClientPoint(event.clientX, event.clientY)
+      if (!planPoint) return
+      useScene.getState().updateNode(drag.stairId, {
+        position: [
+          planPoint[0] - drag.grabOffset[0],
+          planPoint[1] - drag.grabOffset[1],
+        ] as [number, number],
+      })
+    },
+    [getPlanPointFromClientPoint],
+  )
+
+  const handleStairPointerUp = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
+    const drag = stairDragRef.current
+    if (drag && drag.pointerId === event.pointerId) {
+      stairDragRef.current = null
+      useScene.temporal.getState().resume()
+    }
+  }, [])
+
   const handleStairSelect = useCallback(
     (stairId: StairNode['id'], event: ReactMouseEvent<SVGElement>) => {
       emitFloorplanNodeClick(stairId, event)
@@ -9267,11 +9345,20 @@ export function FloorplanPanel() {
             onDoubleClick={isMarqueeSelectionToolActive ? undefined : handleBackgroundDoubleClick}
             onDragOver={handleSymbolDragOver}
             onDrop={handleSymbolDrop}
-            onPointerCancel={endPanning}
+            onPointerCancel={(event) => {
+              handleStairPointerUp(event)
+              endPanning(event)
+            }}
             onPointerDown={handlePointerDown}
             onPointerLeave={handleSvgPointerLeave}
-            onPointerMove={handleSvgPointerMove}
-            onPointerUp={endPanning}
+            onPointerMove={(event) => {
+              handleStairPointerMove(event)
+              handleSvgPointerMove(event)
+            }}
+            onPointerUp={(event) => {
+              handleStairPointerUp(event)
+              endPanning(event)
+            }}
             ref={svgRef}
             style={{ cursor: isOpeningBuildActive ? 'crosshair' : EDITOR_CURSOR }}
             viewBox={`${viewBox.minX} ${viewBox.minY} ${viewBox.width} ${viewBox.height}`}
@@ -9358,6 +9445,7 @@ export function FloorplanPanel() {
               slabPolygons={displaySlabPolygons}
               stairPlans={stairPlans}
               onStairSelect={handleStairSelect}
+              onStairPointerDown={handleStairPointerDown}
               unit={unit}
               wallPolygons={displayWallPolygons}
             />
