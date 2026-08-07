@@ -3,6 +3,7 @@
 import {
   type AnyNodeId,
   computeStairMetrics,
+  STAIR_FLIGHT_GAP,
   STAIR_MAX_ANGLE_DEG,
   type StairNode,
   type StairVariant,
@@ -87,6 +88,33 @@ export function StairPanel() {
     [node, levelHeight],
   )
 
+  /* Widening a flight on a U or L also needs room ACROSS, and without this
+     the panel just reported that it had quietly narrowed the flights back
+     down — the slider moved and nothing changed, with a warning explaining
+     why. Growing the depth to match makes the control do what it says.
+
+     Only ever grows. Shrinking the depth when the user narrows a flight would
+     undo a footprint they set deliberately. */
+  const handleWidthChange = useCallback(
+    (w: number) => {
+      if (!node) return
+      if (node.variant === 'u') {
+        const needed = w * 2 + STAIR_FLIGHT_GAP
+        handleUpdate({
+          width: w,
+          depth: Math.max(node.depth, Math.round(needed * 100) / 100),
+        })
+        return
+      }
+      if (node.variant === 'l') {
+        handleUpdate({ width: w, depth: Math.max(node.depth, w) })
+        return
+      }
+      handleUpdate({ width: w })
+    },
+    [node, handleUpdate],
+  )
+
   const handleFit = useCallback(() => {
     if (!node) return
     const fit = suggestStairFootprint(node.variant, node.width, levelHeight)
@@ -167,7 +195,7 @@ export function StairPanel() {
           label="Flight width"
           max={2.5}
           min={0.6}
-          onChange={(v) => handleUpdate({ width: v })}
+          onChange={(v) => handleWidthChange(v)}
           precision={2}
           step={0.05}
           unit="m"

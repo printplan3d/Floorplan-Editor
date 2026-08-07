@@ -187,10 +187,20 @@ export function exportFloorPlanJSON(): object {
       levelStairs.push({
         id: st.id,
         position: flipX(st.position as any),
-        /* Mirroring X flips the sense of rotation and of the turn, exactly as
-           it does for arc bulge. A U-stair exported without this turns the
-           wrong way in the render. */
-        rotation: -st.rotation,
+        /* Rotation through the full editor -> Blender chain.
+           
+           flipX here sends (x, y) -> (-x, y); the translator's _to_world then
+           sends that -> (x, -y). So the COMPOSITE editor-to-world map is a
+           mirror about the X axis, under which a heading theta becomes
+           -theta. The translator also adds pi (documented there: _to_world is
+           a 180-degree rotation of the plane, not a mirror), so what this has
+           to send is -theta - pi for the world heading to come out at -theta.
+
+           It previously sent -theta, off by exactly pi. Position was right,
+           so the stair landed at the correct point but ran in the opposite
+           direction from it — which reads as the stair being in the wrong
+           place entirely, since the body extends from the origin. */
+        rotation: -st.rotation - Math.PI,
         variant: st.variant,
         handedness: st.handedness === 'left' ? 'right' : 'left',
         width: st.width,
