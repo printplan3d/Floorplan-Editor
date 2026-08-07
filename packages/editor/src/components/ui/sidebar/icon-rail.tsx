@@ -161,6 +161,41 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
     activeLevelId ? ((state.nodes[activeLevelId] as LevelNode | undefined)?.level ?? null) : null,
   )
 
+  const [levelsOpen, setLevelsOpen] = useState(false)
+
+  const deleteLevel = (lvl: LevelNode) => {
+    // Everything ON the level goes with it — walls, slabs, stairs — so this
+    // asks first. It is not an undo-sized action for someone who has drawn a
+    // whole storey.
+    const n = lvl.level ?? 0
+    const count = lvl.children.length
+    const label = lvl.name || `Level ${n}`
+    if (
+      !window.confirm(
+        count > 0
+          ? `Delete ${label} and the ${count} item${count === 1 ? '' : 's'} on it?`
+          : `Delete ${label}?`,
+      )
+    ) {
+      return
+    }
+
+    const { deleteNode, nodes } = useScene.getState()
+    // Move off the level FIRST. Deleting the level you are standing on leaves
+    // selection.levelId pointing at a node that no longer exists, and the
+    // canvas renders nothing with no way back.
+    if (activeLevelId === lvl.id) {
+      const sibling = levelsOnBuilding.find((l) => l.id !== lvl.id)
+      setViewerSelection({ levelId: sibling ? sibling.id : null, selectedIds: [] })
+    }
+    // Children first: deleteNode does not cascade, and orphaned walls left in
+    // the node map still export.
+    for (const childId of lvl.children) {
+      if (nodes[childId]) deleteNode(childId as AnyNodeId)
+    }
+    deleteNode(lvl.id as AnyNodeId)
+  }
+
   const selectLevel = (id: LevelNode['id']) => {
     setViewerSelection({ levelId: id, selectedIds: [] })
   }
@@ -330,7 +365,10 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         // 2026-07-28: tighter vertical rhythm so all icons fit on a
         // typical laptop viewport without scrolling. py-1 + gap-0
         // saves ~5 px per row across 15+ buttons.
-        'flex w-full flex-col items-center gap-0 px-1 py-1 transition-all',
+        // shrink-0: without it flexbox compresses the buttons once the
+        // rail overflows, and the bottom of the rail — units, theme —
+        // collapses into an unreadable stack.
+        'flex w-full shrink-0 flex-col items-center gap-0 px-1 py-1 transition-all',
         disabled
           ? 'opacity-35 cursor-not-allowed'
           : isActive
@@ -390,56 +428,98 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         />
       ))}
 
-      {/* Ritn3D 2026-08-07: levels.
-          The site tree that used to own "Add level" is disabled in
-          app-sidebar.tsx behind `{false && ...}` for the first-storey launch,
-          which left multi-storey unreachable — the pipeline could render a
-          second floor and nothing in the UI could create or show one. It
-          belongs on this rail because this rail IS the editor's menu in the
-          webapp; the horizontal quick-build strip in floorplan-panel is not
-          rendered here.
+      {/* Ritn3D 2026-08-07: levels, as a flyout.
+          Listing every storey inline stretched the rail without bound — five
+          levels and the tools below scroll off. One button showing the
+          current storey, opening a panel beside the rail. */}
+      {levelsOnBuilding.length > 0 && (
+        <div className="relative w-full shrink-0">
+          <RailButton
+            isActive={levelsOpen}
+            label="Levels"
+            onClick={() => setLevelsOpen((v) => !v)}
+            iconNode={
+              <span className="flex h-5 w-5 items-center justify-center rounded border border-current font-semibold text-[10px]">
+                {activeLevelNumber === null ? '-' : activeLevelNumber === 0 ? 'G' : activeLevelNumber}
+              </span>
+            }
+          />
 
-          Ground floor reads "G" because that is what people call it. */}
-      {levelsOnBuilding.length > 1 || activeLevelNumber !== null ? (
-        <div className="mt-1 flex w-full flex-col items-center gap-1 border-border/40 border-t pt-2">
-          <span className="select-none text-[9px] text-muted-foreground/70 uppercase tracking-wide">
-            Level
-          </span>
-          <div className="flex w-full flex-col items-center gap-0.5">
-            {levelsOnBuilding.map((lvl) => {
-              const n = lvl.level ?? 0
-              const isActive = lvl.id === activeLevelId
-              return (
+          {levelsOpen && (
+            <>
+              {/* Click-away. Sits behind the panel, ahead of the canvas. */}
+              <button
+                aria-label="Close levels"
+                className="fixed inset-0 z-40 cursor-default"
+                onClick={() => setLevelsOpen(false)}
+                type="button"
+              />
+              <div className="absolute top-0 left-full z-50 ml-1 w-52 rounded-lg border border-hair bg-paper p-1 shadow-lg">
+                <div className="px-2 py-1 text-[10px] text-ink/50 uppercase tracking-wide">
+                  Levels
+                </div>
+                {levelsOnBuilding
+                  .slice()
+                  .reverse()
+                  .map((lvl) => {
+                    const n = lvl.level ?? 0
+                    const isActive = lvl.id === activeLevelId
+                    return (
+                      <div
+                        className={cn(
+                          'group flex items-center gap-1 rounded-md px-1',
+                          isActive ? 'bg-ink/[0.06]' : 'hover:bg-ink/[0.04]',
+                        )}
+                        key={lvl.id}
+                      >
+                        <button
+                          className="flex flex-1 items-center gap-2 py-1.5 text-left text-[12px] text-ink"
+                          onClick={() => {
+                            selectLevel(lvl.id)
+                            setLevelsOpen(false)
+                          }}
+                          type="button"
+                        >
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-hair font-semibold text-[10px]">
+                            {n === 0 ? 'G' : n}
+                          </span>
+                          <span className="truncate">
+                            {lvl.name || (n === 0 ? 'Ground floor' : `Level ${n}`)}
+                          </span>
+                        </button>
+                        {/* Ground floor has no delete: a building with no
+                            storeys has nowhere to draw, and every wall already
+                            on it would go with it. */}
+                        {n !== 0 && (
+                          <button
+                            aria-label={`Delete level ${n}`}
+                            className="shrink-0 rounded p-1 text-ink/40 opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"
+                            onClick={() => deleteLevel(lvl)}
+                            title={`Delete level ${n}`}
+                            type="button"
+                          >
+                            <TrashIcon />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+
                 <button
-                  aria-label={`Show level ${n}`}
-                  aria-pressed={isActive}
-                  className={cn(
-                    'flex h-7 w-7 items-center justify-center rounded-md font-medium text-[11px] transition-colors',
-                    isActive
-                      ? 'bg-accent text-foreground'
-                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                  )}
-                  key={lvl.id}
-                  onClick={() => selectLevel(lvl.id)}
-                  title={lvl.name || (n === 0 ? 'Ground floor' : `Level ${n}`)}
+                  className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-ink/70 hover:bg-ink/[0.04] hover:text-ink"
+                  onClick={addLevel}
                   type="button"
                 >
-                  {n === 0 ? 'G' : n}
+                  <span className="flex h-5 w-5 items-center justify-center text-[14px] leading-none">
+                    +
+                  </span>
+                  Add level above
                 </button>
-              )
-            })}
-            <button
-              aria-label="Add a level above"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-              onClick={addLevel}
-              title="Add a level above"
-              type="button"
-            >
-              +
-            </button>
-          </div>
+              </div>
+            </>
+          )}
         </div>
-      ) : null}
+      )}
 
       {/* Ritn3D 2026-07-24 iOS parity: Calibrate + Trace rail tools.
           2026-07-27: Calibrate must fire with a guideId or the panel
@@ -549,8 +629,9 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         )
       })}
 
-      {/* Spacer */}
-      <div className="flex-1" />
+      {/* Spacer. min-h keeps a gap even when the rail is full, so the
+          utilities never butt up against the tools above them. */}
+      <div className="min-h-3 flex-1 shrink" />
 
       {/* Utility icons at bottom -- Reset View, Clear, Units, Theme. */}
       <RailButton
@@ -588,7 +669,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
 
       {/* Unit Toggle — segmented pair labelled m / ft */}
       {mounted && (
-        <div className="mx-2 my-1 flex flex-col rounded-md border border-hair overflow-hidden">
+        <div className="mx-2 my-1 flex shrink-0 flex-col rounded-md border border-hair overflow-hidden">
           <button
             className={cn(
               'flex h-7 items-center justify-center font-semibold text-[11px] transition-all',

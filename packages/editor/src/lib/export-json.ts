@@ -184,9 +184,28 @@ export function exportFloorPlanJSON(): object {
       const st = child as StairNode
       const m = computeStairMetrics(st, stairLevelHeight)
       const fp = getStairFootprint(st)
+      /* Which corner becomes the origin after the chain mirrors the plane.
+
+         The pipeline builds a stair from its origin extending into local +X
+         and +Y. The composite editor->world map is a mirror about X, so the
+         editor's local +Y becomes world -Y — the body ends up on the opposite
+         side of the origin from where it was drawn. Position alone matched,
+         which is why this read as "the stair is offset" rather than
+         "the stair is mirrored": for a 1 m wide flight it is a 1 m error.
+
+         Emitting the FAR corner — local (0, across), i.e. position plus the
+         across-extent along the heading's left normal — puts the mirrored
+         body exactly over the footprint the user drew. The handedness flip
+         below then re-mirrors the internal layout, so which side flight 2
+         returns on still matches the plan. */
+      const acrossExtent = st.variant === 'straight' ? m.width : st.depth
+      const anchor: [number, number] = [
+        st.position[0] - acrossExtent * Math.sin(st.rotation),
+        st.position[1] + acrossExtent * Math.cos(st.rotation),
+      ]
       levelStairs.push({
         id: st.id,
-        position: flipX(st.position as any),
+        position: flipX(anchor),
         /* Rotation through the full editor -> Blender chain.
            
            flipX here sends (x, y) -> (-x, y); the translator's _to_world then
