@@ -68,6 +68,12 @@ const MINIMAL_TOOLS: {
   { id: 'door',     label: 'Door',     icon: '/icons/door.png' },
   { id: 'window',   label: 'Window',   icon: '/icons/window.png' },
   { id: 'stair',    label: 'Stair',    icon: '/symbols/stairs/staircase.svg' },
+  // Floor slabs. The tool and its polygon-draw path already existed in
+  // floorplan-panel; it was simply never listed on the rail the webapp
+  // renders, so there was no way to draw one. Real slabs are not the wall
+  // outline — balconies, sun shades and porticos all extend past it — so an
+  // upper storey's floor being auto-derived is a DEFAULT, not the answer.
+  { id: 'slab',     label: 'Floor',    icon: '/icons/floor.png' },
 ]
 
 // Ritn3D 2026-07-19: Select-mode icon (arrow cursor). Distinct from
