@@ -178,7 +178,25 @@ export function isPointInStairPlan(point: PlanPoint, plan: StairPlan): boolean {
   return inside
 }
 
+/**
+ * Node space -> SVG space.
+ *
+ * The floor plan draws with toSvgX/toSvgY, which both NEGATE: a click at svg
+ * (sx, sy) is stored as (-sx, -sy), and drawing it back negates again. Walls
+ * and slabs go through that on the way to the canvas; the stair symbol did
+ * not, so it rendered point-mirrored through the origin — the stair appeared
+ * nowhere near where it was placed, while the stored position (and therefore
+ * the 3D render) was correct all along.
+ *
+ * Hit-testing deliberately stays in NODE space, because the click point it is
+ * compared against is already in node space.
+ */
+export function toStairSvg(pt: PlanPoint): PlanPoint {
+  return { x: -pt.x, y: -pt.y }
+}
+
 export function polygonToPath(points: PlanPoint[]): string {
   if (points.length === 0) return ''
-  return `${points.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ')} Z`
+  const p = points.map(toStairSvg)
+  return `${p.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ')} Z`
 }

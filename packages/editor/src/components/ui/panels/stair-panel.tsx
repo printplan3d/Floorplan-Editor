@@ -58,6 +58,7 @@ export function StairPanel() {
   const selectedIds = useViewer((s) => s.selection.selectedIds)
   const setSelection = useViewer((s) => s.setSelection)
   const nodes = useScene((s) => s.nodes)
+  const unit = useViewer((s) => s.unit)
   const updateNode = useScene((s) => s.updateNode)
 
   const selectedId = selectedIds[0]
@@ -94,7 +95,16 @@ export function StairPanel() {
 
   if (!(node && metrics)) return null
 
-  const mm = (v: number) => `${Math.round(v * 1000)} mm`
+  // Follow the canvas unit. The sliders already convert via SliderControl, so
+  // showing the readout in millimetres while Length read in feet put two unit
+  // systems in one panel.
+  const small = (v: number) =>
+    unit === 'imperial'
+      ? `${(v * 39.3700787).toFixed(1)} in`
+      : `${Math.round(v * 1000)} mm`
+  const storey = unit === 'imperial'
+    ? `${(levelHeight * 3.280839895).toFixed(2)} ft`
+    : `${levelHeight.toFixed(2)} m`
 
   return (
     <PanelWrapper
@@ -193,19 +203,19 @@ export function StairPanel() {
 
       {/* The readout. Step count first, because it is the number users do not
           expect to be fixed — everything else is a consequence of it. */}
-      <PanelSection title={`Steps — ${levelHeight.toFixed(2)} m storey`}>
+      <PanelSection title={`Steps — ${storey} storey`}>
         <div className="grid grid-cols-2 gap-x-3 gap-y-1 px-2 py-1 text-sm">
           <span className="text-muted-foreground">Risers</span>
           <span className="text-right font-mono text-white">{metrics.stepCount}</span>
 
           <span className="text-muted-foreground">Riser height</span>
-          <span className="text-right font-mono text-white">{mm(metrics.riser)}</span>
+          <span className="text-right font-mono text-white">{small(metrics.riser)}</span>
 
           <span className="text-muted-foreground">Tread</span>
           <span
             className={`text-right font-mono ${metrics.fits ? 'text-white' : 'text-amber-300'}`}
           >
-            {mm(metrics.tread)}
+            {small(metrics.tread)}
           </span>
 
           <span className="text-muted-foreground">Pitch</span>
@@ -220,7 +230,7 @@ export function StairPanel() {
           {metrics.narrowed && (
             <>
               <span className="text-muted-foreground">Flight width</span>
-              <span className="text-right font-mono text-amber-300">{mm(metrics.width)}</span>
+              <span className="text-right font-mono text-amber-300">{small(metrics.width)}</span>
             </>
           )}
         </div>

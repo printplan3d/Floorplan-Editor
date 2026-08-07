@@ -63,7 +63,13 @@ import {
   type WallPlanPoint,
 } from '../tools/wall/wall-drafting'
 import { furnishTools } from '../ui/action-menu/furnish-tools'
-import { buildStairPlan, isPointInStairPlan, polygonToPath, type StairPlan } from '../../lib/stair-plan'
+import {
+  buildStairPlan,
+  isPointInStairPlan,
+  polygonToPath,
+  type StairPlan,
+  toStairSvg,
+} from '../../lib/stair-plan'
 import { tools as structureTools } from '../ui/action-menu/structure-tools'
 import { SliderControl } from '../ui/controls/slider-control'
 import { PALETTE_COLORS } from '../ui/primitives/color-dot'
@@ -2396,27 +2402,33 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 pointerEvents="none"
               />
             )}
-            {plan.treadLines.map((line, i) => (
-              <line
-                key={i}
-                pointerEvents="none"
-                stroke={stroke}
-                strokeWidth={0.02}
-                x1={line[0].x}
-                x2={line[1].x}
-                y1={line[0].y}
-                y2={line[1].y}
-              />
-            ))}
+            {plan.treadLines.map((line, i) => {
+              // Same node -> SVG negation the paths get; a raw line here would
+              // draw the treads mirrored away from their own outline.
+              const a = toStairSvg(line[0])
+              const b = toStairSvg(line[1])
+              return (
+                <line
+                  key={i}
+                  pointerEvents="none"
+                  stroke={stroke}
+                  strokeWidth={0.02}
+                  x1={a.x}
+                  x2={b.x}
+                  y1={a.y}
+                  y2={b.y}
+                />
+              )
+            })}
             {plan.arrow && (
               <g pointerEvents="none">
                 <line
                   stroke={stroke}
                   strokeWidth={0.035}
-                  x1={plan.arrow.shaft[0].x}
-                  x2={plan.arrow.shaft[1].x}
-                  y1={plan.arrow.shaft[0].y}
-                  y2={plan.arrow.shaft[1].y}
+                  x1={toStairSvg(plan.arrow.shaft[0]).x}
+                  x2={toStairSvg(plan.arrow.shaft[1]).x}
+                  y1={toStairSvg(plan.arrow.shaft[0]).y}
+                  y2={toStairSvg(plan.arrow.shaft[1]).y}
                 />
                 <path d={polygonToPath(plan.arrow.head)} fill={stroke} />
               </g>
@@ -7006,6 +7018,20 @@ export function FloorplanPanel() {
         } else {
           handleSlabPlacementPoint(snappedPoint)
         }
+        return
+      }
+
+      // Stairs are hit-tested BEFORE zones. A stair is almost always drawn
+      // inside a room, and the zone polygon covers the whole room — so the
+      // zone swallowed every click and a placed stair could never be
+      // reselected. Testing the smaller, more specific object first is the
+      // same order the slab/wall tests already use.
+      const stairClick = stairPlans.find((plan) =>
+        isPointInStairPlan(toPoint2D(planPoint), plan),
+      )
+      if (stairClick) {
+        setSelectedReferenceId(null)
+        setSelection({ selectedIds: [stairClick.stair.id], zoneId: null })
         return
       }
 
