@@ -39,15 +39,22 @@ export type StairPlan = {
 }
 
 function place(
-  stair: Pick<StairNode, 'position' | 'rotation'>,
+  stair: Pick<StairNode, 'position' | 'rotation' | 'handedness'>,
   x: number,
   y: number,
+  across: number,
 ): PlanPoint {
+  // Handedness mirrors the route across the footprint before it is rotated
+  // into place — the same `y -> across - y` the pipeline applies as a scale
+  // matrix. Flight 2 is always built on +Y, so "turns left" is the mirrored
+  // stair, and a mirror is not a rotation, which is why the rotation control
+  // cannot express it.
+  const my = stair.handedness === 'left' ? across - y : y
   const ca = Math.cos(stair.rotation)
   const sa = Math.sin(stair.rotation)
   return {
-    x: stair.position[0] + x * ca - y * sa,
-    y: stair.position[1] + x * sa + y * ca,
+    x: stair.position[0] + x * ca - my * sa,
+    y: stair.position[1] + x * sa + my * ca,
   }
 }
 
@@ -63,7 +70,7 @@ export function buildStairPlan(stair: StairNode, levelHeight: number): StairPlan
   const m = computeStairMetrics(stair, levelHeight)
   const width = m.width
   const across = stair.variant === 'straight' ? width : stair.depth
-  const p = (x: number, y: number) => place(stair, x, y)
+  const p = (x: number, y: number) => place(stair, x, y, across)
 
   const outline = [p(0, 0), p(stair.length, 0), p(stair.length, across), p(0, across)]
 
