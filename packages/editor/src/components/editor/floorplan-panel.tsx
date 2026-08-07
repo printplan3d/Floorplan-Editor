@@ -2312,6 +2312,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   selectedIdSet,
   slabPolygons,
   stairPlans,
+  ghost,
   onStairSelect,
   onStairPointerDown,
   wallPolygons,
@@ -2334,6 +2335,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   selectedIdSet: ReadonlySet<string>
   slabPolygons: SlabPolygonEntry[]
   stairPlans: StairPlan[]
+  ghost: { walls: { start: [number, number]; end: [number, number] }[]; stairs: StairPlan[] } | null
   onStairSelect: (stairId: StairNode['id'], event: ReactMouseEvent<SVGElement>) => void
   onStairPointerDown: (stairId: StairNode['id'], event: ReactPointerEvent<SVGElement>) => void
   wallPolygons: WallPolygonEntry[]
@@ -2379,6 +2381,45 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
 
   return (
     <>
+      {/* The storey below, as a reference. Drawn first so everything on the
+          current level sits over it, and non-interactive so it can never
+          steal a click from the floor you are actually editing. */}
+      {ghost && (
+        <g opacity={0.22} pointerEvents="none">
+          {ghost.walls.map((w, i) => (
+            <line
+              key={`gw${i}`}
+              stroke="#8ea0c0"
+              strokeDasharray="0.18 0.12"
+              strokeWidth={0.06}
+              x1={-w.start[0]}
+              x2={-w.end[0]}
+              y1={-w.start[1]}
+              y2={-w.end[1]}
+            />
+          ))}
+          {ghost.stairs.map((plan) => (
+            <g key={`gs${plan.stair.id}`}>
+              <path
+                d={polygonToPath(plan.outline)}
+                fill="rgba(142,160,192,0.18)"
+                stroke="#8ea0c0"
+                strokeDasharray="0.18 0.12"
+                strokeWidth={0.05}
+              />
+              {plan.treadLines.map((line, i) => {
+                const a = toStairSvg(line[0])
+                const b = toStairSvg(line[1])
+                return (
+                  <line key={i} stroke="#8ea0c0" strokeWidth={0.025}
+                    x1={a.x} x2={b.x} y1={a.y} y2={b.y} />
+                )
+              })}
+            </g>
+          ))}
+        </g>
+      )}
+
       {/* Stairs. Drawn above slabs because a stair sits ON the floor, and
           hit-tested in the same order — clicking one should select the stair,
           not the slab underneath it. */}
@@ -3719,6 +3760,48 @@ export function FloorplanPanel() {
   // render a second floor, the exporter could describe one, and nothing in
   // the UI could create or even show one. This puts it on the canvas, where
   // the rest of this editor lives, rather than reviving that panel.
+  // ── Ghost of the storey below ─────────────────────────────────────
+  // Drawing an upper floor blind is guesswork: you cannot see where the walls
+  // below run, and — the case that actually bites — you cannot see where the
+  // stair lands, so a room ends up sitting on top of the landing.
+  //
+  // Walls and stair footprints only. Not floors or zones: the point is a
+  // faint reference, and filled shapes at low opacity read as smudge rather
+  // than structure.
+  const levelBelowGhost = useScene(
+    useShallow((state) => {
+      if (!levelId) return null
+      const lvl = state.nodes[levelId]
+      if (!lvl || lvl.type !== 'level') return null
+      const bId = lvl.parentId
+      if (!bId) return null
+      const building = state.nodes[bId as AnyNodeId]
+      if (!building || building.type !== 'building') return null
+
+      const mine = (lvl as LevelNode).level ?? 0
+      let below: LevelNode | null = null
+      for (const childId of building.children) {
+        const c = state.nodes[childId]
+        if (c?.type !== 'level') continue
+        const n = (c as LevelNode).level ?? 0
+        if (n < mine && (below === null || n > (below.level ?? 0))) below = c as LevelNode
+      }
+      if (!below) return null
+
+      const walls: { start: [number, number]; end: [number, number] }[] = []
+      const stairs: StairNode[] = []
+      for (const childId of below.children) {
+        const c = state.nodes[childId]
+        if (c?.type === 'wall') {
+          walls.push({ start: c.start as [number, number], end: c.end as [number, number] })
+        } else if (c?.type === 'stair') {
+          stairs.push(c as StairNode)
+        }
+      }
+      return walls.length || stairs.length ? { walls, stairs } : null
+    }),
+  )
+
   const levelsOnBuilding = useScene(
     useShallow((state) => {
       if (!buildingId) {
@@ -4470,6 +4553,11 @@ export function FloorplanPanel() {
       levelId ? getLevelHeight(levelId, state.nodes) || DEFAULT_LEVEL_HEIGHT : DEFAULT_LEVEL_HEIGHT,
     ),
   )
+  const ghostStairPlans = useMemo(
+    () => (levelBelowGhost?.stairs ?? []).map((st) => buildStairPlan(st, stairLevelHeight)),
+    [levelBelowGhost, stairLevelHeight],
+  )
+
   const stairPlans = useMemo(
     () => stairs.map((stair) => buildStairPlan(stair, stairLevelHeight)),
     [stairs, stairLevelHeight],
@@ -9457,6 +9545,7 @@ export function FloorplanPanel() {
               selectedIdSet={selectedIdSet}
               slabPolygons={displaySlabPolygons}
               stairPlans={stairPlans}
+              ghost={levelBelowGhost ? { walls: levelBelowGhost.walls, stairs: ghostStairPlans } : null}
               onStairSelect={handleStairSelect}
               onStairPointerDown={handleStairPointerDown}
               unit={unit}
