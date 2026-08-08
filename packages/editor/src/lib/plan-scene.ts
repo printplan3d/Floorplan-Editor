@@ -30,6 +30,8 @@ import {
   DoorNode,
   LevelNode,
   SiteNode,
+  SlabNode,
+  StairNode,
   WallNode,
   WindowNode,
   ZoneNode,
@@ -75,13 +77,38 @@ export interface CanonicalRoom {
   area?: number
   polygon?: [number, number][]
 }
+/** A placed stair. `level` is the storey it RISES FROM. */
+export interface CanonicalStair {
+  id: string
+  level: number
+  position: [number, number]
+  rotation: number
+  variant?: string
+  handedness?: string
+  width?: number
+  length?: number
+  depth?: number
+  railing?: boolean
+}
+/** A floor plate. Curved edges ride in `bulges`, one per edge. */
+export interface CanonicalSlab {
+  id: string
+  level: number
+  polygon: [number, number][]
+  bulges?: number[]
+  holes?: [number, number][][]
+  elevation?: number
+  thickness?: number
+  surface_type?: string
+}
 export interface CanonicalScene {
   walls: CanonicalWall[]
   doors: CanonicalDoor[]
   windows: CanonicalWindow[]
   rooms: CanonicalRoom[]
   floors: unknown[]
-  stairs: unknown[]
+  stairs: CanonicalStair[]
+  slabs?: CanonicalSlab[]
   furniture: unknown[]
   metadata: Record<string, unknown>
 }
@@ -148,6 +175,27 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
   const doors: CanonicalDoor[] = []
   const windows: CanonicalWindow[] = []
   const rooms: CanonicalRoom[] = []
+  const stairs: CanonicalStair[] = []
+  const slabs: CanonicalSlab[] = []
+
+  /* Which storey each node belongs to. Levels own their children, so the
+     map is built once from the LevelNodes rather than re-derived per node.
+     Everything below reads it, so a plan with one level behaves exactly as
+     it did when 'level-0' was hardcoded. */
+  const levelOf = new Map<string, number>()
+  const levelNodes = all
+    .filter((n) => n?.type === 'level')
+    .sort((a, b) => (a.level ?? 0) - (b.level ?? 0))
+  for (const lv of levelNodes) {
+    for (const childId of lv.children ?? []) {
+      levelOf.set(childId, lv.level ?? 0)
+      // Doors and windows hang off walls, not levels; inherit from the wall.
+      const child = nodes[childId]
+      for (const grandchildId of child?.children ?? []) {
+        levelOf.set(grandchildId, lv.level ?? 0)
+      }
+    }
+  }
 
   for (const n of all) {
     if (n?.type === 'wall') {
@@ -206,24 +254,73 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
         area: 0,
         polygon: (n.polygon || []).map((p: number[]) => rot180([p[0] ?? 0, p[1] ?? 0])),
       })
+    } else if (n?.type === 'stair') {
+      stairs.push({
+        id: n.id,
+        level: levelOf.get(n.id) ?? 0,
+        position: rot180(n.position as [number, number]),
+        // A 180-degree frame rotation adds pi to any heading. Same reason
+        // the positions negate; without it a saved stair reopens facing the
+        // opposite way.
+        rotation: (Number(n.rotation ?? 0) + Math.PI) % (2 * Math.PI),
+        variant: n.variant ?? 'straight',
+        handedness: n.handedness ?? 'right',
+        width: n.width,
+        length: n.length,
+        depth: n.depth,
+        railing: n.railing !== false,
+      })
+    } else if (n?.type === 'slab') {
+      slabs.push({
+        id: n.id,
+        level: levelOf.get(n.id) ?? 0,
+        polygon: (n.polygon || []).map((q: number[]) => rot180([q[0] ?? 0, q[1] ?? 0])),
+        // rot180 is a ROTATION, so it preserves which side of the chord an
+        // arc bulges towards — the sign rides through untouched, same as
+        // wall bulge above. (export-json.ts is the flip, and that one is a
+        // reflection, which is why it negates.)
+        ...(Array.isArray(n.bulges) && n.bulges.some((b: number) => b)
+          ? { bulges: n.bulges as number[] }
+          : {}),
+        holes: (n.holes || []).map((h: number[][]) =>
+          h.map((q: number[]) => rot180([q[0] ?? 0, q[1] ?? 0])),
+        ),
+        elevation: n.elevation ?? 0.05,
+        thickness: n.thickness ?? 0.2,
+        surface_type: n.surfaceType ?? 'interior',
+      })
     }
   }
 
-  const floor = {
-    id: 'level-0',
-    level: 0,
-    label: 'Ground floor',
-    height: 2.7,
-    walls: walls.map((w) => w.id),
-    doors: doors.map((d) => d.id),
-    windows: windows.map((w) => w.id),
-    rooms: rooms.map((r) => r.id),
-  }
+  /* One entry per storey. This used to be a single hardcoded 'level-0'
+     listing every wall in the building, so a two-storey plan came back as
+     one storey with both floors' walls piled on top of each other. */
+  const idsAtLevel = (lvl: number, ids: string[]) =>
+    ids.filter((id) => (levelOf.get(id) ?? 0) === lvl)
+
+  const floors = (levelNodes.length ? levelNodes : [{ level: 0, name: null }]).map(
+    (lv: any) => {
+      const lvl = lv.level ?? 0
+      return {
+        id: `level-${lvl}`,
+        level: lvl,
+        label: lv.name || (lvl === 0 ? 'Ground floor' : `Floor ${lvl}`),
+        height: 2.7,
+        walls: idsAtLevel(lvl, walls.map((w) => w.id)),
+        doors: idsAtLevel(lvl, doors.map((d) => d.id)),
+        windows: idsAtLevel(lvl, windows.map((w) => w.id)),
+        rooms: idsAtLevel(lvl, rooms.map((r) => r.id)),
+        stairs: stairs.filter((st) => st.level === lvl).map((st) => st.id),
+        slabs: slabs.filter((sl) => sl.level === lvl).map((sl) => sl.id),
+      }
+    },
+  )
 
   return {
     walls, doors, windows, rooms,
-    floors: [floor],
-    stairs: [],
+    floors,
+    stairs,
+    slabs,
     furniture: [],
     metadata: {
       unit: 'meters',
@@ -260,9 +357,33 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
 
   const wallIdMap = new Map<string, any>()  // canonical wall id -> WallNode
 
+  /* One LevelNode per storey. Everything used to be parented to level0, so
+     a two-storey plan reopened as one storey with both floors' walls in the
+     same place. level0 already exists, so it is reused for level 0 and only
+     the storeys above it are created. */
+  const levelByNumber = new Map<number, any>([[0, level0]])
+  const levelOfCanonicalId = new Map<string, number>()
+  for (const f of (canonical.floors ?? []) as any[]) {
+    const lvl = Number(f?.level ?? 0)
+    if (!levelByNumber.has(lvl)) {
+      const lv: any = LevelNode.parse({ parentId: building.id, level: lvl, children: [] })
+      nodes[lv.id] = lv
+      building.children.push(lv.id)
+      levelByNumber.set(lvl, lv)
+    }
+    for (const key of ['walls', 'doors', 'windows', 'rooms', 'stairs', 'slabs']) {
+      for (const id of (f?.[key] ?? []) as string[]) {
+        levelOfCanonicalId.set(String(id), lvl)
+      }
+    }
+  }
+  const levelFor = (canonicalId: string) =>
+    levelByNumber.get(levelOfCanonicalId.get(String(canonicalId)) ?? 0) ?? level0
+
   for (const w of canonical.walls ?? []) {
+    const owner = levelFor(w.id)
     const wall: any = WallNode.parse({
-      parentId: level0.id,
+      parentId: owner.id,
       children: [],
       start: rot180(w.start as [number, number]),
       end: rot180(w.end as [number, number]),
@@ -273,7 +394,7 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
       backSide: w.type === 'exterior' ? 'exterior' : 'unknown',
     })
     nodes[wall.id] = wall
-    level0.children.push(wall.id)
+    owner.children.push(wall.id)
     wallIdMap.set(w.id, wall)
   }
 
@@ -321,14 +442,60 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
     const polygon = (r.polygon || []).map((p) => rot180([p[0], p[1]] as [number, number]))
     if (polygon.length < 3) continue
     const roomType = WEB_ROOM_TYPES.has(r.type ?? '') ? r.type : 'other'
+    const owner = levelFor(r.id)
     const zone: any = ZoneNode.parse({
-      parentId: level0.id,
+      parentId: owner.id,
       name: r.label || 'Room',
       polygon,
       roomType,
     })
     nodes[zone.id] = zone
-    level0.children.push(zone.id)
+    owner.children.push(zone.id)
+  }
+
+  /* Stairs. rotation takes the same +pi the encoder applied: the wire frame
+     is the editor frame rotated 180 degrees, and a heading rotates with it.
+     Applying it on both sides is self-inverse (2*pi is a no-op), so a
+     save/load round trip returns the original heading. */
+  for (const st of (canonical.stairs ?? []) as any[]) {
+    const owner = levelFor(st?.id)
+    const stair: any = StairNode.parse({
+      parentId: owner.id,
+      position: rot180([st?.position?.[0] ?? 0, st?.position?.[1] ?? 0]),
+      rotation: (Number(st?.rotation ?? 0) + Math.PI) % (2 * Math.PI),
+      variant: st?.variant ?? 'straight',
+      handedness: st?.handedness ?? 'right',
+      ...(typeof st?.width === 'number' ? { width: st.width } : {}),
+      ...(typeof st?.length === 'number' ? { length: st.length } : {}),
+      ...(typeof st?.depth === 'number' ? { depth: st.depth } : {}),
+      railing: st?.railing !== false,
+    })
+    nodes[stair.id] = stair
+    owner.children.push(stair.id)
+  }
+
+  /* Slabs. bulges ride through unchanged — rot180 is a rotation, so it
+     preserves which side of the chord an arc bulges towards. */
+  for (const sl of (canonical.slabs ?? []) as any[]) {
+    const polygon = (sl?.polygon || []).map((q: number[]) =>
+      rot180([q[0] ?? 0, q[1] ?? 0] as [number, number]),
+    )
+    if (polygon.length < 3) continue
+    const owner = levelFor(sl?.id)
+    const slab: any = SlabNode.parse({
+      parentId: owner.id,
+      polygon,
+      bulges: Array.isArray(sl?.bulges) ? sl.bulges : [],
+      holes: (sl?.holes || [])
+        .map((h: number[][]) =>
+          h.map((q: number[]) => rot180([q[0] ?? 0, q[1] ?? 0] as [number, number])),
+        )
+        .filter((h: unknown[]) => h.length >= 3),
+      elevation: typeof sl?.elevation === 'number' ? sl.elevation : 0.05,
+      surfaceType: sl?.surface_type ?? 'interior',
+    })
+    nodes[slab.id] = slab
+    owner.children.push(slab.id)
   }
 
   return { nodes, rootNodeIds: [site.id] }
