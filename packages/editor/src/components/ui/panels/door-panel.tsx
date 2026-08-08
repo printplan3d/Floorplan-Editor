@@ -1,4 +1,4 @@
-'use client'
+"use client";
 
 import {
   type AnyNode,
@@ -8,16 +8,16 @@ import {
   type DoorStyle,
   useScene,
   type WallNode,
-} from '@ritn3d/core'
-import { useViewer } from '@ritn3d/viewer'
-import { Trash2 } from 'lucide-react'
-import { useCallback, useMemo } from 'react'
-import { sfxEmitter } from '../../../lib/sfx-bus'
-import { ActionButton, ActionGroup } from '../controls/action-button'
-import { PanelSection } from '../controls/panel-section'
-import { SegmentedControl } from '../controls/segmented-control'
-import { SliderControl } from '../controls/slider-control'
-import { PanelWrapper } from './panel-wrapper'
+} from "@ritn3d/core";
+import { useViewer } from "@ritn3d/viewer";
+import { Trash2 } from "lucide-react";
+import { useCallback, useMemo } from "react";
+import { sfxEmitter } from "../../../lib/sfx-bus";
+import { ActionButton, ActionGroup } from "../controls/action-button";
+import { PanelSection } from "../controls/panel-section";
+import { SegmentedControl } from "../controls/segmented-control";
+import { SliderControl } from "../controls/slider-control";
+import { PanelWrapper } from "./panel-wrapper";
 
 /* Order and labels follow the Flutter editor's picker on master, so the two
    apps present the same choices in the same sequence:
@@ -34,65 +34,115 @@ import { PanelWrapper } from './panel-wrapper'
 
    Hints describe how each one READS ON THE PLAN, since that is the feedback
    you get after choosing. */
+/* Per-type width range and default, in metres. Straight from Flutter master
+   (editor_property_sheet.dart _doorWidthRange / _doorDefaultWidth), which
+   notes the ranges match the iOS editor too.
+
+   Without these every door shared one 0.5-3 m slider, so a patio door sat at
+   whatever a single door had been — a 3 ft opening onto the garden. A patio
+   is a wide exterior slider and a double is two leaves; neither is physically
+   capable of being single-door width.
+
+   'garage' has no Flutter type. It falls through to the default branch there,
+   so it does here, but a real sectional door is wider than a pedestrian one —
+   left alone rather than invented, since Flutter is the reference. */
+const DOOR_WIDTH_RULES: Record<
+  string,
+  { min: number; max: number; def: number }
+> = {
+  double: { min: 1.2, max: 2.4, def: 1.6 },
+  patio: { min: 1.8, max: 3.6, def: 2.4 },
+  // Interior slider / pocket door: it replaces a single door, so it takes the
+  // same leaf sizes. Narrower than patio, which is the wide exterior slider.
+  sliding: { min: 0.6, max: 1.8, def: 0.9 },
+};
+const DOOR_WIDTH_FALLBACK = { min: 0.6, max: 1.5, def: 0.9 };
+
+const doorWidthRule = (style: string | undefined) =>
+  DOOR_WIDTH_RULES[style ?? ""] ?? DOOR_WIDTH_FALLBACK;
+
 const DOOR_STYLES: { value: DoorStyle; label: string; hint: string }[] = [
-  { value: 'pedestrian', label: 'Single', hint: 'One leaf with a swing arc.' },
-  { value: 'double', label: 'Double', hint: 'Two leaves hinged at opposite ends.' },
-  { value: 'glass', label: 'Glass', hint: 'One leaf with a swing arc, hatched.' },
-  { value: 'sliding', label: 'Sliding', hint: 'One panel on a track, with a travel arrow.' },
-  { value: 'patio', label: 'Patio', hint: 'Two panels — one fixed, one sliding.' },
-  { value: 'garage', label: 'Garage', hint: 'Sectional. No Flutter symbol; draws as a plain leaf.' },
-]
+  { value: "pedestrian", label: "Single", hint: "One leaf with a swing arc." },
+  {
+    value: "double",
+    label: "Double",
+    hint: "Two leaves hinged at opposite ends.",
+  },
+  {
+    value: "glass",
+    label: "Glass",
+    hint: "One leaf with a swing arc, hatched.",
+  },
+  {
+    value: "sliding",
+    label: "Sliding",
+    hint: "One panel on a track, with a travel arrow.",
+  },
+  {
+    value: "patio",
+    label: "Patio",
+    hint: "Two panels — one fixed, one sliding.",
+  },
+  {
+    value: "garage",
+    label: "Garage",
+    hint: "Sectional. No Flutter symbol; draws as a plain leaf.",
+  },
+];
 
 export function DoorPanel() {
-  const selectedIds = useViewer((s) => s.selection.selectedIds)
-  const setSelection = useViewer((s) => s.setSelection)
-  const nodes = useScene((s) => s.nodes)
-  const updateNode = useScene((s) => s.updateNode)
-  const deleteNode = useScene((s) => s.deleteNode)
+  const selectedIds = useViewer((s) => s.selection.selectedIds);
+  const setSelection = useViewer((s) => s.setSelection);
+  const nodes = useScene((s) => s.nodes);
+  const updateNode = useScene((s) => s.updateNode);
+  const deleteNode = useScene((s) => s.deleteNode);
 
-  const selectedId = selectedIds[0]
-  const node = selectedId ? (nodes[selectedId as AnyNode['id']] as DoorNode | undefined) : undefined
+  const selectedId = selectedIds[0];
+  const node = selectedId
+    ? (nodes[selectedId as AnyNode["id"]] as DoorNode | undefined)
+    : undefined;
 
   // Get parent wall height
   const parentWall = useMemo(() => {
-    if (!node?.parentId) return null
-    const parent = nodes[node.parentId as AnyNode['id']]
-    return parent?.type === 'wall' ? (parent as WallNode) : null
-  }, [node?.parentId, nodes])
-  const wallHeight = parentWall?.height ?? DEFAULT_WALL_HEIGHT
-  const isOverHeight = (node?.height ?? 0) > wallHeight
+    if (!node?.parentId) return null;
+    const parent = nodes[node.parentId as AnyNode["id"]];
+    return parent?.type === "wall" ? (parent as WallNode) : null;
+  }, [node?.parentId, nodes]);
+  const wallHeight = parentWall?.height ?? DEFAULT_WALL_HEIGHT;
+  const isOverHeight = (node?.height ?? 0) > wallHeight;
   // Ritn3D 2026-06-18: wall length so the Position slider can clamp the door
   // inside the wall (door.position[0] is distance-along-wall in metres).
   const wallLength = useMemo(() => {
-    if (!parentWall) return 0
+    if (!parentWall) return 0;
     return Math.hypot(
       parentWall.end[0] - parentWall.start[0],
       parentWall.end[1] - parentWall.start[1],
-    )
-  }, [parentWall])
+    );
+  }, [parentWall]);
 
   const handleUpdate = useCallback(
     (updates: Partial<DoorNode>) => {
-      if (!selectedId) return
-      updateNode(selectedId as AnyNode['id'], updates)
-      useScene.getState().dirtyNodes.add(selectedId as AnyNodeId)
+      if (!selectedId) return;
+      updateNode(selectedId as AnyNode["id"], updates);
+      useScene.getState().dirtyNodes.add(selectedId as AnyNodeId);
     },
     [selectedId, updateNode],
-  )
+  );
 
   const handleClose = useCallback(() => {
-    setSelection({ selectedIds: [] })
-  }, [setSelection])
+    setSelection({ selectedIds: [] });
+  }, [setSelection]);
 
   const handleDelete = useCallback(() => {
-    if (!(selectedId && node)) return
-    sfxEmitter.emit('sfx:item-delete')
-    deleteNode(selectedId as AnyNode['id'])
-    if (node.parentId) useScene.getState().dirtyNodes.add(node.parentId as AnyNodeId)
-    setSelection({ selectedIds: [] })
-  }, [selectedId, node, deleteNode, setSelection])
+    if (!(selectedId && node)) return;
+    sfxEmitter.emit("sfx:item-delete");
+    deleteNode(selectedId as AnyNode["id"]);
+    if (node.parentId)
+      useScene.getState().dirtyNodes.add(node.parentId as AnyNodeId);
+    setSelection({ selectedIds: [] });
+  }, [selectedId, node, deleteNode, setSelection]);
 
-  if (!node || node.type !== 'door' || selectedIds.length !== 1) return null
+  if (!node || node.type !== "door" || selectedIds.length !== 1) return null;
 
   return (
     <PanelWrapper
@@ -111,8 +161,13 @@ export function DoorPanel() {
             max={Math.max(0, wallLength - node.width / 2)}
             min={node.width / 2}
             onChange={(v) => {
-              const clamped = Math.max(node.width / 2, Math.min(v, wallLength - node.width / 2))
-              handleUpdate({ position: [clamped, node.position[1], node.position[2]] })
+              const clamped = Math.max(
+                node.width / 2,
+                Math.min(v, wallLength - node.width / 2),
+              );
+              handleUpdate({
+                position: [clamped, node.position[1], node.position[2]],
+              });
             }}
             precision={2}
             step={0.01}
@@ -136,22 +191,33 @@ export function DoorPanel() {
       <PanelSection title="Style">
         <div className="grid grid-cols-3 gap-1 px-1 pb-1">
           {DOOR_STYLES.map((opt) => {
-            const isActive = (node.style ?? 'pedestrian') === opt.value
+            const isActive = (node.style ?? "pedestrian") === opt.value;
             return (
               <button
                 className={`rounded-md border px-2 py-2 text-[11px] font-medium transition-colors ${
                   isActive
-                    ? 'border-amber-500/50 bg-amber-500/20 text-amber-100'
-                    : 'border-border/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground'
+                    ? "border-amber-500/50 bg-amber-500/20 text-amber-100"
+                    : "border-border/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
                 }`}
                 key={opt.value}
-                onClick={() => handleUpdate({ style: opt.value })}
+                onClick={() => {
+                  // Flutter resets width to the new type's default and
+                  // re-clamps, because a 0.9 m single is too narrow to be a
+                  // patio and a 2.4 m patio too wide to be a single. Without
+                  // the reset the slider silently reports a width the type
+                  // cannot have.
+                  const rule = doorWidthRule(opt.value);
+                  handleUpdate({
+                    style: opt.value,
+                    width: Math.min(Math.max(rule.def, rule.min), rule.max),
+                  });
+                }}
                 title={opt.hint}
                 type="button"
               >
                 {opt.label}
               </button>
-            )
+            );
           })}
         </div>
       </PanelSection>
@@ -159,8 +225,8 @@ export function DoorPanel() {
       <PanelSection title="Dimensions">
         <SliderControl
           label="Width"
-          max={3}
-          min={0.5}
+          max={doorWidthRule((node as any).style).max}
+          min={doorWidthRule((node as any).style).min}
           onChange={(v) => handleUpdate({ width: v })}
           precision={2}
           step={0.05}
@@ -173,8 +239,11 @@ export function DoorPanel() {
             max={wallHeight}
             min={1.0}
             onChange={(v) => {
-              const clamped = Math.min(v, wallHeight)
-              handleUpdate({ height: clamped, position: [node.position[0], clamped / 2, node.position[2]] })
+              const clamped = Math.min(v, wallHeight);
+              handleUpdate({
+                height: clamped,
+                position: [node.position[0], clamped / 2, node.position[2]],
+              });
             }}
             precision={2}
             step={0.05}
@@ -183,10 +252,22 @@ export function DoorPanel() {
           />
           {isOverHeight && (
             <div className="mx-1 mt-1 flex items-center gap-1 rounded-md border border-amber-600/20 bg-amber-500/10 px-2 py-1">
-              <svg className="h-3 w-3 shrink-0 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              <svg
+                className="h-3 w-3 shrink-0 text-amber-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth={2.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+                />
               </svg>
-              <span className="text-[10px] font-medium text-amber-700">Exceeds wall height ({wallHeight}m)</span>
+              <span className="text-[10px] font-medium text-amber-700">
+                Exceeds wall height ({wallHeight}m)
+              </span>
             </div>
           )}
         </div>
@@ -201,8 +282,8 @@ export function DoorPanel() {
             <SegmentedControl
               onChange={(v) => handleUpdate({ hingesSide: v })}
               options={[
-                { label: 'Left', value: 'left' },
-                { label: 'Right', value: 'right' },
+                { label: "Left", value: "left" },
+                { label: "Right", value: "right" },
               ]}
               value={node.hingesSide}
             />
@@ -214,8 +295,8 @@ export function DoorPanel() {
             <SegmentedControl
               onChange={(v) => handleUpdate({ swingDirection: v })}
               options={[
-                { label: 'Inward', value: 'inward' },
-                { label: 'Outward', value: 'outward' },
+                { label: "Inward", value: "inward" },
+                { label: "Outward", value: "outward" },
               ]}
               value={node.swingDirection}
             />
@@ -240,5 +321,5 @@ export function DoorPanel() {
         </ActionGroup>
       </PanelSection>
     </PanelWrapper>
-  )
+  );
 }
