@@ -164,6 +164,15 @@ export function exportFloorPlanJSON(): object {
       levelSlabs.push({
         id: sl.id,
         polygon: (sl.polygon || []).map((pt: [number, number]) => flipX(pt)),
+        // Per-edge arc bulge takes the SAME sign correction walls get: flipX
+        // is a reflection, so it reverses which side of the chord an arc
+        // bulges towards. Edge indexing survives the flip untouched — edge i
+        // is still polygon[i] -> polygon[i+1] — so only the sign changes.
+        // Omitted when every edge is straight, so plans with no curved floor
+        // serialise byte-identically to before.
+        ...((sl.bulges || []).some((b: number) => b)
+          ? { bulges: (sl.bulges as number[]).map(flipBulge) }
+          : {}),
         holes: (sl.holes || []).map((h: [number, number][]) => h.map((pt) => flipX(pt))),
         elevation: sl.elevation ?? 0.05,
         thickness: sl.thickness ?? 0.2,

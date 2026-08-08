@@ -24,6 +24,17 @@ export const SlabNode = BaseNode.extend({
   // Specific props
   // Polygon boundary - array of [x, z] coordinates defining the slab
   polygon: z.array(z.tuple([z.number(), z.number()])),
+  // Ritn3D 2026-08-08: per-EDGE arc bulge, same DXF convention as
+  // WallNode.bulge — tan(included_arc_angle / 4), 0 = straight. bulges[i]
+  // curves the edge polygon[i] -> polygon[i + 1]; the last entry closes back
+  // to polygon[0].
+  //
+  // A parallel array rather than widening polygon to [x, z, bulge]: those
+  // tuples are destructured in roughly twenty places, and a shape change
+  // breaks every one of them. Missing or short arrays read as straight, so
+  // every existing slab parses unchanged with no migration — the same trade
+  // WallNode made.
+  bulges: z.array(z.number()).default([]),
   holes: z.array(z.array(z.tuple([z.number(), z.number()]))).default([]),
   elevation: z.number().default(0.05), // Elevation in meters
   surfaceType: SlabSurfaceType.default('interior'),
@@ -31,6 +42,7 @@ export const SlabNode = BaseNode.extend({
   dedent`
   Slab node - used to represent a slab/floor in the building
   - polygon: array of [x, z] points defining the slab boundary
+  - bulges: per-edge arc bulge, tan(arc_angle/4); 0 or absent = straight edge
   - holes: array of polygon holes (for stair openings, double-height voids)
   - elevation: elevation in meters
   - surfaceType: drives the Blender material (interior floor, patio, deck,

@@ -429,6 +429,13 @@ type WallBulgeDraft = {
   bulge: number;
 };
 
+/** A slab edge being curved. edgeIndex i curves polygon[i] -> polygon[i+1]. */
+type SlabBulgeDraft = {
+  slabId: SlabNode["id"];
+  edgeIndex: number;
+  bulge: number;
+};
+
 type SlabBoundaryDraft = {
   slabId: SlabNode["id"];
   polygon: WallPlanPoint[];
@@ -1360,8 +1367,63 @@ function formatPolygonPath(points: Point2D[], holes: Point2D[][] = []): string {
   return [points, ...holes].map(formatSubpath).filter(Boolean).join(" ");
 }
 
+function toWallPlanPointFromTuple([x, y]: [number, number]): WallPlanPoint {
+  return [x, y] as WallPlanPoint;
+}
+
+function toFloorplanPolygon1([x, y]: [number, number]): Point2D {
+  return { x, y };
+}
+
 function toFloorplanPolygon(points: Array<[number, number]>): Point2D[] {
   return points.map(([x, y]) => ({ x, y }));
+}
+
+/**
+ * Expand a slab outline's curved edges into a polyline.
+ *
+ * `bulges[i]` curves the edge polygon[i] -> polygon[i + 1], last entry
+ * closing back to [0], same DXF convention as WallNode.bulge.
+ *
+ * Tessellating rather than emitting SVG `A` commands is deliberate, and it is
+ * what curved walls already do for the plan. One expansion feeds the SVG
+ * path, the area, the hit-test, the PDF export and — via the translator — the
+ * Blender pipeline, so none of them can disagree about where the edge is.
+ * True arcs would render a shade smoother and put the plan on a different
+ * code path from the geometry, which is the class of bug that has cost the
+ * most here.
+ *
+ * Straight outlines return the input array untouched, so the common case
+ * allocates nothing.
+ */
+function tessellateSlabOutline(
+  polygon: Array<[number, number]>,
+  bulges: number[] | undefined,
+): Array<[number, number]> {
+  if (!bulges?.some((b) => !isStraight(b ?? 0))) {
+    return polygon;
+  }
+
+  const out: Array<[number, number]> = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i]!;
+    const b = polygon[(i + 1) % polygon.length]!;
+    const bulge = bulges[i] ?? 0;
+
+    if (isStraight(bulge)) {
+      out.push(a);
+      continue;
+    }
+
+    // Drop each arc's final sample: it is the next edge's first point, and
+    // duplicated vertices upset the shoelace area and the boolean in Blender.
+    const samples = tessellateArc(a, b, bulge);
+    for (let s = 0; s < samples.length - 1; s++) {
+      const pt = samples[s]!;
+      out.push([pt[0], pt[1]]);
+    }
+  }
+  return out;
 }
 
 function isPointInsidePolygonWithHoles(
@@ -4137,6 +4199,14 @@ export function FloorplanPanel() {
   const wallEndpointDragRef = useRef<WallEndpointDragState | null>(null);
   // Bulge handle drag — parallel to endpoint drag (see WallBulgeDragState).
   const wallBulgeDragRef = useRef<WallBulgeDragState | null>(null);
+  const slabBulgeDragRef = useRef<{
+    pointerId: number;
+    slabId: SlabNode["id"];
+    edgeIndex: number;
+    start: [number, number];
+    end: [number, number];
+    lastBulge: number;
+  } | null>(null);
   // Item move/rotate drag — stored as a ref since intra-drag updates don't
   // require React re-renders (we mutate the node directly each pointer-move
   // event and the scene store re-renders the affected SVG element).
@@ -4585,6 +4655,9 @@ export function FloorplanPanel() {
   const [wallEndpointDraft, setWallEndpointDraft] =
     useState<WallEndpointDraft | null>(null);
   const [wallBulgeDraft, setWallBulgeDraft] = useState<WallBulgeDraft | null>(
+    null,
+  );
+  const [slabBulgeDraft, setSlabBulgeDraft] = useState<SlabBulgeDraft | null>(
     null,
   );
   const [hoveredOpeningId, setHoveredOpeningId] = useState<
@@ -5218,7 +5291,19 @@ export function FloorplanPanel() {
   const slabPolygons = useMemo(
     () =>
       slabs.flatMap((slab) => {
-        const polygon = toFloorplanPolygon(slab.polygon);
+        // Curved edges expand here, at the single place the display polygon
+        // is derived, so the path, area and hit-test below all inherit them.
+        // A live bulge drag overrides its one edge so the floor re-curves
+        // under the cursor instead of snapping only on release.
+        let bulges = slab.bulges;
+        if (slabBulgeDraft?.slabId === slab.id) {
+          bulges = [...(slab.bulges ?? [])];
+          while (bulges.length < slab.polygon.length) bulges.push(0);
+          bulges[slabBulgeDraft.edgeIndex] = slabBulgeDraft.bulge;
+        }
+        const polygon = toFloorplanPolygon(
+          tessellateSlabOutline(slab.polygon, bulges),
+        );
         if (polygon.length < 3) {
           return [];
         }
@@ -5236,7 +5321,7 @@ export function FloorplanPanel() {
           },
         ];
       }),
-    [slabs],
+    [slabs, slabBulgeDraft],
   );
   // Tread count follows the storey height, so the symbol is rebuilt whenever
   // the level's walls change — a taller storey genuinely has more steps and
@@ -5559,31 +5644,37 @@ export function FloorplanPanel() {
       return [];
     }
 
-    return selectedSlabEntry.polygon.map((point, vertexIndex) => ({
-      nodeId: selectedSlabEntry.slab.id,
-      vertexIndex,
-      point: toWallPlanPoint(point),
-      isActive:
-        slabVertexDragState?.slabId === selectedSlabEntry.slab.id &&
-        slabVertexDragState.vertexIndex === vertexIndex,
-    }));
+    // Raw corners — the display polygon is tessellated, and a curved slab
+    // would otherwise sprout a drag handle on every arc sample.
+    return selectedSlabEntry.slab.polygon
+      .map(toFloorplanPolygon1)
+      .map((point, vertexIndex) => ({
+        nodeId: selectedSlabEntry.slab.id,
+        vertexIndex,
+        point: toWallPlanPoint(point),
+        isActive:
+          slabVertexDragState?.slabId === selectedSlabEntry.slab.id &&
+          slabVertexDragState.vertexIndex === vertexIndex,
+      }));
   }, [selectedSlabEntry, shouldShowSlabBoundaryHandles, slabVertexDragState]);
   const slabMidpointHandles = useMemo(() => {
     if (!(shouldShowSlabBoundaryHandles && !slabVertexDragState)) {
       return [];
     }
 
-    return selectedSlabEntry.polygon.map((point, edgeIndex, polygon) => {
-      const nextPoint = polygon[(edgeIndex + 1) % polygon.length];
-      return {
-        nodeId: selectedSlabEntry.slab.id,
-        edgeIndex,
-        point: [
-          (point.x + (nextPoint?.x ?? point.x)) / 2,
-          (point.y + (nextPoint?.y ?? point.y)) / 2,
-        ] as WallPlanPoint,
-      };
-    });
+    return selectedSlabEntry.slab.polygon
+      .map(toFloorplanPolygon1)
+      .map((point, edgeIndex, polygon) => {
+        const nextPoint = polygon[(edgeIndex + 1) % polygon.length];
+        return {
+          nodeId: selectedSlabEntry.slab.id,
+          edgeIndex,
+          point: [
+            (point.x + (nextPoint?.x ?? point.x)) / 2,
+            (point.y + (nextPoint?.y ?? point.y)) / 2,
+          ] as WallPlanPoint,
+        };
+      });
   }, [selectedSlabEntry, shouldShowSlabBoundaryHandles, slabVertexDragState]);
   const siteVertexHandles = useMemo(() => {
     if (!(shouldShowSiteBoundaryHandles && visibleSitePolygon)) {
@@ -5968,6 +6059,61 @@ export function FloorplanPanel() {
 
     return (widthUnitsPerPixel + heightUnitsPerPixel) / 2;
   }, [surfaceSize.height, surfaceSize.width, viewBox.height, viewBox.width]);
+  /* One curve handle per edge of the selected floor, dragged perpendicular
+     to bow that edge — the same gesture a selected wall already uses.
+
+     Position needs care: the edge midpoint is already taken by the
+     insert-vertex handle. On a curved edge the arc midpoint is naturally
+     clear of it, so use that. On a straight edge the two coincide, so the
+     handle is pushed out along the edge normal by a fixed SCREEN distance —
+     constant separation at every zoom, and the moment a drag starts the
+     handle becomes the true arc midpoint and sits under the cursor. */
+  const slabBulgeHandles = useMemo(() => {
+    if (!shouldShowSlabBoundaryHandles || slabVertexDragState) {
+      return [];
+    }
+
+    const corners = selectedSlabEntry.slab.polygon;
+    if (corners.length < 3) return [];
+    const stored = selectedSlabEntry.slab.bulges ?? [];
+    const clearance = floorplanWorldUnitsPerPixel * 14;
+
+    return corners.map((start, edgeIndex) => {
+      const end = corners[(edgeIndex + 1) % corners.length]!;
+      const isDragging =
+        slabBulgeDraft?.slabId === selectedSlabEntry.slab.id &&
+        slabBulgeDraft.edgeIndex === edgeIndex;
+      const bulge = isDragging
+        ? slabBulgeDraft.bulge
+        : (stored[edgeIndex] ?? 0);
+
+      let point: [number, number];
+      if (isStraight(bulge)) {
+        const dx = end[0] - start[0];
+        const dy = end[1] - start[1];
+        const len = Math.hypot(dx, dy) || 1;
+        point = [
+          (start[0] + end[0]) / 2 - (dy / len) * clearance,
+          (start[1] + end[1]) / 2 + (dx / len) * clearance,
+        ];
+      } else {
+        point = arcMidpoint(start, end, bulge) as [number, number];
+      }
+
+      return {
+        nodeId: selectedSlabEntry.slab.id,
+        edgeIndex,
+        point: point as WallPlanPoint,
+        isActive: isDragging,
+      };
+    });
+  }, [
+    floorplanWorldUnitsPerPixel,
+    selectedSlabEntry,
+    shouldShowSlabBoundaryHandles,
+    slabBulgeDraft,
+    slabVertexDragState,
+  ]);
   const floorplanWallHitTolerance = useMemo(
     () => floorplanWorldUnitsPerPixel * (FLOORPLAN_WALL_HIT_STROKE_WIDTH / 2),
     [floorplanWorldUnitsPerPixel],
@@ -8973,9 +9119,12 @@ export function FloorplanPanel() {
         return;
       }
 
+      // RAW corners, not slabEntry.polygon: that is the tessellated display
+      // outline now, and seeding an edit from it would write ~50 polyline
+      // points back as the slab's corners and flatten every arc.
       setSlabBoundaryDraft({
         slabId,
-        polygon: slabEntry.polygon.map(toWallPlanPoint),
+        polygon: slabEntry.slab.polygon.map(toWallPlanPointFromTuple),
       });
       setSlabVertexDragState({
         pointerId: event.pointerId,
@@ -9034,7 +9183,10 @@ export function FloorplanPanel() {
         return;
       }
 
-      const basePolygon = slabEntry.polygon.map(toWallPlanPoint);
+      // RAW corners, not slabEntry.polygon: that is the tessellated display
+      // outline now, and seeding an edit from it would write ~50 polyline
+      // points back as the slab's corners and flatten every arc.
+      const basePolygon = slabEntry.slab.polygon.map(toWallPlanPointFromTuple);
       const startPoint = basePolygon[edgeIndex];
       const endPoint = basePolygon[(edgeIndex + 1) % basePolygon.length];
       if (!(startPoint && endPoint)) {
@@ -9065,6 +9217,117 @@ export function FloorplanPanel() {
     },
     [displaySlabPolygons],
   );
+  /* Curve one edge of a floor. Mirrors the wall bulge drag: the handle IS
+     the arc apex, so its perpendicular distance from the chord is the
+     sagitta and bulge = 2 * sagitta / chord, hard-clamped to a semicircle.
+     Absolute rather than relative, for the reason recorded on the wall
+     version — a relative model decouples the cursor from the visible apex
+     and you can never drag a curved edge back to straight. */
+  const handleSlabBulgePointerDown = useCallback(
+    (
+      slabId: SlabNode["id"],
+      edgeIndex: number,
+      event: ReactPointerEvent<SVGCircleElement>,
+    ) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setHoveredSlabHandleId(null);
+
+      const slab = slabById.get(slabId);
+      if (!slab) return;
+      const start = slab.polygon[edgeIndex];
+      const end = slab.polygon[(edgeIndex + 1) % slab.polygon.length];
+      if (!(start && end)) return;
+
+      const initialBulge = slab.bulges?.[edgeIndex] ?? 0;
+      slabBulgeDragRef.current = {
+        pointerId: event.pointerId,
+        slabId,
+        edgeIndex,
+        start,
+        end,
+        lastBulge: initialBulge,
+      };
+      setSlabBulgeDraft({ slabId, edgeIndex, bulge: initialBulge });
+    },
+    [slabById],
+  );
+
+  useEffect(() => {
+    if (!slabBulgeDraft) return;
+
+    const onMove = (event: PointerEvent) => {
+      const drag = slabBulgeDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      event.preventDefault();
+
+      const planPoint = getPlanPointFromClientPoint(
+        event.clientX,
+        event.clientY,
+      );
+      if (!planPoint) return;
+
+      const chord = Math.hypot(
+        drag.end[0] - drag.start[0],
+        drag.end[1] - drag.start[1],
+      );
+      if (chord === 0) return;
+
+      const dx = (drag.end[0] - drag.start[0]) / chord;
+      const dy = (drag.end[1] - drag.start[1]) / chord;
+      const vx = planPoint[0] - drag.start[0];
+      const vy = planPoint[1] - drag.start[1];
+      const cursorPerp = vx * -dy + vy * dx;
+
+      const next = Math.max(-1, Math.min(1, (2 * cursorPerp) / chord));
+      drag.lastBulge = next;
+      setSlabBulgeDraft({
+        slabId: drag.slabId,
+        edgeIndex: drag.edgeIndex,
+        bulge: next,
+      });
+    };
+
+    const commit = (event: PointerEvent) => {
+      const drag = slabBulgeDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+
+      const slab = slabById.get(drag.slabId);
+      if (slab) {
+        const finalBulge = isStraight(drag.lastBulge) ? 0 : drag.lastBulge;
+        if ((slab.bulges?.[drag.edgeIndex] ?? 0) !== finalBulge) {
+          // Pad to one entry per edge before writing: a slab drawn before
+          // bulges existed has none at all, and a sparse array would put the
+          // curve on whichever edge happened to land at that index later.
+          const nextBulges = [...(slab.bulges ?? [])];
+          while (nextBulges.length < slab.polygon.length) nextBulges.push(0);
+          nextBulges[drag.edgeIndex] = finalBulge;
+          updateNode(slab.id, { bulges: nextBulges });
+          sfxEmitter.emit("sfx:structure-build");
+        }
+      }
+      slabBulgeDragRef.current = null;
+      setSlabBulgeDraft(null);
+    };
+
+    const cancel = (event: PointerEvent) => {
+      const drag = slabBulgeDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      slabBulgeDragRef.current = null;
+      setSlabBulgeDraft(null);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", commit);
+    window.addEventListener("pointercancel", cancel);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", commit);
+      window.removeEventListener("pointercancel", cancel);
+    };
+  }, [getPlanPointFromClientPoint, slabBulgeDraft, slabById, updateNode]);
+
   const handleSiteVertexPointerDown = useCallback(
     (
       siteId: SiteNode["id"],
@@ -11267,6 +11530,40 @@ export function FloorplanPanel() {
                     r={0.04}
                     fill="#ffffff"
                     pointerEvents="none"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              );
+            })}
+
+            {/* Floor curve handles. Same visual language as the wall bulge
+                handle, in a warmer tint so the two are not confused when a
+                slab and a wall are both selected. */}
+            {slabBulgeHandles.map(({ nodeId, edgeIndex, point, isActive }) => {
+              const svg = toSvgPoint({ x: point[0], y: point[1] });
+              return (
+                <g key={`slab-bulge-${nodeId}-${edgeIndex}`}>
+                  <circle
+                    cx={svg.x}
+                    cy={svg.y}
+                    fill={
+                      isActive ? palette.selectedFill : "rgba(224,163,60,0.30)"
+                    }
+                    pointerEvents="none"
+                    r={0.28}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <circle
+                    cx={svg.x}
+                    cy={svg.y}
+                    fill={isActive ? "#f2c98a" : "#e0a33c"}
+                    onPointerDown={(event) =>
+                      handleSlabBulgePointerDown(nodeId, edgeIndex, event)
+                    }
+                    r={0.16}
+                    stroke="#ffffff"
+                    strokeWidth="0.03"
+                    style={{ cursor: "grab" }}
                     vectorEffect="non-scaling-stroke"
                   />
                 </g>
