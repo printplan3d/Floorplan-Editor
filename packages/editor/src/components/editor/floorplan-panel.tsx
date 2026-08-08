@@ -2639,7 +2639,12 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   slabPolygons: SlabPolygonEntry[];
   stairPlans: StairPlan[];
   ghost: {
-    walls: { start: [number, number]; end: [number, number] }[];
+    /** depth 1 is the storey directly below; higher is further down. */
+    walls: {
+      start: [number, number];
+      end: [number, number];
+      depth?: number;
+    }[];
     stairs: StairPlan[];
   } | null;
   onStairSelect: (
@@ -2849,6 +2854,9 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
           {ghost.walls.map((w, i) => (
             <line
               key={`gw${i}`}
+              // Each storey further down is drawn at 55% of the one above it,
+              // with a floor so the ground outline never vanishes entirely.
+              opacity={Math.max(0.3, 0.55 ** ((w.depth ?? 1) - 1))}
               stroke={palette.ghostStroke}
               strokeDasharray="7 5"
               strokeWidth={1.6}
@@ -4199,6 +4207,15 @@ export function FloorplanPanel() {
   const wallEndpointDragRef = useRef<WallEndpointDragState | null>(null);
   // Bulge handle drag — parallel to endpoint drag (see WallBulgeDragState).
   const wallBulgeDragRef = useRef<WallBulgeDragState | null>(null);
+  /** Dragging a floor cut: one corner of it, or the whole ring. */
+  const slabHoleDragRef = useRef<{
+    pointerId: number;
+    slabId: SlabNode["id"];
+    holeIndex: number;
+    vertexIndex: number | null; // null = moving the whole hole
+    origin: [number, number];
+    startRing: [number, number][];
+  } | null>(null);
   const slabBulgeDragRef = useRef<{
     pointerId: number;
     slabId: SlabNode["id"];
@@ -4445,30 +4462,47 @@ export function FloorplanPanel() {
     const building = sceneNodes[bId as AnyNodeId];
     if (!building || building.type !== "building") return null;
 
+    /* EVERY storey below, not just the nearest. Standing on level 2 you want
+       the ground-floor outline as well — that is what tells you whether a
+       wall you are drawing lands over structure or over thin air. Depth 1 is
+       the storey directly beneath; each further one is drawn fainter, so the
+       stack reads back-to-front without any of it competing with the level
+       you are editing. */
     const mine = (lvl as LevelNode).level ?? 0;
-    let below: LevelNode | null = null;
+    const below: LevelNode[] = [];
     for (const childId of building.children) {
       const c = sceneNodes[childId];
       if (c?.type !== "level") continue;
-      const n = (c as LevelNode).level ?? 0;
-      if (n < mine && (below === null || n > (below.level ?? 0)))
-        below = c as LevelNode;
+      if (((c as LevelNode).level ?? 0) < mine) below.push(c as LevelNode);
     }
-    if (!below) return null;
+    if (!below.length) return null;
+    // Nearest first, so depth is just the index + 1.
+    below.sort((a, b) => (b.level ?? 0) - (a.level ?? 0));
 
-    const walls: { start: [number, number]; end: [number, number] }[] = [];
+    const walls: {
+      start: [number, number];
+      end: [number, number];
+      depth: number;
+    }[] = [];
     const stairs: StairNode[] = [];
-    for (const childId of below.children) {
-      const c = sceneNodes[childId];
-      if (c?.type === "wall") {
-        walls.push({
-          start: c.start as [number, number],
-          end: c.end as [number, number],
-        });
-      } else if (c?.type === "stair") {
-        stairs.push(c as StairNode);
+    below.forEach((lv, i) => {
+      const depth = i + 1;
+      for (const childId of lv.children) {
+        const c = sceneNodes[childId];
+        if (c?.type === "wall") {
+          walls.push({
+            start: c.start as [number, number],
+            end: c.end as [number, number],
+            depth,
+          });
+        } else if (c?.type === "stair" && depth === 1) {
+          // Stair symbols only from the storey directly below. A stair three
+          // floors down tells you nothing about where you are building and
+          // its treads make the underlay unreadable.
+          stairs.push(c as StairNode);
+        }
       }
-    }
+    });
     return walls.length || stairs.length ? { walls, stairs } : null;
   }, [levelId, sceneNodes]);
 
@@ -4660,6 +4694,11 @@ export function FloorplanPanel() {
   const [slabBulgeDraft, setSlabBulgeDraft] = useState<SlabBulgeDraft | null>(
     null,
   );
+  const [slabHoleDraft, setSlabHoleDraft] = useState<{
+    slabId: SlabNode["id"];
+    holeIndex: number;
+    ring: [number, number][];
+  } | null>(null);
   const [hoveredOpeningId, setHoveredOpeningId] = useState<
     OpeningNode["id"] | null
   >(null);
@@ -5308,7 +5347,14 @@ export function FloorplanPanel() {
           return [];
         }
 
-        const holes = (slab.holes ?? [])
+        // A hole being dragged renders from the draft, so the cut moves
+        // under the cursor rather than jumping on release.
+        const rawHoles = (slab.holes ?? []).map((hole, i) =>
+          slabHoleDraft?.slabId === slab.id && slabHoleDraft.holeIndex === i
+            ? slabHoleDraft.ring
+            : hole,
+        );
+        const holes = rawHoles
           .map((hole) => toFloorplanPolygon(hole))
           .filter((hole) => hole.length >= 3);
 
@@ -5321,7 +5367,7 @@ export function FloorplanPanel() {
           },
         ];
       }),
-    [slabs, slabBulgeDraft],
+    [slabs, slabBulgeDraft, slabHoleDraft],
   );
   // Tread count follows the storey height, so the symbol is rebuilt whenever
   // the level's walls change — a taller storey genuinely has more steps and
@@ -6114,6 +6160,32 @@ export function FloorplanPanel() {
     slabBulgeDraft,
     slabVertexDragState,
   ]);
+  /* Corner handles for every floor cut on the selected slab. Shown without
+     going through the panel's "edit" button — a cut you can see is a cut you
+     should be able to grab. */
+  const slabHoleHandles = useMemo(() => {
+    if (!shouldShowSlabBoundaryHandles || slabVertexDragState) return [];
+    const slab = selectedSlabEntry.slab;
+    return (slab.holes ?? []).flatMap((hole, holeIndex) => {
+      const live =
+        slabHoleDraft?.slabId === slab.id &&
+        slabHoleDraft.holeIndex === holeIndex
+          ? slabHoleDraft.ring
+          : hole;
+      return live.map((pt, vertexIndex) => ({
+        slabId: slab.id,
+        holeIndex,
+        vertexIndex,
+        point: [pt[0], pt[1]] as WallPlanPoint,
+      }));
+    });
+  }, [
+    selectedSlabEntry,
+    shouldShowSlabBoundaryHandles,
+    slabHoleDraft,
+    slabVertexDragState,
+  ]);
+
   const floorplanWallHitTolerance = useMemo(
     () => floorplanWorldUnitsPerPixel * (FLOORPLAN_WALL_HIT_STROKE_WIDTH / 2),
     [floorplanWorldUnitsPerPixel],
@@ -9328,6 +9400,107 @@ export function FloorplanPanel() {
     };
   }, [getPlanPointFromClientPoint, slabBulgeDraft, slabById, updateNode]);
 
+  const handleSlabHolePointerDown = useCallback(
+    (
+      slabId: SlabNode["id"],
+      holeIndex: number,
+      vertexIndex: number | null,
+      event: ReactPointerEvent<SVGElement>,
+    ) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const slab = slabById.get(slabId);
+      const ring = slab?.holes?.[holeIndex];
+      if (!ring || ring.length < 3) return;
+      const origin = getPlanPointFromClientPoint(event.clientX, event.clientY);
+      if (!origin) return;
+
+      slabHoleDragRef.current = {
+        pointerId: event.pointerId,
+        slabId,
+        holeIndex,
+        vertexIndex,
+        origin,
+        startRing: ring.map((q) => [q[0], q[1]] as [number, number]),
+      };
+      setSlabHoleDraft({
+        slabId,
+        holeIndex,
+        ring: ring.map((q) => [q[0], q[1]] as [number, number]),
+      });
+    },
+    [getPlanPointFromClientPoint, slabById],
+  );
+
+  useEffect(() => {
+    if (!slabHoleDraft) return;
+
+    const onMove = (event: PointerEvent) => {
+      const drag = slabHoleDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      event.preventDefault();
+      const planPoint = getPlanPointFromClientPoint(
+        event.clientX,
+        event.clientY,
+      );
+      if (!planPoint) return;
+
+      let ring: [number, number][];
+      if (drag.vertexIndex === null) {
+        // Whole cut: translate by the cursor delta, snapped, so the shape is
+        // preserved exactly rather than re-snapping each corner separately.
+        const dx = snapToHalf(planPoint[0] - drag.origin[0]);
+        const dy = snapToHalf(planPoint[1] - drag.origin[1]);
+        ring = drag.startRing.map((q) => [q[0] + dx, q[1] + dy]);
+      } else {
+        ring = drag.startRing.map((q) => [q[0], q[1]]);
+        ring[drag.vertexIndex] = [
+          snapToHalf(planPoint[0]),
+          snapToHalf(planPoint[1]),
+        ];
+      }
+      setSlabHoleDraft({
+        slabId: drag.slabId,
+        holeIndex: drag.holeIndex,
+        ring,
+      });
+    };
+
+    const commit = (event: PointerEvent) => {
+      const drag = slabHoleDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const slab = slabById.get(drag.slabId);
+      const draft = slabHoleDraft;
+      if (slab && draft && draft.ring.length >= 3) {
+        const nextHoles = (slab.holes ?? []).map((h, i) =>
+          i === draft.holeIndex ? draft.ring : h,
+        );
+        updateNode(slab.id, { holes: nextHoles });
+        sfxEmitter.emit("sfx:structure-build");
+      }
+      slabHoleDragRef.current = null;
+      setSlabHoleDraft(null);
+    };
+
+    const cancel = (event: PointerEvent) => {
+      const drag = slabHoleDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      slabHoleDragRef.current = null;
+      setSlabHoleDraft(null);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", commit);
+    window.addEventListener("pointercancel", cancel);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", commit);
+      window.removeEventListener("pointercancel", cancel);
+    };
+  }, [getPlanPointFromClientPoint, slabById, slabHoleDraft, updateNode]);
+
   const handleSiteVertexPointerDown = useCallback(
     (
       siteId: SiteNode["id"],
@@ -11535,6 +11708,73 @@ export function FloorplanPanel() {
                 </g>
               );
             })}
+
+            {/* Floor cuts: a grab area filling each hole so the whole cut
+                can be dragged, plus a handle per corner to reshape it.
+                Rendered before the curve handles so a corner handle sitting
+                over a hole still wins the pointer. */}
+            {slabHoleHandles.length > 0 &&
+              selectedSlabEntry &&
+              (selectedSlabEntry?.slab.holes ?? []).map((hole, holeIndex) => {
+                const live =
+                  slabHoleDraft?.slabId === selectedSlabEntry.slab.id &&
+                  slabHoleDraft.holeIndex === holeIndex
+                    ? slabHoleDraft.ring
+                    : hole;
+                if (live.length < 3) return null;
+                const pts = live
+                  .map((q) => {
+                    const sp = toSvgPoint({ x: q[0], y: q[1] });
+                    return sp.x + "," + sp.y;
+                  })
+                  .join(" ");
+                return (
+                  <polygon
+                    key={"hole-body-" + holeIndex}
+                    fill="rgba(239,68,68,0.10)"
+                    onPointerDown={(event) =>
+                      handleSlabHolePointerDown(
+                        selectedSlabEntry.slab.id,
+                        holeIndex,
+                        null,
+                        event,
+                      )
+                    }
+                    points={pts}
+                    stroke="#ef4444"
+                    strokeDasharray="5 4"
+                    strokeWidth={1.2}
+                    style={{ cursor: "move" }}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                );
+              })}
+            {slabHoleHandles.map(
+              ({ slabId, holeIndex, vertexIndex, point }) => {
+                const svg = toSvgPoint({ x: point[0], y: point[1] });
+                return (
+                  <circle
+                    key={"hole-" + holeIndex + "-" + vertexIndex}
+                    cx={svg.x}
+                    cy={svg.y}
+                    fill="#ef4444"
+                    onPointerDown={(event) =>
+                      handleSlabHolePointerDown(
+                        slabId,
+                        holeIndex,
+                        vertexIndex,
+                        event,
+                      )
+                    }
+                    r={0.14}
+                    stroke="#ffffff"
+                    strokeWidth="0.03"
+                    style={{ cursor: "grab" }}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                );
+              },
+            )}
 
             {/* Floor curve handles. Same visual language as the wall bulge
                 handle, in a warmer tint so the two are not confused when a
