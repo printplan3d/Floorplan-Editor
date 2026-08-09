@@ -48,15 +48,20 @@ export function SlabPanel() {
          outdoor ground materials; a first-floor slab is not a driveway.
      A slab is a child of its level, and LevelNode.level is the storey
      number, so 0 is the only floor these apply to. */
-  const slabLevel = useMemo(() => {
-    if (!node) return 0;
-    const parent = node.parentId
-      ? (nodes[node.parentId as AnyNode["id"]] as any)
-      : undefined;
-    if (parent?.type === "level") return Number(parent.level ?? 0);
-    return 0;
+  /* Fail OPEN. This asks "are we certain this slab is above ground", not
+     "is it on the ground" — because the two differ whenever the parent
+     cannot be resolved, and the wrong answer there silently removes controls
+     the user is looking for. A stray preset on an upper floor is a smaller
+     problem than a ground floor with no presets at all. */
+  const isUpperLevel = useMemo(() => {
+    if (!node?.parentId) return false;
+    const parent = nodes[node.parentId as AnyNode["id"]] as
+      | { type?: string; level?: number }
+      | undefined;
+    if (parent?.type !== "level") return false;
+    return Number(parent.level ?? 0) > 0;
   }, [node, nodes]);
-  const isGroundLevel = slabLevel === 0;
+  const isGroundLevel = !isUpperLevel;
 
   const handleUpdate = useCallback(
     (updates: Partial<SlabNode>) => {

@@ -62,18 +62,28 @@ const MINIMAL_TOOLS: {
   label: string
   icon?: string
   iconNode?: ReactNode
+  /* Shown on hover. The rail's own labels are 9px and clipped to one word,
+     so they name a tool without ever explaining it — which is how you end up
+     drawing a floor without knowing which storey it lands on. */
+  hint?: string
 }[] = [
-  { id: 'wall',     label: 'Wall',     icon: '/icons/wall.png' },
-  { id: 'arc-wall', label: 'Arc Wall', iconNode: ArcWallIconNodeIR },
-  { id: 'door',     label: 'Door',     icon: '/icons/door.png' },
-  { id: 'window',   label: 'Window',   icon: '/icons/window.png' },
-  { id: 'stair',    label: 'Stair',    icon: '/symbols/stairs/staircase.svg' },
+  { id: 'wall',     label: 'Wall',     icon: '/icons/wall.png',
+    hint: 'Click a start point, then an end point. Draws on the level you are on.' },
+  { id: 'arc-wall', label: 'Arc Wall', iconNode: ArcWallIconNodeIR,
+    hint: 'Same as Wall, then drag the midpoint handle to curve it.' },
+  { id: 'door',     label: 'Door',     icon: '/icons/door.png',
+    hint: 'Click a wall to place a door. Width follows the type you pick.' },
+  { id: 'window',   label: 'Window',   icon: '/icons/window.png',
+    hint: 'Click a wall to place a window.' },
+  { id: 'stair',    label: 'Stair',    icon: '/symbols/stairs/staircase.svg',
+    hint: 'Click to place. It rises FROM this level to the one above, and cuts its own opening.' },
   // Floor slabs. The tool and its polygon-draw path already existed in
   // floorplan-panel; it was simply never listed on the rail the webapp
   // renders, so there was no way to draw one. Real slabs are not the wall
   // outline — balconies, sun shades and porticos all extend past it — so an
   // upper storey's floor being auto-derived is a DEFAULT, not the answer.
-  { id: 'slab',     label: 'Floor',    icon: '/icons/floor.png' },
+  { id: 'slab',     label: 'Floor',    icon: '/icons/floor.png',
+    hint: 'Click corners to draw a floor plate. It is the floor OF this level and the ceiling of the one below. Extend it past the walls for balconies and porticos.' },
 ]
 
 // Ritn3D 2026-07-19: Select-mode icon (arrow cursor). Distinct from
@@ -336,7 +346,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
 
   // Small helper for consistent styling of the icon+label buttons.
   const RailButton = ({
-    isActive, onClick, disabled, label, iconNode, imgSrc,
+    isActive, onClick, disabled, label, iconNode, imgSrc, hint,
   }: {
     isActive: boolean
     onClick: () => void
@@ -344,9 +354,14 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
     label: string
     iconNode?: ReactNode
     imgSrc?: string
+    hint?: string
   }) => (
     <button
       type="button"
+      /* Native title rather than a custom tooltip: it survives the rail's
+         overflow-y-auto clipping, needs no portal, and cannot be knocked out
+         of position by the flyout. */
+      title={hint ? `${label} — ${hint}` : label}
       onClick={onClick}
       disabled={disabled}
       className={cn(
@@ -412,6 +427,7 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
       {MINIMAL_TOOLS.map((t) => (
         <RailButton
           key={t.id}
+          hint={t.hint}
           isActive={mode === 'build' && tool === t.id}
           onClick={() => pickTool(t.id)}
           label={t.label}
