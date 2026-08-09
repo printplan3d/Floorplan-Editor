@@ -2800,6 +2800,12 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               clipRule="evenodd"
               d={path}
               fill={fillColour}
+              /* The fill had no opacity at all, so a floor covering the plan
+                 buried the walls, rooms and openings under solid colour. A
+                 slab is the surface everything else sits ON, so it has to
+                 read as underneath. Selected is lifted a little, since then
+                 it is the thing being worked on. */
+              fillOpacity={isSelected ? 0.3 : 0.18}
               fillRule="evenodd"
               onClick={
                 canSelectSlabs
@@ -9376,6 +9382,9 @@ export function FloorplanPanel() {
           while (nextBulges.length < slab.polygon.length) nextBulges.push(0);
           nextBulges[drag.edgeIndex] = finalBulge;
           updateNode(slab.id, { bulges: nextBulges });
+          // Same re-assert: curving one edge should not deselect the floor
+          // you are shaping.
+          setSelection({ selectedIds: [slab.id] });
           sfxEmitter.emit("sfx:structure-build");
         }
       }
@@ -9398,7 +9407,13 @@ export function FloorplanPanel() {
       window.removeEventListener("pointerup", commit);
       window.removeEventListener("pointercancel", cancel);
     };
-  }, [getPlanPointFromClientPoint, slabBulgeDraft, slabById, updateNode]);
+  }, [
+    getPlanPointFromClientPoint,
+    setSelection,
+    slabBulgeDraft,
+    slabById,
+    updateNode,
+  ]);
 
   const handleSlabHolePointerDown = useCallback(
     (
@@ -9478,6 +9493,10 @@ export function FloorplanPanel() {
           i === draft.holeIndex ? draft.ring : h,
         );
         updateNode(slab.id, { holes: nextHoles });
+        // updateNode clears the selection, so adjusting one corner of a cut
+        // dropped the slab and you had to reselect it before the next nudge.
+        // The ceiling hole editor re-asserts for the same reason.
+        setSelection({ selectedIds: [slab.id] });
         sfxEmitter.emit("sfx:structure-build");
       }
       slabHoleDragRef.current = null;
@@ -9499,7 +9518,13 @@ export function FloorplanPanel() {
       window.removeEventListener("pointerup", commit);
       window.removeEventListener("pointercancel", cancel);
     };
-  }, [getPlanPointFromClientPoint, slabById, slabHoleDraft, updateNode]);
+  }, [
+    getPlanPointFromClientPoint,
+    setSelection,
+    slabById,
+    slabHoleDraft,
+    updateNode,
+  ]);
 
   const handleSiteVertexPointerDown = useCallback(
     (
