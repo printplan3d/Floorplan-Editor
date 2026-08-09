@@ -100,6 +100,12 @@ type EditorState = {
   // activating the slab tool. Reset to 'interior' on tool change.
   pendingSlabSurfaceType: SlabSurfaceType
   setPendingSlabSurfaceType: (t: SlabSurfaceType) => void
+  /* What the next wall drawn should BE. Mirrors pendingSlabSurfaceType: the
+     barrier buttons arm the ordinary wall tool rather than introducing a
+     second drawing path, so barriers get endpoint dragging, the properties
+     panel, undo and delete for free. null = an ordinary wall. */
+  pendingBarrier: { barrierType: 'solid' | 'railing' | 'fence'; height: number; thickness: number } | null
+  setPendingBarrier: (b: { barrierType: 'solid' | 'railing' | 'fence'; height: number; thickness: number } | null) => void
   // Ritn3D 2026-07-27: persistent grid-snap + ortho toggles. Shift key
   // still works as a per-instance override (XOR with the toggle) so
   // users can temporarily flip either during a single drag without
@@ -390,6 +396,8 @@ const useEditor = create<EditorState>()(
       setAllowUndergroundCamera: (enabled) => set({ allowUndergroundCamera: enabled }),
       pendingSlabSurfaceType: 'interior' as SlabSurfaceType,
       setPendingSlabSurfaceType: (t) => set({ pendingSlabSurfaceType: t }),
+      pendingBarrier: null,
+      setPendingBarrier: (b) => set({ pendingBarrier: b }),
 
       // 2026-07-27: snap + ortho persistent toggles. Both default on.
       gridSnapEnabled: true,

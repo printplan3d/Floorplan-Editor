@@ -69,6 +69,11 @@ export function exportFloorPlanJSON(): object {
           // Omitted from JSON when bulge is 0 so the Blender pipeline can
           // keep a simpler straight-wall code path for legacy plans.
           ...(w.bulge && w.bulge !== 0 ? { bulge: flipBulge(w.bulge) } : {}),
+          // Barriers. Omitted when solid so an ordinary plan serialises
+          // exactly as before and the pipeline keeps its plain wall path.
+          ...(w.barrierType && w.barrierType !== 'solid'
+            ? { barrier_type: w.barrierType }
+            : {}),
         }
         levelWalls.push(wallExport)
 

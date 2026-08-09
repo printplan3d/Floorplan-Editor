@@ -1,88 +1,98 @@
-import { useScene, type WallNode, WallNode as WallSchema } from '@ritn3d/core'
-import { useViewer } from '@ritn3d/viewer'
-import { sfxEmitter } from '../../../lib/sfx-bus'
-export type WallPlanPoint = [number, number]
-export const WALL_GRID_STEP = 0.5
-export const WALL_JOIN_SNAP_RADIUS = 0.35
-export const WALL_MIN_LENGTH = 0.5
+import { useScene, type WallNode, WallNode as WallSchema } from "@ritn3d/core";
+import useEditor from "../../../store/use-editor";
+import { useViewer } from "@ritn3d/viewer";
+import { sfxEmitter } from "../../../lib/sfx-bus";
+export type WallPlanPoint = [number, number];
+export const WALL_GRID_STEP = 0.5;
+export const WALL_JOIN_SNAP_RADIUS = 0.35;
+export const WALL_MIN_LENGTH = 0.5;
 function distanceSquared(a: WallPlanPoint, b: WallPlanPoint): number {
-  const dx = a[0] - b[0]
-  const dz = a[1] - b[1]
-  return dx * dx + dz * dz
+  const dx = a[0] - b[0];
+  const dz = a[1] - b[1];
+  return dx * dx + dz * dz;
 }
 function snapScalarToGrid(value: number, step = WALL_GRID_STEP): number {
-  return Math.round(value / step) * step
+  return Math.round(value / step) * step;
 }
-export function snapPointToGrid(point: WallPlanPoint, step = WALL_GRID_STEP): WallPlanPoint {
-  return [snapScalarToGrid(point[0], step), snapScalarToGrid(point[1], step)]
+export function snapPointToGrid(
+  point: WallPlanPoint,
+  step = WALL_GRID_STEP,
+): WallPlanPoint {
+  return [snapScalarToGrid(point[0], step), snapScalarToGrid(point[1], step)];
 }
-export function snapPointTo45Degrees(start: WallPlanPoint, cursor: WallPlanPoint): WallPlanPoint {
-  const dx = cursor[0] - start[0]
-  const dz = cursor[1] - start[1]
-  const angle = Math.atan2(dz, dx)
-  const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
-  const distance = Math.sqrt(dx * dx + dz * dz)
+export function snapPointTo45Degrees(
+  start: WallPlanPoint,
+  cursor: WallPlanPoint,
+): WallPlanPoint {
+  const dx = cursor[0] - start[0];
+  const dz = cursor[1] - start[1];
+  const angle = Math.atan2(dz, dx);
+  const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+  const distance = Math.sqrt(dx * dx + dz * dz);
   return snapPointToGrid([
     start[0] + Math.cos(snappedAngle) * distance,
     start[1] + Math.sin(snappedAngle) * distance,
-  ])
+  ]);
 }
-function projectPointOntoWall(point: WallPlanPoint, wall: WallNode): WallPlanPoint | null {
-  const [x1, z1] = wall.start
-  const [x2, z2] = wall.end
-  const dx = x2 - x1
-  const dz = z2 - z1
-  const lengthSquared = dx * dx + dz * dz
+function projectPointOntoWall(
+  point: WallPlanPoint,
+  wall: WallNode,
+): WallPlanPoint | null {
+  const [x1, z1] = wall.start;
+  const [x2, z2] = wall.end;
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const lengthSquared = dx * dx + dz * dz;
   if (lengthSquared < 1e-9) {
-    return null
+    return null;
   }
-  const t = ((point[0] - x1) * dx + (point[1] - z1) * dz) / lengthSquared
+  const t = ((point[0] - x1) * dx + (point[1] - z1) * dz) / lengthSquared;
   if (t <= 0 || t >= 1) {
-    return null
+    return null;
   }
-  return [x1 + dx * t, z1 + dz * t]
+  return [x1 + dx * t, z1 + dz * t];
 }
 export function findWallSnapTarget(
   point: WallPlanPoint,
   walls: WallNode[],
   options?: { ignoreWallIds?: string[]; radius?: number },
 ): WallPlanPoint | null {
-  const ignoreWallIds = new Set(options?.ignoreWallIds ?? [])
-  const radiusSquared = (options?.radius ?? WALL_JOIN_SNAP_RADIUS) ** 2
-  let bestTarget: WallPlanPoint | null = null
-  let bestDistanceSquared = Number.POSITIVE_INFINITY
+  const ignoreWallIds = new Set(options?.ignoreWallIds ?? []);
+  const radiusSquared = (options?.radius ?? WALL_JOIN_SNAP_RADIUS) ** 2;
+  let bestTarget: WallPlanPoint | null = null;
+  let bestDistanceSquared = Number.POSITIVE_INFINITY;
   for (const wall of walls) {
     if (ignoreWallIds.has(wall.id)) {
-      continue
+      continue;
     }
     const candidates: Array<WallPlanPoint | null> = [
       wall.start,
       wall.end,
       projectPointOntoWall(point, wall),
-    ]
+    ];
     for (const candidate of candidates) {
       if (!candidate) {
-        continue
+        continue;
       }
-      const candidateDistanceSquared = distanceSquared(point, candidate)
+      const candidateDistanceSquared = distanceSquared(point, candidate);
       if (
         candidateDistanceSquared > radiusSquared ||
         candidateDistanceSquared >= bestDistanceSquared
       ) {
-        continue
+        continue;
       }
-      bestTarget = candidate
-      bestDistanceSquared = candidateDistanceSquared
+      bestTarget = candidate;
+      bestDistanceSquared = candidateDistanceSquared;
     }
   }
-  return bestTarget
+  return bestTarget;
 }
 export function snapWallDraftPoint(args: {
-  point: WallPlanPoint
-  walls: WallNode[]
-  start?: WallPlanPoint
-  angleSnap?: boolean
-  ignoreWallIds?: string[]
+  point: WallPlanPoint;
+  walls: WallNode[];
+  start?: WallPlanPoint;
+  angleSnap?: boolean;
+  ignoreWallIds?: string[];
   // 2026-07-28: angleSnap (ortho) and freehand (grid off) are INDEPENDENT.
   //   ortho on + snap on  -> 45deg direction locked to grid nodes
   //   ortho on + snap off -> 45deg direction, arbitrary length
@@ -90,50 +100,78 @@ export function snapWallDraftPoint(args: {
   //   ortho off + snap off -> raw cursor point
   // Wall-endpoint snap (for clean joins) always applies within the
   // join radius regardless of these two flags.
-  freehand?: boolean
+  freehand?: boolean;
 }): WallPlanPoint {
-  const { point, walls, start, angleSnap = false, ignoreWallIds, freehand = false } = args
+  const {
+    point,
+    walls,
+    start,
+    angleSnap = false,
+    ignoreWallIds,
+    freehand = false,
+  } = args;
   // Step 1: apply ortho direction lock while preserving cursor length.
-  let base: WallPlanPoint = point
+  let base: WallPlanPoint = point;
   if (start && angleSnap) {
-    const dx = point[0] - start[0]
-    const dz = point[1] - start[1]
-    const angle = Math.atan2(dz, dx)
-    const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
-    const distance = Math.sqrt(dx * dx + dz * dz)
+    const dx = point[0] - start[0];
+    const dz = point[1] - start[1];
+    const angle = Math.atan2(dz, dx);
+    const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+    const distance = Math.sqrt(dx * dx + dz * dz);
     base = [
       start[0] + Math.cos(snappedAngle) * distance,
       start[1] + Math.sin(snappedAngle) * distance,
-    ]
+    ];
   }
   // Step 2: apply grid snap if enabled, on top of ortho-locked point.
   if (!freehand) {
-    base = snapPointToGrid(base)
+    base = snapPointToGrid(base);
   }
-  return findWallSnapTarget(base, walls, { ignoreWallIds }) ?? base
+  return findWallSnapTarget(base, walls, { ignoreWallIds }) ?? base;
 }
-export function isWallLongEnough(start: WallPlanPoint, end: WallPlanPoint): boolean {
-  return distanceSquared(start, end) >= WALL_MIN_LENGTH * WALL_MIN_LENGTH
+export function isWallLongEnough(
+  start: WallPlanPoint,
+  end: WallPlanPoint,
+): boolean {
+  return distanceSquared(start, end) >= WALL_MIN_LENGTH * WALL_MIN_LENGTH;
 }
 export function createWallOnCurrentLevel(
   start: WallPlanPoint,
   end: WallPlanPoint,
   bulge = 0,
 ): WallNode | null {
-  const currentLevelId = useViewer.getState().selection.levelId
-  const { createNode, nodes } = useScene.getState()
+  const currentLevelId = useViewer.getState().selection.levelId;
+  const { createNode, nodes } = useScene.getState();
   if (!(currentLevelId && isWallLongEnough(start, end))) {
-    return null
+    return null;
   }
-  const wallCount = Object.values(nodes).filter((node) => node.type === 'wall').length
+  const wallCount = Object.values(nodes).filter(
+    (node) => node.type === "wall",
+  ).length;
+  /* A barrier armed on the rail (parapet / railing / fence) is drawn with the
+     ordinary wall tool — it IS a wall, just a short or open one. Reading the
+     pending value here rather than adding a second drawing path is what gives
+     barriers endpoint dragging, the properties panel, undo and delete without
+     any code of their own. Cleared by the caller after the first wall, same
+     as the slab tool does with its pending surface type. */
+  const pending = useEditor.getState().pendingBarrier;
   const wall = WallSchema.parse({
-    name: `Wall ${wallCount + 1}`,
+    name: pending
+      ? `${pending.barrierType === "solid" ? "Parapet" : pending.barrierType === "railing" ? "Railing" : "Fence"} ${wallCount + 1}`
+      : `Wall ${wallCount + 1}`,
     start,
     end,
     // Default 0 = straight; non-zero on the arc-wall tool path.
     bulge,
-  })
-  createNode(wall, currentLevelId)
-  sfxEmitter.emit('sfx:structure-build')
-  return wall
+    ...(pending
+      ? {
+          barrierType: pending.barrierType,
+          height: pending.height,
+          thickness: pending.thickness,
+        }
+      : {}),
+  });
+  createNode(wall, currentLevelId);
+  sfxEmitter.emit("sfx:structure-build");
+  return wall;
 }

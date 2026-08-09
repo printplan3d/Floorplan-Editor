@@ -1580,6 +1580,9 @@ function buildDraftWall(
     object: "node",
     id: "wall_draft" as WallNode["id"],
     type: "wall",
+    // Transient preview, but the node type requires it now. A draft is
+    // always an ordinary wall — the barrier type is applied on commit.
+    barrierType: "solid",
     name: "Draft wall",
     parentId: levelId,
     visible: true,

@@ -61,12 +61,28 @@ export const WallNode = BaseNode.extend({
   // Helpers in `core/lib/arc-math.ts` convert to center/radius/angles for
   // geometry / rendering / mitering.
   bulge: z.number().default(0),
+  /* Ritn3D 2026-08-09: what this wall IS, structurally.
+       solid   — an ordinary wall. Also a parapet: a parapet is just a short
+                 thin wall, so it needs no geometry of its own and renders
+                 through the existing wall path untouched.
+       railing — posts, balusters and a handrail. Built by the pipeline's
+                 stair railing generator, which already takes an arbitrary
+                 polyline; a slab edge is a flatter, simpler input than the
+                 sloping stair rake it was written for.
+       fence   — the same topology as a railing with different proportions,
+                 so it is constants on the same generator rather than a
+                 second one.
+     Defaulting to 'solid' means every wall drawn before this parses
+     unchanged, and every wall drawn after behaves identically unless the
+     user asks for a barrier. */
+  barrierType: z.enum(['solid', 'railing', 'fence']).default('solid'),
   // Space detection for cutaway mode
   frontSide: z.enum(['interior', 'exterior', 'unknown']).default('unknown'),
   backSide: z.enum(['interior', 'exterior', 'unknown']).default('unknown'),
 }).describe(
   dedent`
   Wall node - used to represent a wall in the building
+  - barrierType: solid wall (incl. parapet), railing, or fence
   - thickness: thickness in meters
   - height: height in meters
   - start: start point of the wall in level coordinate system
