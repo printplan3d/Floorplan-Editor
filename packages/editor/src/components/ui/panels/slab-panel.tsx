@@ -56,8 +56,7 @@ export function SlabPanel() {
   const isUpperLevel = useMemo(() => {
     if (!node?.parentId) return false;
     const parent = nodes[node.parentId as AnyNode["id"]] as
-      | { type?: string; level?: number }
-      | undefined;
+      { type?: string; level?: number } | undefined;
     if (parent?.type !== "level") return false;
     return Number(parent.level ?? 0) > 0;
   }, [node, nodes]);
@@ -89,29 +88,18 @@ export function SlabPanel() {
   }, [setEditingHole]);
 
   const handleAddHole = useCallback(() => {
-    if (!(node && selectedId)) return;
+    if (!selectedId) return;
 
-    const polygon = node.polygon;
-    let cx = 0;
-    let cz = 0;
-    for (const [x, z] of polygon) {
-      cx += x;
-      cz += z;
-    }
-    cx /= polygon.length;
-    cz /= polygon.length;
-
-    const holeSize = 0.5;
-    const newHole: Array<[number, number]> = [
-      [cx - holeSize, cz - holeSize],
-      [cx + holeSize, cz - holeSize],
-      [cx + holeSize, cz + holeSize],
-      [cx - holeSize, cz + holeSize],
-    ];
-    const currentHoles = node?.holes || [];
-    handleUpdate({ holes: [...currentHoles, newHole] });
-    setEditingHole({ nodeId: selectedId, holeIndex: currentHoles.length });
-  }, [node, selectedId, handleUpdate, setEditingHole]);
+    /* Draw the cut, do not receive one. This used to drop a fixed 1 m square
+       at the slab centroid and leave the user to drag four corners into
+       place, which on a large floor means hunting for a small square in the
+       middle of it first. A cut is the same shape as a floor, so it is drawn
+       with the same tool; closing the ring commits it as a hole in this
+       slab. */
+    useEditor.getState().setCuttingSlabId(selectedId);
+    useEditor.getState().setMode("build");
+    useEditor.getState().setTool("slab");
+  }, [selectedId]);
 
   const handleEditHole = useCallback(
     (index: number) => {
@@ -303,8 +291,9 @@ export function SlabPanel() {
             Cut floor
           </button>
           <p className="px-1 pt-1.5 text-[10px] text-muted-foreground">
-            Adds an opening at the slab's centre. Drag its corners to shape the
-            void (stair shaft, double-height living room, etc).
+            Click corners to draw the opening, then click the first one again to
+            close it (stair shaft, double-height living room, etc). Drag an edge
+            handle afterwards to curve it.
           </p>
         </div>
       </PanelSection>

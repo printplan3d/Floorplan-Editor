@@ -6195,7 +6195,9 @@ export function FloorplanPanel() {
             slabBulgeDraft?.slabId === selectedSlabEntry.slab.id &&
             slabBulgeDraft.holeIndex === holeIndex &&
             slabBulgeDraft.edgeIndex === edgeIndex;
-          const bulge = isDragging ? slabBulgeDraft.bulge : (hb[edgeIndex] ?? 0);
+          const bulge = isDragging
+            ? slabBulgeDraft.bulge
+            : (hb[edgeIndex] ?? 0);
           let point: [number, number];
           if (isStraight(bulge)) {
             const dx = end[0] - start[0];
@@ -8046,6 +8048,29 @@ export function FloorplanPanel() {
         slabDraftPoints.length >= 3 &&
         isPointNearPlanPoint(point, firstPoint)
       ) {
+        /* Same gesture, two outcomes. With a slab armed for cutting, the ring
+           just drawn becomes a hole in THAT slab rather than a new floor —
+           the shapes are identical, so drawing them differently would only be
+           something else to learn. */
+        const cutting = useEditor.getState().cuttingSlabId;
+        if (cutting) {
+          const slab = slabById.get(cutting as SlabNode["id"]);
+          if (slab) {
+            updateNode(slab.id, {
+              holes: [
+                ...(slab.holes ?? []),
+                slabDraftPoints.map((q) => [q[0], q[1]] as [number, number]),
+              ],
+            });
+            setSelection({ selectedIds: [slab.id] });
+            sfxEmitter.emit("sfx:structure-build");
+          }
+          useEditor.getState().setCuttingSlabId(null);
+          useEditor.getState().setMode("select");
+          useEditor.getState().setTool(null);
+          clearDraft();
+          return;
+        }
         createSlabOnCurrentLevel(slabDraftPoints);
         clearDraft();
         return;
@@ -8054,7 +8079,14 @@ export function FloorplanPanel() {
       setSlabDraftPoints((currentPoints) => [...currentPoints, point]);
       setCursorPoint(point);
     },
-    [clearDraft, createSlabOnCurrentLevel, slabDraftPoints],
+    [
+      clearDraft,
+      createSlabOnCurrentLevel,
+      setSelection,
+      slabById,
+      slabDraftPoints,
+      updateNode,
+    ],
   );
   const handleSlabPlacementConfirm = useCallback(
     (point?: WallPlanPoint) => {
@@ -11899,36 +11931,45 @@ export function FloorplanPanel() {
             {/* Floor curve handles. Same visual language as the wall bulge
                 handle, in a warmer tint so the two are not confused when a
                 slab and a wall are both selected. */}
-            {slabBulgeHandles.map(({ nodeId, holeIndex, edgeIndex, point, isActive }) => {
-              const svg = toSvgPoint({ x: point[0], y: point[1] });
-              return (
-                <g key={`slab-bulge-${nodeId}-${edgeIndex}`}>
-                  <circle
-                    cx={svg.x}
-                    cy={svg.y}
-                    fill={
-                      isActive ? palette.selectedFill : "rgba(224,163,60,0.30)"
-                    }
-                    pointerEvents="none"
-                    r={0.28}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <circle
-                    cx={svg.x}
-                    cy={svg.y}
-                    fill={isActive ? "#f2c98a" : "#e0a33c"}
-                    onPointerDown={(event) =>
-                      handleSlabBulgePointerDown(nodeId, holeIndex, edgeIndex, event)
-                    }
-                    r={0.16}
-                    stroke="#ffffff"
-                    strokeWidth="0.03"
-                    style={{ cursor: "grab" }}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                </g>
-              );
-            })}
+            {slabBulgeHandles.map(
+              ({ nodeId, holeIndex, edgeIndex, point, isActive }) => {
+                const svg = toSvgPoint({ x: point[0], y: point[1] });
+                return (
+                  <g key={`slab-bulge-${nodeId}-${edgeIndex}`}>
+                    <circle
+                      cx={svg.x}
+                      cy={svg.y}
+                      fill={
+                        isActive
+                          ? palette.selectedFill
+                          : "rgba(224,163,60,0.30)"
+                      }
+                      pointerEvents="none"
+                      r={0.28}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    <circle
+                      cx={svg.x}
+                      cy={svg.y}
+                      fill={isActive ? "#f2c98a" : "#e0a33c"}
+                      onPointerDown={(event) =>
+                        handleSlabBulgePointerDown(
+                          nodeId,
+                          holeIndex,
+                          edgeIndex,
+                          event,
+                        )
+                      }
+                      r={0.16}
+                      stroke="#ffffff"
+                      strokeWidth="0.03"
+                      style={{ cursor: "grab" }}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </g>
+                );
+              },
+            )}
 
             <FloorplanPolygonHandleLayer
               hoveredHandleId={hoveredSlabHandleId}

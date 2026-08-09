@@ -104,6 +104,11 @@ type EditorState = {
      barrier buttons arm the ordinary wall tool rather than introducing a
      second drawing path, so barriers get endpoint dragging, the properties
      panel, undo and delete for free. null = an ordinary wall. */
+  /* The slab currently being cut. Set by the panel's Cut floor button; the
+     slab polygon tool then commits the ring it draws as a hole in this slab
+     instead of creating a new floor. null = drawing floors as usual. */
+  cuttingSlabId: string | null
+  setCuttingSlabId: (id: string | null) => void
   pendingBarrier: { barrierType: 'solid' | 'railing' | 'fence'; height: number; thickness: number } | null
   setPendingBarrier: (b: { barrierType: 'solid' | 'railing' | 'fence'; height: number; thickness: number } | null) => void
   // Ritn3D 2026-07-27: persistent grid-snap + ortho toggles. Shift key
@@ -396,6 +401,8 @@ const useEditor = create<EditorState>()(
       setAllowUndergroundCamera: (enabled) => set({ allowUndergroundCamera: enabled }),
       pendingSlabSurfaceType: 'interior' as SlabSurfaceType,
       setPendingSlabSurfaceType: (t) => set({ pendingSlabSurfaceType: t }),
+      cuttingSlabId: null,
+      setCuttingSlabId: (id) => set({ cuttingSlabId: id }),
       pendingBarrier: null,
       setPendingBarrier: (b) => set({ pendingBarrier: b }),
 
