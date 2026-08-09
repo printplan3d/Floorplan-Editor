@@ -432,6 +432,8 @@ type WallBulgeDraft = {
 /** A slab edge being curved. edgeIndex i curves polygon[i] -> polygon[i+1]. */
 type SlabBulgeDraft = {
   slabId: SlabNode["id"];
+  /** null = an edge of the outline; a number = that hole's ring. */
+  holeIndex: number | null;
   edgeIndex: number;
   bulge: number;
 };
@@ -4228,6 +4230,7 @@ export function FloorplanPanel() {
   const slabBulgeDragRef = useRef<{
     pointerId: number;
     slabId: SlabNode["id"];
+    holeIndex: number | null;
     edgeIndex: number;
     start: [number, number];
     end: [number, number];
@@ -5344,7 +5347,10 @@ export function FloorplanPanel() {
         // A live bulge drag overrides its one edge so the floor re-curves
         // under the cursor instead of snapping only on release.
         let bulges = slab.bulges;
-        if (slabBulgeDraft?.slabId === slab.id) {
+        if (
+          slabBulgeDraft?.slabId === slab.id &&
+          slabBulgeDraft.holeIndex === null
+        ) {
           bulges = [...(slab.bulges ?? [])];
           while (bulges.length < slab.polygon.length) bulges.push(0);
           bulges[slabBulgeDraft.edgeIndex] = slabBulgeDraft.bulge;
@@ -5364,7 +5370,18 @@ export function FloorplanPanel() {
             : hole,
         );
         const holes = rawHoles
-          .map((hole) => toFloorplanPolygon(hole))
+          .map((hole, i) => {
+            let hb = slab.holeBulges?.[i];
+            if (
+              slabBulgeDraft?.slabId === slab.id &&
+              slabBulgeDraft.holeIndex === i
+            ) {
+              hb = [...(hb ?? [])];
+              while (hb.length < hole.length) hb.push(0);
+              hb[slabBulgeDraft.edgeIndex] = slabBulgeDraft.bulge;
+            }
+            return toFloorplanPolygon(tessellateSlabOutline(hole, hb));
+          })
           .filter((hole) => hole.length >= 3);
 
         return [
@@ -6133,7 +6150,7 @@ export function FloorplanPanel() {
     const stored = selectedSlabEntry.slab.bulges ?? [];
     const clearance = floorplanWorldUnitsPerPixel * 14;
 
-    return corners.map((start, edgeIndex) => {
+    const outlineHandles = corners.map((start, edgeIndex) => {
       const end = corners[(edgeIndex + 1) % corners.length]!;
       const isDragging =
         slabBulgeDraft?.slabId === selectedSlabEntry.slab.id &&
@@ -6157,11 +6174,52 @@ export function FloorplanPanel() {
 
       return {
         nodeId: selectedSlabEntry.slab.id,
+        holeIndex: null as number | null,
         edgeIndex,
         point: point as WallPlanPoint,
         isActive: isDragging,
       };
     });
+
+    /* Same handle on every hole edge, so a stairwell opening can be curved
+       exactly like the floor outline. Offset uses the ring's own normal, so
+       on a hole the handle sits OUTSIDE the cut rather than in the middle of
+       it where the move-grab area already lives. */
+    const holeHandles = (selectedSlabEntry.slab.holes ?? []).flatMap(
+      (hole, holeIndex) => {
+        if (hole.length < 3) return [];
+        const hb = selectedSlabEntry.slab.holeBulges?.[holeIndex] ?? [];
+        return hole.map((start, edgeIndex) => {
+          const end = hole[(edgeIndex + 1) % hole.length]!;
+          const isDragging =
+            slabBulgeDraft?.slabId === selectedSlabEntry.slab.id &&
+            slabBulgeDraft.holeIndex === holeIndex &&
+            slabBulgeDraft.edgeIndex === edgeIndex;
+          const bulge = isDragging ? slabBulgeDraft.bulge : (hb[edgeIndex] ?? 0);
+          let point: [number, number];
+          if (isStraight(bulge)) {
+            const dx = end[0] - start[0];
+            const dy = end[1] - start[1];
+            const len = Math.hypot(dx, dy) || 1;
+            point = [
+              (start[0] + end[0]) / 2 - (dy / len) * clearance,
+              (start[1] + end[1]) / 2 + (dx / len) * clearance,
+            ];
+          } else {
+            point = arcMidpoint(start, end, bulge) as [number, number];
+          }
+          return {
+            nodeId: selectedSlabEntry.slab.id,
+            holeIndex: holeIndex as number | null,
+            edgeIndex,
+            point: point as WallPlanPoint,
+            isActive: isDragging,
+          };
+        });
+      },
+    );
+
+    return [...outlineHandles, ...holeHandles];
   }, [
     floorplanWorldUnitsPerPixel,
     selectedSlabEntry,
@@ -6187,6 +6245,8 @@ export function FloorplanPanel() {
         vertexIndex,
         point: [pt[0], pt[1]] as WallPlanPoint,
       }));
+      // Curve handles for hole edges are emitted separately below, so a hole
+      // corner and its curve handle never fight for the same pointer.
     });
   }, [
     selectedSlabEntry,
@@ -9307,6 +9367,7 @@ export function FloorplanPanel() {
   const handleSlabBulgePointerDown = useCallback(
     (
       slabId: SlabNode["id"],
+      holeIndex: number | null,
       edgeIndex: number,
       event: ReactPointerEvent<SVGCircleElement>,
     ) => {
@@ -9317,20 +9378,27 @@ export function FloorplanPanel() {
 
       const slab = slabById.get(slabId);
       if (!slab) return;
-      const start = slab.polygon[edgeIndex];
-      const end = slab.polygon[(edgeIndex + 1) % slab.polygon.length];
+      const ring =
+        holeIndex === null ? slab.polygon : (slab.holes?.[holeIndex] ?? []);
+      if (ring.length < 3) return;
+      const start = ring[edgeIndex];
+      const end = ring[(edgeIndex + 1) % ring.length];
       if (!(start && end)) return;
 
-      const initialBulge = slab.bulges?.[edgeIndex] ?? 0;
+      const initialBulge =
+        (holeIndex === null
+          ? slab.bulges?.[edgeIndex]
+          : slab.holeBulges?.[holeIndex]?.[edgeIndex]) ?? 0;
       slabBulgeDragRef.current = {
         pointerId: event.pointerId,
         slabId,
+        holeIndex,
         edgeIndex,
         start,
         end,
         lastBulge: initialBulge,
       };
-      setSlabBulgeDraft({ slabId, edgeIndex, bulge: initialBulge });
+      setSlabBulgeDraft({ slabId, holeIndex, edgeIndex, bulge: initialBulge });
     },
     [slabById],
   );
@@ -9365,6 +9433,7 @@ export function FloorplanPanel() {
       drag.lastBulge = next;
       setSlabBulgeDraft({
         slabId: drag.slabId,
+        holeIndex: drag.holeIndex,
         edgeIndex: drag.edgeIndex,
         bulge: next,
       });
@@ -9377,14 +9446,37 @@ export function FloorplanPanel() {
       const slab = slabById.get(drag.slabId);
       if (slab) {
         const finalBulge = isStraight(drag.lastBulge) ? 0 : drag.lastBulge;
-        if ((slab.bulges?.[drag.edgeIndex] ?? 0) !== finalBulge) {
+        const ring =
+          drag.holeIndex === null
+            ? slab.polygon
+            : (slab.holes?.[drag.holeIndex] ?? []);
+        const current =
+          (drag.holeIndex === null
+            ? slab.bulges?.[drag.edgeIndex]
+            : slab.holeBulges?.[drag.holeIndex]?.[drag.edgeIndex]) ?? 0;
+        if (current !== finalBulge) {
           // Pad to one entry per edge before writing: a slab drawn before
           // bulges existed has none at all, and a sparse array would put the
           // curve on whichever edge happened to land at that index later.
-          const nextBulges = [...(slab.bulges ?? [])];
-          while (nextBulges.length < slab.polygon.length) nextBulges.push(0);
+          const nextBulges = [
+            ...((drag.holeIndex === null
+              ? slab.bulges
+              : slab.holeBulges?.[drag.holeIndex]) ?? []),
+          ];
+          while (nextBulges.length < ring.length) nextBulges.push(0);
           nextBulges[drag.edgeIndex] = finalBulge;
-          updateNode(slab.id, { bulges: nextBulges });
+          if (drag.holeIndex === null) {
+            updateNode(slab.id, { bulges: nextBulges });
+          } else {
+            // Pad the OUTER array too, so hole 2 curving before hole 0 does
+            // not land its bulges on hole 0's ring.
+            const allHoleBulges = [...(slab.holeBulges ?? [])];
+            while (allHoleBulges.length < (slab.holes?.length ?? 0)) {
+              allHoleBulges.push([]);
+            }
+            allHoleBulges[drag.holeIndex] = nextBulges;
+            updateNode(slab.id, { holeBulges: allHoleBulges });
+          }
           // Same re-assert: curving one edge should not deselect the floor
           // you are shaping.
           setSelection({ selectedIds: [slab.id] });
@@ -11807,7 +11899,7 @@ export function FloorplanPanel() {
             {/* Floor curve handles. Same visual language as the wall bulge
                 handle, in a warmer tint so the two are not confused when a
                 slab and a wall are both selected. */}
-            {slabBulgeHandles.map(({ nodeId, edgeIndex, point, isActive }) => {
+            {slabBulgeHandles.map(({ nodeId, holeIndex, edgeIndex, point, isActive }) => {
               const svg = toSvgPoint({ x: point[0], y: point[1] });
               return (
                 <g key={`slab-bulge-${nodeId}-${edgeIndex}`}>
@@ -11826,7 +11918,7 @@ export function FloorplanPanel() {
                     cy={svg.y}
                     fill={isActive ? "#f2c98a" : "#e0a33c"}
                     onPointerDown={(event) =>
-                      handleSlabBulgePointerDown(nodeId, edgeIndex, event)
+                      handleSlabBulgePointerDown(nodeId, holeIndex, edgeIndex, event)
                     }
                     r={0.16}
                     stroke="#ffffff"

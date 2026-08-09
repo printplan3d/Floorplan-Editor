@@ -97,6 +97,7 @@ export interface CanonicalSlab {
   polygon: [number, number][]
   bulges?: number[]
   holes?: [number, number][][]
+  hole_bulges?: number[][]
   elevation?: number
   thickness?: number
   surface_type?: string
@@ -285,6 +286,12 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
         holes: (n.holes || []).map((h: number[][]) =>
           h.map((q: number[]) => rot180([q[0] ?? 0, q[1] ?? 0])),
         ),
+        // rot180 is a rotation, so hole bulges pass through unflipped, same
+        // as the outline's.
+        ...(Array.isArray(n.holeBulges) &&
+        n.holeBulges.some((r: number[]) => (r || []).some((b: number) => b))
+          ? { hole_bulges: n.holeBulges as number[][] }
+          : {}),
         elevation: n.elevation ?? 0.05,
         thickness: n.thickness ?? 0.2,
         surface_type: n.surfaceType ?? 'interior',
@@ -491,6 +498,7 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
           h.map((q: number[]) => rot180([q[0] ?? 0, q[1] ?? 0] as [number, number])),
         )
         .filter((h: unknown[]) => h.length >= 3),
+      holeBulges: Array.isArray(sl?.hole_bulges) ? sl.hole_bulges : [],
       elevation: typeof sl?.elevation === 'number' ? sl.elevation : 0.05,
       surfaceType: sl?.surface_type ?? 'interior',
     })

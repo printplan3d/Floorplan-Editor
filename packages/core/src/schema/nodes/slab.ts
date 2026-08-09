@@ -36,6 +36,11 @@ export const SlabNode = BaseNode.extend({
   // WallNode made.
   bulges: z.array(z.number()).default([]),
   holes: z.array(z.array(z.tuple([z.number(), z.number()]))).default([]),
+  // Per-edge bulge for each hole ring, same convention as `bulges` above:
+  // holeBulges[h][i] curves edge i of hole h. A ring with no entry, or a
+  // shorter array than the ring, reads as straight — so every slab drawn
+  // before this parses unchanged.
+  holeBulges: z.array(z.array(z.number())).default([]),
   elevation: z.number().default(0.05), // Elevation in meters
   surfaceType: SlabSurfaceType.default('interior'),
 }).describe(
@@ -44,6 +49,7 @@ export const SlabNode = BaseNode.extend({
   - polygon: array of [x, z] points defining the slab boundary
   - bulges: per-edge arc bulge, tan(arc_angle/4); 0 or absent = straight edge
   - holes: array of polygon holes (for stair openings, double-height voids)
+  - holeBulges: per-edge arc bulge for each hole ring; absent = straight
   - elevation: elevation in meters
   - surfaceType: drives the Blender material (interior floor, patio, deck,
     driveway, garage, gravel, grass, wood). Defaults to interior so legacy

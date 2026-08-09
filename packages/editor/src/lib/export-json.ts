@@ -179,6 +179,11 @@ export function exportFloorPlanJSON(): object {
           ? { bulges: (sl.bulges as number[]).map(flipBulge) }
           : {}),
         holes: (sl.holes || []).map((h: [number, number][]) => h.map((pt) => flipX(pt))),
+        // Curved hole edges take the same sign flip as the outline: flipX is
+        // a reflection, so it reverses which way an arc bows.
+        ...((sl.holeBulges || []).some((r: number[]) => (r || []).some((b) => b))
+          ? { hole_bulges: (sl.holeBulges as number[][]).map((r) => (r || []).map(flipBulge)) }
+          : {}),
         elevation: sl.elevation ?? 0.05,
         thickness: sl.thickness ?? 0.2,
       })

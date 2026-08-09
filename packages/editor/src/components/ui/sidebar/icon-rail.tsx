@@ -82,6 +82,50 @@ const ArcWallIconNodeIR = (
    is taller than a person can lean over. Thickness separates them visually
    on the plan even before the 3D exists — a parapet reads as masonry, the
    other two as thin lines. */
+/* Help rows. The first six mirror Flutter's "How to draw" sheet
+   (editor_screen.dart _showHelpSheet) so the two apps teach the same thing in
+   the same order. The last three are web-only, because Flutter is
+   single-storey — and the Floors one exists because "is this floor for the
+   level above or below" is genuinely not guessable from the canvas. */
+const HELP_ROWS: { title: string; body: string }[] = [
+  {
+    title: "Wall",
+    body: "Click a start point, then an end point. Draw on empty canvas to keep going.",
+  },
+  {
+    title: "Arc wall",
+    body: "Same as Wall, then drag the midpoint handle to shape the curve.",
+  },
+  {
+    title: "Door / Window",
+    body: "Click on a wall to drop it. Width follows the type you choose — a patio door cannot be single-door width.",
+  },
+  {
+    title: "Select + edit",
+    body: "Click anything to open its properties. Corner handles resize, midpoint handles add a corner.",
+  },
+  {
+    title: "Zoom & pan",
+    body: "Scroll to zoom, drag empty canvas to pan.",
+  },
+  {
+    title: "Save & resume",
+    body: "Leaving asks whether to keep your changes. Discard restores the plan as it was when you opened it.",
+  },
+  {
+    title: "Levels",
+    body: "The Levels button switches storeys. You always draw on the level you are on; the storey below shows as a faint amber outline so you can line things up.",
+  },
+  {
+    title: "Floors",
+    body: "A floor you draw belongs to the level you are on — it is that level's floor AND the ceiling of the one below. Extend it past the walls for balconies, porticos and sun shades. Drag an edge handle to curve it, and Cut floor makes a void for a stairwell or a double-height room.",
+  },
+  {
+    title: "Stairs",
+    body: "A stair rises FROM the level you place it on to the one above, and cuts its own opening in the floor there. Upper storeys also get Barrier: parapet, railing or fence along an open floor edge.",
+  },
+];
+
 const BARRIER_PRESETS: {
   id: "parapet" | "railing" | "fence";
   label: string;
@@ -353,6 +397,7 @@ export function IconRail({
 
   const [levelsOpen, setLevelsOpen] = useState(false);
   const [barriersOpen, setBarriersOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const railRef = useRef<HTMLDivElement | null>(null);
   const [railRect, setRailRect] = useState<DOMRect | null>(null);
 
@@ -796,6 +841,21 @@ export function IconRail({
           utilities never butt up against the tools above them. */}
       <div className="min-h-3 flex-1 shrink" />
 
+      {/* Help sits with the utilities rather than the tools: it is not
+          something you draw with, and it belongs where you look when you are
+          stuck rather than in the middle of the drawing flow. */}
+      <RailButton
+        isActive={helpOpen}
+        label="Help"
+        hint="How to draw — walls, doors, levels, floors and stairs."
+        onClick={() => setHelpOpen((v) => !v)}
+        iconNode={
+          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border border-current font-semibold text-[11px]">
+            ?
+          </span>
+        }
+      />
+
       {/* Utility icons at bottom -- Reset View, Clear, Units, Theme. */}
       <RailButton
         isActive={false}
@@ -970,6 +1030,41 @@ export function IconRail({
   return (
     <>
       {rail}
+      {helpOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <>
+            <button
+              aria-label="Close help"
+              className="fixed inset-0 z-[59] cursor-default"
+              onClick={() => setHelpOpen(false)}
+              type="button"
+            />
+            <div
+              className="fixed z-[60] flex w-72 flex-col overflow-y-auto border-hair border-r bg-paper py-1 shadow-[4px_0_12px_rgba(0,0,0,0.18)] scrollbar-thin"
+              style={{
+                left: railRect?.right ?? 64,
+                top: railRect?.top ?? 0,
+                height: railRect?.height ?? "100%",
+              }}
+            >
+              <div className="px-3 py-2 text-[10px] text-ink/50 uppercase tracking-wide">
+                How to draw
+              </div>
+              {HELP_ROWS.map((row) => (
+                <div key={row.title} className="px-3 py-2">
+                  <div className="font-medium text-[12px] text-ink">
+                    {row.title}
+                  </div>
+                  <div className="mt-0.5 text-[11px] leading-snug text-ink/60">
+                    {row.body}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>,
+          document.body,
+        )}
       {barriersOpen &&
         typeof document !== "undefined" &&
         createPortal(
