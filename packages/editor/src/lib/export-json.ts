@@ -1,5 +1,22 @@
-import { type AnyNodeId, arcLength, computeStairMetrics, DEFAULT_WALL_HEIGHT, DEFAULT_WALL_THICKNESS, type DoorNode, getStairFootprint, type StairNode, type WallNode, type WindowNode, type ZoneNode, useScene } from '@ritn3d/core'
-import { DEFAULT_LEVEL_HEIGHT, getLevelHeight, useViewer } from '@ritn3d/viewer'
+import {
+  type AnyNodeId,
+  arcLength,
+  computeStairMetrics,
+  DEFAULT_WALL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
+  type DoorNode,
+  getStairFootprint,
+  type StairNode,
+  type WallNode,
+  type WindowNode,
+  type ZoneNode,
+  useScene,
+} from "@ritn3d/core";
+import {
+  DEFAULT_LEVEL_HEIGHT,
+  getLevelHeight,
+  useViewer,
+} from "@ritn3d/viewer";
 
 /**
  * Export the current floor plan as structured JSON matching the Ritn3D Blender pipeline format.
@@ -9,44 +26,47 @@ import { DEFAULT_LEVEL_HEIGHT, getLevelHeight, useViewer } from '@ritn3d/viewer'
    backend translator's [-x, -y]. Hoisted to module scope because slabs need
    exactly the same correction as walls — a second copy inside another branch
    is precisely how this codebase ended up with two encoders for one format. */
-const flipX = ([x, y]: [number, number]): [number, number] => [-x, y]
-const flipBulge = (b: number) => -b
+const flipX = ([x, y]: [number, number]): [number, number] => [-x, y];
+const flipBulge = (b: number) => -b;
 
 export function exportFloorPlanJSON(): object {
-  const { nodes } = useScene.getState()
-  const { selection } = useViewer.getState()
+  const { nodes } = useScene.getState();
+  const { selection } = useViewer.getState();
 
-  const allNodes = Object.values(nodes)
+  const allNodes = Object.values(nodes);
 
   /* Sorted by level number, because `elevation` below is a running total —
      iterating in scene order would stack floor 2 under floor 1 whenever the
      nodes happened to be created out of order. */
-  const levels = (allNodes.filter((n) => n.type === 'level') as any[])
-    .sort((a, b) => (a.level ?? 0) - (b.level ?? 0))
+  const levels = (allNodes.filter((n) => n.type === "level") as any[]).sort(
+    (a, b) => (a.level ?? 0) - (b.level ?? 0),
+  );
 
-  const floors: any[] = []
-  const allWalls: any[] = []
-  const allDoors: any[] = []
-  const allWindows: any[] = []
-  const allRooms: any[] = []
-  const allSlabs: any[] = []
-  const allStairs: any[] = []
+  const floors: any[] = [];
+  const allWalls: any[] = [];
+  const allDoors: any[] = [];
+  const allWindows: any[] = [];
+  const allRooms: any[] = [];
+  const allSlabs: any[] = [];
+  const allStairs: any[] = [];
   /** Height of everything below this level — i.e. where this floor starts. */
-  let cumulativeElevation = 0
+  let cumulativeElevation = 0;
 
   for (const level of levels) {
-    const levelWalls: any[] = []
-    const levelSlabs: any[] = []
-    const levelStairs: any[] = []
-    const levelDoors: any[] = []
-    const levelWindows: any[] = []
-    const levelRooms: any[] = []
+    const levelWalls: any[] = [];
+    const levelSlabs: any[] = [];
+    const levelStairs: any[] = [];
+    const levelDoors: any[] = [];
+    const levelWindows: any[] = [];
+    const levelRooms: any[] = [];
 
-    const children = (level.children || []).map((id: string) => nodes[id as AnyNodeId]).filter(Boolean)
+    const children = (level.children || [])
+      .map((id: string) => nodes[id as AnyNodeId])
+      .filter(Boolean);
 
     for (const child of children) {
-      if (child.type === 'wall') {
-        const w = child as WallNode
+      if (child.type === "wall") {
+        const w = child as WallNode;
         // Ritn3D 2026-07-19: pre-flip X (and bulge sign) client-side to
         // match the mobile Flutter editor's `maybeFlip(p) => [-p[0], p[1]]`.
         // The pascal-editor stores planPoint = -svgClick (toSvgX = -value),
@@ -64,29 +84,34 @@ export function exportFloorPlanJSON(): object {
           end: flipX(w.end as any),
           thickness: w.thickness ?? DEFAULT_WALL_THICKNESS,
           height: w.height ?? DEFAULT_WALL_HEIGHT,
-          type: w.frontSide === 'exterior' || w.backSide === 'exterior' ? 'exterior' : 'interior',
+          type:
+            w.frontSide === "exterior" || w.backSide === "exterior"
+              ? "exterior"
+              : "interior",
           // Ritn3D arc walls (DXF bulge: tan(arc_angle/4); 0 = straight).
           // Omitted from JSON when bulge is 0 so the Blender pipeline can
           // keep a simpler straight-wall code path for legacy plans.
           ...(w.bulge && w.bulge !== 0 ? { bulge: flipBulge(w.bulge) } : {}),
           // Barriers. Omitted when solid so an ordinary plan serialises
           // exactly as before and the pipeline keeps its plain wall path.
-          ...(w.barrierType && w.barrierType !== 'solid'
+          ...(w.barrierType && w.barrierType !== "solid"
             ? { barrier_type: w.barrierType }
             : {}),
-        }
-        levelWalls.push(wallExport)
+        };
+        levelWalls.push(wallExport);
 
         // Collect doors/windows on this wall
-        const wallChildren = (w.children || []).map((id: string) => nodes[id as AnyNodeId]).filter(Boolean)
+        const wallChildren = (w.children || [])
+          .map((id: string) => nodes[id as AnyNodeId])
+          .filter(Boolean);
         for (const wc of wallChildren) {
-          if (!wc) continue  // .filter(Boolean) doesn't narrow the TS type
-          if (wc.type === 'door') {
-            const d = wc as DoorNode
+          if (!wc) continue; // .filter(Boolean) doesn't narrow the TS type
+          if (wc.type === "door") {
+            const d = wc as DoorNode;
             // For curved walls, "position_along_wall" is parametric over arc
             // length, not chord. For straight walls bulge=0 so arcLength
             // collapses to chord length — same answer as before.
-            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
+            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0);
             // Ritn3D 2026-07-16 (Tier 2): export style + frame dims +
             // handle metadata so the Blender pipeline can render an
             // actual leaf (flush slab / glass / patio sliding) instead
@@ -97,36 +122,41 @@ export function exportFloorPlanJSON(): object {
               position_along_wall: wallLen > 0 ? d.position[0] / wallLen : 0.5,
               width: d.width,
               height: d.height,
-              door_type: 'single',
-              style: d.style ?? 'pedestrian',
-              swing_direction: d.hingesSide === 'left' ? 'left' : 'right',
-              hinges_side: d.hingesSide ?? 'left',
+              door_type: "single",
+              style: d.style ?? "pedestrian",
+              swing_direction: d.hingesSide === "left" ? "left" : "right",
+              hinges_side: d.hingesSide ?? "left",
               frame_thickness: d.frameThickness ?? 0.05,
               frame_depth: d.frameDepth ?? 0.07,
               threshold: d.threshold ?? true,
               handle: d.handle ?? true,
-              handle_side: d.handleSide ?? 'right',
+              handle_side: d.handleSide ?? "right",
               handle_height: d.handleHeight ?? 1.05,
-            })
+            });
           }
-          if (wc.type === 'window') {
-            const win = wc as WindowNode
+          if (wc.type === "window") {
+            const win = wc as WindowNode;
             // For curved walls, "position_along_wall" is parametric over arc
             // length, not chord. For straight walls bulge=0 so arcLength
             // collapses to chord length — same answer as before.
-            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0)
-            const sillHeight = Math.max(0, (win.position[1] ?? 0) - (win.height ?? 1.5) / 2)
+            const wallLen = arcLength(w.start, w.end, w.bulge ?? 0);
+            const sillHeight = Math.max(
+              0,
+              (win.position[1] ?? 0) - (win.height ?? 1.5) / 2,
+            );
             // Ritn3D 2026-07-16 (Tier 2): export the actual pane grid
             // ratios + frame dims + sill toggle so Blender stops
             // auto-computing them and respects the user's design.
             levelWindows.push({
               id: win.id,
               wall_id: w.id,
-              position_along_wall: wallLen > 0 ? win.position[0] / wallLen : 0.5,
+              position_along_wall:
+                wallLen > 0 ? win.position[0] / wallLen : 0.5,
               width: win.width,
               height: win.height,
               sill_height: sillHeight,
-              pane_count: (win.columnRatios?.length ?? 1) * (win.rowRatios?.length ?? 1),
+              pane_count:
+                (win.columnRatios?.length ?? 1) * (win.rowRatios?.length ?? 1),
               column_ratios: win.columnRatios ?? [1],
               row_ratios: win.rowRatios ?? [1],
               column_divider_thickness: win.columnDividerThickness ?? 0.03,
@@ -136,13 +166,13 @@ export function exportFloorPlanJSON(): object {
               sill: win.sill ?? true,
               sill_depth: win.sillDepth ?? 0.08,
               sill_thickness: win.sillThickness ?? 0.03,
-            })
+            });
           }
         }
       }
 
-      if (child.type === 'zone') {
-        const z = child as ZoneNode
+      if (child.type === "zone") {
+        const z = child as ZoneNode;
         // 2026-07-28: pipe the ZonePanel's roomType through to the
         // pipeline so Blender picks the right floor material
         // (bathroom -> tiles, kitchen -> laminate, etc.). Was
@@ -150,11 +180,11 @@ export function exportFloorPlanJSON(): object {
         // regardless of the type the user selected in the picker.
         levelRooms.push({
           id: z.id,
-          label: z.name || 'Room',
-          type: (z as any).roomType || 'other',
+          label: z.name || "Room",
+          type: (z as any).roomType || "other",
           wall_ids: [],
           area: 0, // calculated by pipeline
-        })
+        });
       }
     }
 
@@ -164,8 +194,8 @@ export function exportFloorPlanJSON(): object {
        voids. Emitted in level-local coordinates with the same flipX the walls
        get, so the pipeline sees one consistent frame. */
     for (const child of children) {
-      if (child.type !== 'slab') continue
-      const sl = child as any
+      if (child.type !== "slab") continue;
+      const sl = child as any;
       levelSlabs.push({
         id: sl.id,
         polygon: (sl.polygon || []).map((pt: [number, number]) => flipX(pt)),
@@ -178,15 +208,23 @@ export function exportFloorPlanJSON(): object {
         ...((sl.bulges || []).some((b: number) => b)
           ? { bulges: (sl.bulges as number[]).map(flipBulge) }
           : {}),
-        holes: (sl.holes || []).map((h: [number, number][]) => h.map((pt) => flipX(pt))),
+        holes: (sl.holes || []).map((h: [number, number][]) =>
+          h.map((pt) => flipX(pt)),
+        ),
         // Curved hole edges take the same sign flip as the outline: flipX is
         // a reflection, so it reverses which way an arc bows.
-        ...((sl.holeBulges || []).some((r: number[]) => (r || []).some((b) => b))
-          ? { hole_bulges: (sl.holeBulges as number[][]).map((r) => (r || []).map(flipBulge)) }
+        ...((sl.holeBulges || []).some((r: number[]) =>
+          (r || []).some((b) => b),
+        )
+          ? {
+              hole_bulges: (sl.holeBulges as number[][]).map((r) =>
+                (r || []).map(flipBulge),
+              ),
+            }
           : {}),
         elevation: sl.elevation ?? 0.05,
         thickness: sl.thickness ?? 0.2,
-      })
+      });
     }
 
     /* Stairs. The storey height is resolved here rather than further down
@@ -197,12 +235,13 @@ export function exportFloorPlanJSON(): object {
        instead of re-deriving them from a hardcoded floor-to-floor default,
        which is how the old procedural stairs came out at the wrong height
        and ran out through the wall. */
-    const stairLevelHeight = getLevelHeight(level.id, nodes) || DEFAULT_LEVEL_HEIGHT
+    const stairLevelHeight =
+      getLevelHeight(level.id, nodes) || DEFAULT_LEVEL_HEIGHT;
     for (const child of children) {
-      if (child.type !== 'stair') continue
-      const st = child as StairNode
-      const m = computeStairMetrics(st, stairLevelHeight)
-      const fp = getStairFootprint(st)
+      if (child.type !== "stair") continue;
+      const st = child as StairNode;
+      const m = computeStairMetrics(st, stairLevelHeight);
+      const fp = getStairFootprint(st);
       /* Which corner becomes the origin after the chain mirrors the plane.
 
          The pipeline builds a stair from its origin extending into local +X
@@ -217,11 +256,11 @@ export function exportFloorPlanJSON(): object {
          body exactly over the footprint the user drew. The handedness flip
          below then re-mirrors the internal layout, so which side flight 2
          returns on still matches the plan. */
-      const acrossExtent = st.variant === 'straight' ? m.width : st.depth
+      const acrossExtent = st.variant === "straight" ? m.width : st.depth;
       const anchor: [number, number] = [
         st.position[0] - acrossExtent * Math.sin(st.rotation),
         st.position[1] + acrossExtent * Math.cos(st.rotation),
-      ]
+      ];
       levelStairs.push({
         id: st.id,
         position: flipX(anchor),
@@ -240,7 +279,7 @@ export function exportFloorPlanJSON(): object {
            place entirely, since the body extends from the origin. */
         rotation: -st.rotation - Math.PI,
         variant: st.variant,
-        handedness: st.handedness === 'left' ? 'right' : 'left',
+        handedness: st.handedness === "left" ? "right" : "left",
         width: st.width,
         length: fp.length,
         depth: fp.width,
@@ -251,16 +290,21 @@ export function exportFloorPlanJSON(): object {
         tread_depth: m.tread,
         angle_deg: m.angleDeg,
         fits: m.fits,
-      })
+      });
     }
 
     /* Real height, not a hardcoded 2.7. getLevelHeight reads the tallest wall
        or ceiling on the level, so a storey with 3 m walls stacks at 3 m — and
        `elevation` is the running total, which is what lets the pipeline place
        floor 2 on top of floor 1 instead of through it. */
-    const levelHeight = stairLevelHeight
+    const levelHeight = stairLevelHeight;
 
     floors.push({
+      // false = this storey is deliberately open (mezzanine, void over a
+      // double-height room, roof deck). The pipeline synthesises a floor for
+      // an upper storey with none drawn, and without this flag there is no
+      // way to say the absence was intended.
+      auto_floor: (level as any).autoFloor !== false,
       id: level.id,
       level: level.level ?? 0,
       label: `Level ${level.level ?? 0}`,
@@ -272,8 +316,8 @@ export function exportFloorPlanJSON(): object {
       rooms: levelRooms.map((r: any) => r.id),
       slabs: levelSlabs.map((s: any) => s.id),
       stairs: levelStairs.map((s: any) => s.id),
-    })
-    cumulativeElevation += levelHeight
+    });
+    cumulativeElevation += levelHeight;
 
     /* Accumulate rather than return. This used to `return` here whenever
        floors.length === 1 — which is always true on the first pass — so every
@@ -282,12 +326,12 @@ export function exportFloorPlanJSON(): object {
        the flipX correction, never populated rooms, and typed every wall
        'interior'. Deleted rather than revived; one loop, one coordinate
        convention. */
-    allWalls.push(...levelWalls)
-    allDoors.push(...levelDoors)
-    allWindows.push(...levelWindows)
-    allRooms.push(...levelRooms)
-    allSlabs.push(...levelSlabs)
-    allStairs.push(...levelStairs)
+    allWalls.push(...levelWalls);
+    allDoors.push(...levelDoors);
+    allWindows.push(...levelWindows);
+    allRooms.push(...levelRooms);
+    allSlabs.push(...levelSlabs);
+    allStairs.push(...levelStairs);
   }
 
   return {
@@ -303,24 +347,26 @@ export function exportFloorPlanJSON(): object {
     stairs: allStairs,
     furniture: [],
     metadata: {
-      unit: 'meters',
+      unit: "meters",
       scale: 1.0,
       created_at: new Date().toISOString(),
-      source: 'web_editor',
-      version: '1.0',
+      source: "web_editor",
+      version: "1.0",
       level_count: floors.length,
     },
-  }
+  };
 }
 
 /** Download JSON file */
 export function downloadJSON() {
-  const data = exportFloorPlanJSON()
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `floorplan_${Date.now()}.json`
-  a.click()
-  URL.revokeObjectURL(url)
+  const data = exportFloorPlanJSON();
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `floorplan_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

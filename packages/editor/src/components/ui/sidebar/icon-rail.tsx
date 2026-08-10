@@ -1053,8 +1053,8 @@ export function IconRail({
     if (
       !window.confirm(
         `Add ${pending.length} ${preset.label.toLowerCase()}${pending.length === 1 ? "" : "s"} along the open stretches of this level's floor edges?\n\n` +
-          "Only the parts with no wall on them are covered, so a half-walled edge gets a barrier on the open half.\n\n" +
-          "They are ordinary walls, so you can move, edit or delete any of them afterwards.",
+          "Only the open parts are covered — where an edge is half walled, the barrier fills the rest.\n\n" +
+          "You can move, resize or delete any of them afterwards.",
       )
     ) {
       return;
@@ -1234,6 +1234,42 @@ export function IconRail({
                             (n === 0 ? "Ground floor" : `Level ${n}`)}
                         </span>
                       </button>
+                      {/* Auto-floor toggle. Upper storeys only — the ground
+                          floor is never synthesised, so the control would
+                          mean nothing there. Shows what the storey HAS, and
+                          clicking flips it: "Auto floor" means the pipeline
+                          fills in a floor when none is drawn; "No floor"
+                          means the storey is a void, which is how a
+                          mezzanine or an open roof deck gets made. */}
+                      {n !== 0 && (
+                        <button
+                          aria-label={
+                            lvl.autoFloor === false
+                              ? `Level ${n} has no floor — click to fill it in automatically`
+                              : `Level ${n} gets a floor automatically — click to leave it open`
+                          }
+                          className={cn(
+                            "shrink-0 rounded px-1.5 py-1 text-[9px] font-medium transition-colors",
+                            lvl.autoFloor === false
+                              ? "text-amber-500 hover:bg-amber-500/10"
+                              : "text-ink/40 hover:bg-ink/[0.06] hover:text-ink/70",
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            useScene.getState().updateNode(lvl.id, {
+                              autoFloor: lvl.autoFloor === false,
+                            });
+                          }}
+                          title={
+                            lvl.autoFloor === false
+                              ? "No floor — this storey is left open. Click to fill it in automatically."
+                              : "Auto floor — a floor is added when you have not drawn one. Click to leave it open."
+                          }
+                          type="button"
+                        >
+                          {lvl.autoFloor === false ? "NO FLOOR" : "AUTO"}
+                        </button>
+                      )}
                       {/* Ground floor has no delete: a building with no
                           storeys has nowhere to draw. */}
                       {n !== 0 && (
