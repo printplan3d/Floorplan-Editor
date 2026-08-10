@@ -2,9 +2,11 @@
 
 import {
   type AnyNodeId,
+  DEFAULT_WALL_THICKNESS,
   emitter,
   generateId,
   LevelNode,
+  SlabNode,
   useScene,
   WallNode,
 } from "@ritn3d/core";
@@ -23,6 +25,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "./../../../components/ui/primitives/tooltip";
+import { detectOuterOutlines } from "./../../../lib/detect-rooms";
 import { cn } from "./../../../lib/utils";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
@@ -117,14 +120,84 @@ const HELP_ROWS: { title: string; body: string }[] = [
     body: "The Levels button switches storeys. You always draw on the level you are on; the storey below shows as a faint amber outline so you can line things up.",
   },
   {
-    title: "Floors",
-    body: "A floor you draw belongs to the level you are on — it is that level's floor AND the ceiling of the one below. Extend it past the walls for balconies, porticos and sun shades. Drag an edge handle to curve it, and Cut floor makes a void for a stairwell or a double-height room.",
+    title: "Floors and roofs",
+    body:
+      "Add a level and its floor is made for you — that same slab is the roof " +
+      "over the storey below, which is how a building is actually built. " +
+      "Cut a hole in it for a stairwell or a double-height room, or drag its " +
+      "edges out past the walls for a balcony, portico or sun shade. The top " +
+      "storey is left open.",
   },
   {
     title: "Stairs",
     body: "A stair rises FROM the level you place it on to the one above, and cuts its own opening in the floor there. Upper storeys also get Barrier: parapet, railing or fence along an open floor edge.",
   },
 ];
+
+/**
+ * Push a closed polygon outward, mitring the corners.
+ *
+ * detectOuterOutlines traces wall CENTRE-lines, so a floor cut to that shape
+ * leaves every wall half hanging over the edge. Offsetting by half the wall
+ * thickness reaches the outer face and the storey above stands fully on its
+ * floor.
+ *
+ * Each edge moves along its own outward normal and adjacent lines are
+ * intersected, which is exact on the rectilinear plans this mostly sees.
+ * Near-parallel neighbours would intersect at infinity, so those fall back to
+ * the plain normal offset.
+ */
+function offsetPolygonOutward(
+  poly: [number, number][],
+  dist: number,
+): [number, number][] {
+  const n = poly.length;
+  if (n < 3 || dist <= 0) return poly;
+
+  let area2 = 0;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i]!;
+    const b = poly[(i + 1) % n]!;
+    area2 += a[0] * b[1] - b[0] * a[1];
+  }
+  const sign = area2 > 0 ? 1 : -1;
+
+  const edges: ([number, number, number, number] | null)[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = poly[i]!;
+    const b = poly[(i + 1) % n]!;
+    const ex = b[0] - a[0];
+    const ey = b[1] - a[1];
+    const len = Math.hypot(ex, ey);
+    if (len < 1e-9) {
+      edges.push(null);
+      continue;
+    }
+    const nx = (ey / len) * sign;
+    const ny = (-ex / len) * sign;
+    edges.push([a[0] + nx * dist, a[1] + ny * dist, ex / len, ey / len]);
+  }
+
+  const out: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const prev = edges[(i - 1 + n) % n];
+    const cur = edges[i];
+    if (!prev || !cur) {
+      out.push(poly[i]!);
+      continue;
+    }
+    const [px, py, pdx, pdy] = prev;
+    const [cx, cy, cdx, cdy] = cur;
+    const denom = pdx * cdy - pdy * cdx;
+    if (Math.abs(denom) < 1e-6) {
+      out.push([cx, cy]);
+      continue;
+    }
+    const t = ((cx - px) * cdy - (cy - py) * cdx) / denom;
+    out.push([px + pdx * t, py + pdy * t]);
+  }
+  return out;
+}
 
 const BARRIER_PRESETS: {
   id: "parapet" | "railing" | "fence";
@@ -209,7 +282,7 @@ const MINIMAL_TOOLS: {
     id: "slab",
     label: "Floor",
     icon: "/icons/floor.png",
-    hint: "Click corners to draw a floor plate. It is the floor OF this level and the ceiling of the one below. Extend it past the walls for balconies and porticos.",
+    hint: "Each level already has its floor. Use this to add another — a balcony, portico or sun shade beyond the walls.",
   },
 ];
 
@@ -474,6 +547,55 @@ export function IconRail({
 
     const level = LevelNode.parse({ level: next, children: [], parentId: bId });
     createNode(level, bId as AnyNodeId);
+
+    /* The roof over the storey below, which is this storey's floor — one
+       object, exactly as a building is actually built.
+
+       Made HERE rather than in Blender at render time. The pipeline used to
+       synthesise it, which put a floor in the 3D model that had no
+       counterpart in the editor: nothing to cut a stairwell through, nothing
+       to drag out into a balcony. As a real slab, every tool that already
+       works on floors works on this one.
+
+       Traced from the storey below's outline, so an L-shaped plan follows
+       the L instead of boxing over the notch. Offset by half the wall
+       thickness because the trace follows wall centre-lines — without it
+       every wall above would hang half off its own floor. */
+    const belowLevel = levelsOnBuilding.find(
+      (l) => (l.level ?? 0) === next - 1,
+    );
+    if (belowLevel) {
+      const nodes = useScene.getState().nodes;
+      const belowWalls = belowLevel.children
+        .map((id) => nodes[id as AnyNodeId])
+        .filter((n): n is any => n?.type === "wall");
+      if (belowWalls.length >= 3) {
+        const maxThickness = belowWalls.reduce(
+          (m, w) => Math.max(m, w.thickness ?? DEFAULT_WALL_THICKNESS),
+          DEFAULT_WALL_THICKNESS,
+        );
+        const outlines = detectOuterOutlines(
+          belowWalls.map((w) => ({
+            id: w.id,
+            start: w.start as [number, number],
+            end: w.end as [number, number],
+          })),
+        );
+        for (const outline of outlines) {
+          const poly = offsetPolygonOutward(outline, maxThickness / 2);
+          if (poly.length < 3) continue;
+          const slab = SlabNode.parse({
+            name: `Floor ${next}`,
+            parentId: level.id,
+            polygon: poly,
+            // Sits AT the storey datum. The presets that nudge a floor up or
+            // down are ground-floor thresholds and steps, not this.
+            elevation: 0,
+          });
+          createNode(slab, level.id as AnyNodeId);
+        }
+      }
+    }
 
     // No slab is created here, deliberately.
     //
@@ -1234,42 +1356,6 @@ export function IconRail({
                             (n === 0 ? "Ground floor" : `Level ${n}`)}
                         </span>
                       </button>
-                      {/* Auto-floor toggle. Upper storeys only — the ground
-                          floor is never synthesised, so the control would
-                          mean nothing there. Shows what the storey HAS, and
-                          clicking flips it: "Auto floor" means the pipeline
-                          fills in a floor when none is drawn; "No floor"
-                          means the storey is a void, which is how a
-                          mezzanine or an open roof deck gets made. */}
-                      {n !== 0 && (
-                        <button
-                          aria-label={
-                            lvl.autoFloor === false
-                              ? `Level ${n} has no floor — click to fill it in automatically`
-                              : `Level ${n} gets a floor automatically — click to leave it open`
-                          }
-                          className={cn(
-                            "shrink-0 rounded px-1.5 py-1 text-[9px] font-medium transition-colors",
-                            lvl.autoFloor === false
-                              ? "text-amber-500 hover:bg-amber-500/10"
-                              : "text-ink/40 hover:bg-ink/[0.06] hover:text-ink/70",
-                          )}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            useScene.getState().updateNode(lvl.id, {
-                              autoFloor: lvl.autoFloor === false,
-                            });
-                          }}
-                          title={
-                            lvl.autoFloor === false
-                              ? "No floor — this storey is left open. Click to fill it in automatically."
-                              : "Auto floor — a floor is added when you have not drawn one. Click to leave it open."
-                          }
-                          type="button"
-                        >
-                          {lvl.autoFloor === false ? "NO FLOOR" : "AUTO"}
-                        </button>
-                      )}
                       {/* Ground floor has no delete: a building with no
                           storeys has nowhere to draw. */}
                       {n !== 0 && (

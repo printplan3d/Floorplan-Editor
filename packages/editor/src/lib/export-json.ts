@@ -300,11 +300,6 @@ export function exportFloorPlanJSON(): object {
     const levelHeight = stairLevelHeight;
 
     floors.push({
-      // false = this storey is deliberately open (mezzanine, void over a
-      // double-height room, roof deck). The pipeline synthesises a floor for
-      // an upper storey with none drawn, and without this flag there is no
-      // way to say the absence was intended.
-      auto_floor: (level as any).autoFloor !== false,
       id: level.id,
       level: level.level ?? 0,
       label: `Level ${level.level ?? 0}`,

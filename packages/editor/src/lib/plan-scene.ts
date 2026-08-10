@@ -354,9 +354,6 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
       level: lvl,
       label: lv.name || (lvl === 0 ? "Ground floor" : `Floor ${lvl}`),
       height: 2.7,
-      // Survives a save/load round trip, or reopening a plan would quietly
-      // put back a floor the user had removed.
-      auto_floor: lv.autoFloor !== false,
       walls: idsAtLevel(
         lvl,
         walls.map((w) => w.id),
@@ -437,7 +434,6 @@ export function canonicalToSceneGraph(
         parentId: building.id,
         level: lvl,
         children: [],
-        autoFloor: (f as any)?.auto_floor !== false,
       });
       nodes[lv.id] = lv;
       building.children.push(lv.id);

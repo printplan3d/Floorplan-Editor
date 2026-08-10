@@ -5369,7 +5369,24 @@ export function FloorplanPanel() {
             ? slabHoleDraft.ring
             : hole,
         );
-        const holes = rawHoles
+        /* Stairwell voids, DERIVED from the stairs below rather than stored.
+           A stair rising to this storey opens its floor, and the pipeline
+           cuts exactly this footprint at render time. Deriving it means the
+           void follows the stair when it is moved, resized or switched from
+           straight to U — cutting it in as a real hole would leave a hole
+           where the stair used to be the moment you dragged it.
+
+           Display only. Never written back to the node, so there is nothing
+           for the user to manage or accidentally delete. Level height is
+           irrelevant here: the footprint depends on the stair's own length
+           and width, not on how many treads it needs. */
+        const stairVoids = (levelBelowGhost?.stairs ?? []).map((st) =>
+          buildStairPlan(st, DEFAULT_LEVEL_HEIGHT).outline.map(
+            (q) => [q.x, q.y] as [number, number],
+          ),
+        );
+
+        const holes = [...rawHoles, ...stairVoids]
           .map((hole, i) => {
             let hb = slab.holeBulges?.[i];
             if (
@@ -5393,7 +5410,7 @@ export function FloorplanPanel() {
           },
         ];
       }),
-    [slabs, slabBulgeDraft, slabHoleDraft],
+    [slabs, slabBulgeDraft, slabHoleDraft, levelBelowGhost],
   );
   // Tread count follows the storey height, so the symbol is rebuilt whenever
   // the level's walls change — a taller storey genuinely has more steps and
