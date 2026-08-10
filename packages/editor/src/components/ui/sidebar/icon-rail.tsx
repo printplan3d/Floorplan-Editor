@@ -973,14 +973,15 @@ export function IconRail({
       return;
     }
 
-    const near = (a: [number, number], b: [number, number]) =>
-      Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.25;
-    const edgeHasWall = (a: [number, number], b: [number, number]) =>
-      walls.some(
-        (w) =>
-          (near(w.start, a) && near(w.end, b)) ||
-          (near(w.start, b) && near(w.end, a)),
-      );
+    /* How far a wall may sit off an edge and still count as being ON it.
+       Walls are drawn on the slab's edge line, but thickness, mitring and
+       half-metre snapping all move the stored centre-line a little, so an
+       exact test would find nothing. 0.35 m is wider than any wall we build
+       and far narrower than a room. */
+    const ON_EDGE_TOL = 0.35;
+    /* Gaps shorter than this are not worth a barrier — they are mitre slop
+       at a corner, not an opening someone can fall through. */
+    const MIN_GAP = 0.4;
 
     const pending: [[number, number], [number, number]][] = [];
     for (const sl of slabs) {
@@ -988,12 +989,58 @@ export function IconRail({
       for (let i = 0; i < poly.length; i++) {
         const a = poly[i];
         const b = poly[(i + 1) % poly.length];
-        if (!a || !b) continue;
+        if (!(a && b)) continue;
         const p0: [number, number] = [a[0] ?? 0, a[1] ?? 0];
         const p1: [number, number] = [b[0] ?? 0, b[1] ?? 0];
-        if (Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) < 0.3) continue;
-        if (edgeHasWall(p0, p1)) continue;
-        pending.push([p0, p1]);
+        const ex = p1[0] - p0[0];
+        const ey = p1[1] - p0[1];
+        const edgeLen = Math.hypot(ex, ey);
+        if (edgeLen < MIN_GAP) continue;
+        const ux = ex / edgeLen;
+        const uy = ey / edgeLen;
+
+        /* Project every wall that lies along this edge onto it, in metres
+           from p0. A wall counts only when BOTH ends are near the edge line
+           — one endpoint near it just means a wall meeting this edge at a
+           corner, which covers none of it. */
+        const covered: [number, number][] = [];
+        for (const w of walls) {
+          const ends = [w.start, w.end] as [number, number][];
+          const proj: number[] = [];
+          let onEdge = true;
+          for (const q of ends) {
+            const dx = q[0] - p0[0];
+            const dy = q[1] - p0[1];
+            const along = dx * ux + dy * uy;
+            const perp = Math.abs(dx * -uy + dy * ux);
+            if (perp > ON_EDGE_TOL) {
+              onEdge = false;
+              break;
+            }
+            proj.push(along);
+          }
+          if (!onEdge || proj.length !== 2) continue;
+          const lo = Math.max(0, Math.min(proj[0]!, proj[1]!));
+          const hi = Math.min(edgeLen, Math.max(proj[0]!, proj[1]!));
+          if (hi - lo > 0.05) covered.push([lo, hi]);
+        }
+
+        // Merge, then walk the gaps between them.
+        covered.sort((m, n) => m[0] - n[0]);
+        let cursor = 0;
+        const gaps: [number, number][] = [];
+        for (const [lo, hi] of covered) {
+          if (lo - cursor > MIN_GAP) gaps.push([cursor, lo]);
+          cursor = Math.max(cursor, hi);
+        }
+        if (edgeLen - cursor > MIN_GAP) gaps.push([cursor, edgeLen]);
+
+        for (const [g0, g1] of gaps) {
+          pending.push([
+            [p0[0] + ux * g0, p0[1] + uy * g0],
+            [p0[0] + ux * g1, p0[1] + uy * g1],
+          ]);
+        }
       }
     }
 
@@ -1005,7 +1052,8 @@ export function IconRail({
     }
     if (
       !window.confirm(
-        `Add ${pending.length} ${preset.label.toLowerCase()}${pending.length === 1 ? "" : "s"} along the floor edges with no wall on them?\n\n` +
+        `Add ${pending.length} ${preset.label.toLowerCase()}${pending.length === 1 ? "" : "s"} along the open stretches of this level's floor edges?\n\n` +
+          "Only the parts with no wall on them are covered, so a half-walled edge gets a barrier on the open half.\n\n" +
           "They are ordinary walls, so you can move, edit or delete any of them afterwards.",
       )
     ) {
