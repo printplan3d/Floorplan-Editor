@@ -47,6 +47,9 @@ export interface CanonicalWall {
   height?: number;
   type?: string;
   bulge?: number;
+  /** 'railing' | 'fence'. Absent means an ordinary solid wall — which is also
+   *  what a parapet is — so nothing is written for the common case. */
+  barrier_type?: string;
 }
 export interface CanonicalDoor {
   id: string;
@@ -241,6 +244,13 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
             : "interior",
       };
       if (Math.abs(bulge) > 1e-6) wall.bulge = bulge;
+      /* Barriers must survive a save. Without this a railing or fence came
+         back as a plain wall next time the plan was opened — the RENDER path
+         carried barrier_type from the start, so it looked right in 3D up
+         until you reloaded. Omitted when solid, so an ordinary plan
+         serialises byte-identically to before. */
+      const barrier = (w as { barrierType?: string }).barrierType;
+      if (barrier && barrier !== "solid") wall.barrier_type = barrier;
       walls.push(wall);
 
       const wallLen = arcLength(w.start, w.end, bulge);
@@ -466,6 +476,10 @@ export function canonicalToSceneGraph(
       thickness: w.thickness ?? DEFAULT_WALL_THICKNESS,
       height: w.height ?? DEFAULT_WALL_HEIGHT,
       bulge: typeof w.bulge === "number" ? w.bulge : 0,
+      barrierType:
+        w.barrier_type === "railing" || w.barrier_type === "fence"
+          ? w.barrier_type
+          : "solid",
       frontSide: w.type === "exterior" ? "exterior" : "unknown",
       backSide: w.type === "exterior" ? "exterior" : "unknown",
     });
