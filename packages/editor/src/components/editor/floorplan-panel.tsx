@@ -6949,6 +6949,34 @@ export function FloorplanPanel() {
         return null;
       }
 
+      /* Cut mode: the ring just drawn becomes a HOLE in the armed slab
+         rather than a new floor.
+
+         This check lives here, not at the call sites, because a polygon can
+         be finished two ways — clicking back on the first point, or
+         double-click/Enter through handleSlabPlacementConfirm. It was
+         originally only on the first, so closing a cut the other way drew a
+         second slab on top of the floor instead of opening it. One choke
+         point, one behaviour. */
+      const cutting = useEditor.getState().cuttingSlabId;
+      if (cutting) {
+        const slab = slabById.get(cutting as SlabNode["id"]);
+        if (slab) {
+          updateNode(slab.id, {
+            holes: [
+              ...(slab.holes ?? []),
+              points.map((q) => [q[0], q[1]] as [number, number]),
+            ],
+          });
+          setSelection({ selectedIds: [slab.id] });
+          sfxEmitter.emit("sfx:structure-build");
+        }
+        useEditor.getState().setCuttingSlabId(null);
+        useEditor.getState().setMode("select");
+        useEditor.getState().setTool(null);
+        return null;
+      }
+
       const { createNode, nodes } = useScene.getState();
       const slabCount = Object.values(nodes).filter(
         (node) => node.type === "slab",
@@ -8065,29 +8093,6 @@ export function FloorplanPanel() {
         slabDraftPoints.length >= 3 &&
         isPointNearPlanPoint(point, firstPoint)
       ) {
-        /* Same gesture, two outcomes. With a slab armed for cutting, the ring
-           just drawn becomes a hole in THAT slab rather than a new floor —
-           the shapes are identical, so drawing them differently would only be
-           something else to learn. */
-        const cutting = useEditor.getState().cuttingSlabId;
-        if (cutting) {
-          const slab = slabById.get(cutting as SlabNode["id"]);
-          if (slab) {
-            updateNode(slab.id, {
-              holes: [
-                ...(slab.holes ?? []),
-                slabDraftPoints.map((q) => [q[0], q[1]] as [number, number]),
-              ],
-            });
-            setSelection({ selectedIds: [slab.id] });
-            sfxEmitter.emit("sfx:structure-build");
-          }
-          useEditor.getState().setCuttingSlabId(null);
-          useEditor.getState().setMode("select");
-          useEditor.getState().setTool(null);
-          clearDraft();
-          return;
-        }
         createSlabOnCurrentLevel(slabDraftPoints);
         clearDraft();
         return;
