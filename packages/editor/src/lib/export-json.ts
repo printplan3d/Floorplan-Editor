@@ -224,6 +224,13 @@ export function exportFloorPlanJSON(): object {
           : {}),
         elevation: sl.elevation ?? 0.05,
         thickness: sl.thickness ?? 0.2,
+        /* The pipeline reads this (generate_3d.py: room_type from
+           surface_type) and it was never sent, so every patio, deck,
+           driveway, gravel, grass and wood slab rendered as plain base
+           floor. The whole outdoor-surface feature was dead on this path —
+           the picker worked, the choice was saved, and nothing reached
+           Blender. */
+        surface_type: sl.surfaceType ?? 'interior',
       });
     }
 
