@@ -1136,6 +1136,38 @@ export function IconRail({
     /* Gaps shorter than this are not worth a barrier — they are mitre slop
        at a corner, not an opening someone can fall through. */
     const MIN_GAP = 0.4;
+    /* How far off an edge to look for floor. Big enough to clear the edge
+       itself and any snapping slop, small enough not to reach across a
+       narrow balcony and find the floor on its far side. */
+    const PROBE = 0.25;
+
+    const pointInRing = (
+      x: number,
+      y: number,
+      ring: [number, number][],
+    ): boolean => {
+      let inside = false;
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i]!;
+        const b = ring[(i + 1) % ring.length]!;
+        if (
+          a[1] > y !== b[1] > y &&
+          x < ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]) + a[0]
+        ) {
+          inside = !inside;
+        }
+      }
+      return inside;
+    };
+
+    /** Is there floor at this point — any slab on this level, minus its holes? */
+    const isFloored = (x: number, y: number): boolean =>
+      slabs.some((sl) => {
+        const poly = (sl.polygon ?? []) as [number, number][];
+        if (poly.length < 3 || !pointInRing(x, y, poly)) return false;
+        const holes = (sl.holes ?? []) as [number, number][][];
+        return !holes.some((h) => h.length >= 3 && pointInRing(x, y, h));
+      });
 
     const pending: [[number, number], [number, number]][] = [];
     for (const sl of slabs) {
@@ -1190,6 +1222,21 @@ export function IconRail({
         if (edgeLen - cursor > MIN_GAP) gaps.push([cursor, edgeLen]);
 
         for (const [g0, g1] of gaps) {
+          /* Floor on BOTH sides means this is a seam between two slabs — a
+             balcony drawn onto the storey's floor shares its edge with it —
+             not a drop. Railing it puts a fence through the middle of the
+             deck, which is exactly what happened. Probed at the gap's own
+             midpoint rather than the whole edge's, so an edge that is shared
+             for part of its length still gets a barrier on the rest. */
+          const mid = (g0 + g1) / 2;
+          const mx = p0[0] + ux * mid;
+          const my = p0[1] + uy * mid;
+          const nx = -uy;
+          const ny = ux;
+          const floorLeft = isFloored(mx + nx * PROBE, my + ny * PROBE);
+          const floorRight = isFloored(mx - nx * PROBE, my - ny * PROBE);
+          if (floorLeft && floorRight) continue;
+
           pending.push([
             [p0[0] + ux * g0, p0[1] + uy * g0],
             [p0[0] + ux * g1, p0[1] + uy * g1],
