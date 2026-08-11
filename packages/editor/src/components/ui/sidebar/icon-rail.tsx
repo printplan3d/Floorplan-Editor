@@ -5,8 +5,10 @@ import {
   DEFAULT_WALL_THICKNESS,
   emitter,
   generateId,
+  isStraight,
   LevelNode,
   SlabNode,
+  tessellateArc,
   useScene,
   WallNode,
 } from "@ritn3d/core";
@@ -574,13 +576,43 @@ export function IconRail({
           (m, w) => Math.max(m, w.thickness ?? DEFAULT_WALL_THICKNESS),
           DEFAULT_WALL_THICKNESS,
         );
-        const outlines = detectOuterOutlines(
-          belowWalls.map((w) => ({
-            id: w.id,
-            start: w.start as [number, number],
-            end: w.end as [number, number],
-          })),
-        );
+        /* Arc walls must be expanded BEFORE tracing. detectOuterOutlines
+           walks the wall graph, whose nodes are wall ENDPOINTS — so a curved
+           wall contributes its chord and nothing else. The floor then cut
+           straight across every curve, leaving the bulge hanging over
+           nothing and z-fighting the wall where the two disagreed.
+
+           Each arc becomes a chain of short segments with synthetic ids, so
+           the tracer sees an ordinary polyline and the outline follows the
+           curve. Same resolution the pipeline uses for its own arc
+           tessellation, so the floor edge and the wall agree. */
+        const traceSegments: {
+          id: string;
+          start: [number, number];
+          end: [number, number];
+        }[] = [];
+        for (const w of belowWalls) {
+          const bulge = w.bulge ?? 0;
+          if (isStraight(bulge)) {
+            traceSegments.push({
+              id: w.id,
+              start: w.start as [number, number],
+              end: w.end as [number, number],
+            });
+            continue;
+          }
+          const pts = tessellateArc(w.start, w.end, bulge);
+          for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i]!;
+            const b = pts[i + 1]!;
+            traceSegments.push({
+              id: `${w.id}__arc${i}`,
+              start: [a[0], a[1]],
+              end: [b[0], b[1]],
+            });
+          }
+        }
+        const outlines = detectOuterOutlines(traceSegments);
         for (const outline of outlines) {
           const poly = offsetPolygonOutward(outline, maxThickness / 2);
           if (poly.length < 3) continue;
