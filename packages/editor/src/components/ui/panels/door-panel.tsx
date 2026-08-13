@@ -55,6 +55,18 @@ const DOOR_WIDTH_RULES: Record<
   // Interior slider / pocket door: it replaces a single door, so it takes the
   // same leaf sizes. Narrower than patio, which is the wide exterior slider.
   sliding: { min: 0.6, max: 1.8, def: 0.9 },
+  /* Sectional overhead door. Deferring to Flutter left this on the 0.6-1.5 m
+     pedestrian fallback, which is not a neutral default: 1.5 m is narrower
+     than any real garage door, so one placed here came out pedestrian-sized
+     and could not be widened by hand either — the slider's own maximum
+     stopped short of a garage. 2.4 m is a single-car opening and is what
+     DoorNode's schema already documents; the range reaches 4.8 m for a
+     double.
+
+     This is now AHEAD of Flutter rather than behind it, which is fine —
+     Flutter has no garage type at all, so there is nothing to contradict.
+     When it gains one, these are the numbers to match. */
+  garage: { min: 2.0, max: 5.0, def: 2.4 },
 };
 const DOOR_WIDTH_FALLBACK = { min: 0.6, max: 1.5, def: 0.9 };
 

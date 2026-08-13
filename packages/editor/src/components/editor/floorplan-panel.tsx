@@ -3497,6 +3497,58 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                   );
                 }
 
+                if (doorStyle === "garage") {
+                  /* A sectional overhead door: no swing, no sliding track.
+                     With no branch of its own it fell through to the
+                     pedestrian swing arc, which is not merely plain but
+                     wrong — it read as a hinged door and gave no hint the
+                     opening was a garage.
+
+                     In plan it is the panel itself, sitting on the opening
+                     line, with its section joints ticked across. The ticks
+                     are what separate it at a glance from a blocked-up
+                     opening; the panel is deliberately heavier than a
+                     pedestrian leaf because a garage door is one slab. */
+                  const k = doorInflate(0.05);
+                  const panelOff = 0.05 * k * sgn;
+                  const tick = 0.07;
+                  const SECTIONS = 4;
+                  const ticks = [];
+                  for (let s = 1; s < SECTIONS; s++) {
+                    const t = s / SECTIONS;
+                    const jx = aX + (bX - aX) * t + px * panelOff;
+                    const jy = aY + (bY - aY) * t + py * panelOff;
+                    ticks.push(
+                      <line
+                        key={s}
+                        opacity={0.55}
+                        stroke={strokeColor}
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                        x1={jx - px * tick}
+                        y1={jy - py * tick}
+                        x2={jx + px * tick}
+                        y2={jy + py * tick}
+                      />,
+                    );
+                  }
+                  return (
+                    <g data-element="door-symbol">
+                      {jambs}
+                      <line
+                        stroke={strokeColor}
+                        strokeWidth={2}
+                        vectorEffect="non-scaling-stroke"
+                        x1={aX + px * panelOff}
+                        y1={aY + py * panelOff}
+                        x2={bX + px * panelOff}
+                        y2={bY + py * panelOff}
+                      />
+                      {ticks}
+                    </g>
+                  );
+                }
+
                 if (doorStyle === "sliding") {
                   // Panel reads against its track, so the 0.06 m between
                   // them is the feature. The arrow keeps Flutter's fixed
