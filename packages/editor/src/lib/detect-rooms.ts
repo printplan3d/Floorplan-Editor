@@ -33,6 +33,18 @@ export interface DetectedRoom {
   signature: string;
   polygon: [number, number][];
   areaM2: number;
+  /**
+   * The walls that bound this room.
+   *
+   * This is how a room keeps its identity across an edit. Matching on the
+   * polygon alone cannot: move one wall and every signature in the room
+   * changes, so the room reads as deleted and a brand-new one appears in its
+   * place, taking a new id and losing whatever the user named it.
+   *
+   * iOS and Flutter have always matched on wall-id overlap for exactly this
+   * reason. The webapp is catching up — see auto-room-detector.
+   */
+  wallIds: string[];
 }
 
 interface Node {
@@ -81,7 +93,7 @@ function polygonSignature(poly: [number, number][]): string {
  */
 function traceFaces(
   walls: WallSegment[],
-): { polygon: [number, number][]; areaM2: number }[] {
+): { polygon: [number, number][]; areaM2: number; wallIds: string[] }[] {
   if (walls.length < 3) return [];
 
   const nodes: Node[] = [];
@@ -167,7 +179,11 @@ function traceFaces(
   for (const list of adj) list.sort((a, b) => angleOf(a) - angleOf(b));
 
   const visited: boolean[] = new Array(edges.length).fill(false);
-  const rooms: { polygon: [number, number][]; areaM2: number }[] = [];
+  const rooms: {
+    polygon: [number, number][];
+    areaM2: number;
+    wallIds: string[];
+  }[] = [];
 
   const reverseOf = (edgeIdx: number): number => {
     // With T-junction splits (2026-07-27), a single wall can contribute
@@ -226,7 +242,20 @@ function traceFaces(
     }
     if (poly.length < 3) continue;
 
-    rooms.push({ polygon: poly, areaM2: polygonSignedArea(poly) });
+    // Which walls bound this face. A T-junction split gives one wall several
+    // edges, so the same id can appear more than once — dedupe, because this
+    // is compared as a SET.
+    const wallIds: string[] = [];
+    for (const eIdx of faceEdges) {
+      const wid = edges[eIdx]!.wallId;
+      if (!wallIds.includes(wid)) wallIds.push(wid);
+    }
+
+    rooms.push({
+      polygon: poly,
+      areaM2: polygonSignedArea(poly),
+      wallIds,
+    });
   }
 
   return rooms;
@@ -240,6 +269,7 @@ export function detectClosedRooms(walls: WallSegment[]): DetectedRoom[] {
       signature: polygonSignature(f.polygon),
       polygon: f.polygon,
       areaM2: f.areaM2,
+      wallIds: f.wallIds,
     }));
 }
 

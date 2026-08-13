@@ -336,7 +336,22 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
         id: n.id,
         label: n.name || "Room",
         type,
-        wall_ids: [],
+        /* The walls bounding this room, and the ONLY thing that lets a room
+           keep its name across a save/load.
+
+           This used to be hard-coded `[]`, which broke two things at once.
+           Locally, the detector had nothing to match on after a reload, so
+           it matched on a metadata flag the wire does not carry and grew a
+           duplicate per open. On mobile it was worse and silent: iOS and
+           Flutter inherit a room's label by wall-id overlap, and overlap
+           with an empty set is always zero — so every room in a
+           webapp-saved plan arrived on the phone unmatched, with a fresh id
+           and no label.
+
+           The field was already in the wire format. It was just never
+           filled in. */
+        wall_ids: ((n.metadata as Record<string, unknown> | undefined)
+          ?.wallIds as string[]) ?? [],
         area: 0,
         polygon: (n.polygon || []).map((p: number[]) =>
           rot180([p[0] ?? 0, p[1] ?? 0]),
@@ -608,9 +623,25 @@ export function canonicalToSceneGraph(
     const owner = levelFor(r.id);
     const zone: any = ZoneNode.parse({
       parentId: owner.id,
+      /* Keep the id when it is one of ours.
+
+         ZoneNode's id is `zone_` + string, enforced by a template literal —
+         so passing a mobile-shaped id ("room-abc12345" from Flutter) would
+         throw inside parse and take the WHOLE plan load down with it. Reuse
+         it only when it already has the prefix, otherwise let the schema
+         mint a new one. Mobile-origin rooms therefore still get fresh ids
+         here, which costs nothing: mobile re-derives its own rooms from the
+         walls on the next edit anyway. */
+      ...(typeof r.id === "string" && r.id.startsWith("zone_")
+        ? { id: r.id }
+        : {}),
       name: r.label || "Room",
       polygon,
       roomType,
+      /* Restore what the detector matches on. Without this the first pass
+         after a load finds no wall ids to compare, treats every room as new,
+         and resets the names the user typed. */
+      metadata: { autoCreated: true, wallIds: r.wall_ids ?? [] },
     });
     nodes[zone.id] = zone;
     owner.children.push(zone.id);
