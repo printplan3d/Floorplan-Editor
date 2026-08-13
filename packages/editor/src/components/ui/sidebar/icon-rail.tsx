@@ -568,9 +568,25 @@ export function IconRail({
     );
     if (belowLevel) {
       const nodes = useScene.getState().nodes;
+      /* Structural walls only — a railing or a fence does not hold a storey
+         up, and must not shape the floor of the one above.
+
+         Fence a garden, add a level, and the outline traced around those
+         fence posts laid a floor over the whole garden: standing on the
+         grass in walk mode you were under a roof. A parapet stays in, since
+         it is a genuine low wall and a balcony above one is ordinary
+         construction — only 'railing' and 'fence' are unambiguously not
+         structure. ('solid' is the schema default, so it cannot be used to
+         tell a parapet from a plain wall; that distinction is not needed
+         here.) */
       const belowWalls = belowLevel.children
         .map((id) => nodes[id as AnyNodeId])
-        .filter((n): n is any => n?.type === "wall");
+        .filter(
+          (n): n is any =>
+            n?.type === "wall" &&
+            n.barrierType !== "railing" &&
+            n.barrierType !== "fence",
+        );
       if (belowWalls.length >= 3) {
         const maxThickness = belowWalls.reduce(
           (m, w) => Math.max(m, w.thickness ?? DEFAULT_WALL_THICKNESS),
@@ -1172,16 +1188,59 @@ export function IconRail({
     const pending: [[number, number], [number, number]][] = [];
     for (const sl of slabs) {
       const poly = (sl.polygon ?? []) as number[][];
+      const slabBulges = (sl.bulges ?? []) as number[];
+
+      /* Straight spans to run the gap logic over.
+
+         A curved slab edge is ONE entry in `polygon` with a bulge — walking
+         consecutive points treats it as the chord, so a railing round a
+         curved balcony was built straight across the opening it was meant to
+         guard. Tessellating first turns the arc into short straight spans
+         that trace the curve, which is exactly what the translator already
+         does to an arc WALL before Blender sees it: many small segments read
+         as a curve, and every downstream stage stays straight-line only.
+
+         Computing a bulge for each partial span was the alternative and is a
+         trap — a sub-chord's bulge is NOT the parent's, and getting that
+         wrong is a bug we have already shipped once on room areas. */
+      const spans: {
+        p0: [number, number];
+        p1: [number, number];
+        arcSub: boolean;
+      }[] = [];
       for (let i = 0; i < poly.length; i++) {
         const a = poly[i];
         const b = poly[(i + 1) % poly.length];
         if (!(a && b)) continue;
-        const p0: [number, number] = [a[0] ?? 0, a[1] ?? 0];
-        const p1: [number, number] = [b[0] ?? 0, b[1] ?? 0];
+        const s: [number, number] = [a[0] ?? 0, a[1] ?? 0];
+        const e: [number, number] = [b[0] ?? 0, b[1] ?? 0];
+        const bulge = slabBulges[i] ?? 0;
+        if (isStraight(bulge)) {
+          spans.push({ p0: s, p1: e, arcSub: false });
+          continue;
+        }
+        const pts = tessellateArc(s, e, bulge, 0.5);
+        for (let k = 0; k + 1 < pts.length; k++) {
+          spans.push({
+            p0: [pts[k]![0], pts[k]![1]],
+            p1: [pts[k + 1]![0], pts[k + 1]![1]],
+            arcSub: true,
+          });
+        }
+      }
+
+      for (const span of spans) {
+        const p0 = span.p0;
+        const p1 = span.p1;
         const ex = p1[0] - p0[0];
         const ey = p1[1] - p0[1];
         const edgeLen = Math.hypot(ex, ey);
-        if (edgeLen < MIN_GAP) continue;
+        /* MIN_GAP rejects mitre slop at a corner. An arc sub-span is a
+           deliberate subdivision, not slop, so it is held to a much smaller
+           floor — otherwise tessellating a curve into half-metre pieces
+           would discard every one of them and the railing would vanish
+           entirely rather than merely cut the chord. */
+        if (edgeLen < (span.arcSub ? 0.05 : MIN_GAP)) continue;
         const ux = ex / edgeLen;
         const uy = ey / edgeLen;
 
@@ -1211,15 +1270,18 @@ export function IconRail({
           if (hi - lo > 0.05) covered.push([lo, hi]);
         }
 
-        // Merge, then walk the gaps between them.
+        // Merge, then walk the gaps between them. Same reasoning as the span
+        // length above: within an arc sub-span, a short gap is still real
+        // guarding to build, not corner slop.
+        const gapMin = span.arcSub ? 0.05 : MIN_GAP;
         covered.sort((m, n) => m[0] - n[0]);
         let cursor = 0;
         const gaps: [number, number][] = [];
         for (const [lo, hi] of covered) {
-          if (lo - cursor > MIN_GAP) gaps.push([cursor, lo]);
+          if (lo - cursor > gapMin) gaps.push([cursor, lo]);
           cursor = Math.max(cursor, hi);
         }
-        if (edgeLen - cursor > MIN_GAP) gaps.push([cursor, edgeLen]);
+        if (edgeLen - cursor > gapMin) gaps.push([cursor, edgeLen]);
 
         for (const [g0, g1] of gaps) {
           /* Floor on BOTH sides means this is a seam between two slabs — a
