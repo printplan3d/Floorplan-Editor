@@ -1323,6 +1323,18 @@ export function IconRail({
       return;
     }
 
+    /* One id shared by every span of this run.
+
+       A curved slab edge is tessellated into half-metre straight spans —
+       the pipeline only takes straight segments, and without that a railing
+       round a curved balcony cut the chord. The cost is that one railing
+       becomes dozens of WallNodes, and deleting it meant clicking every one.
+
+       The spans stay separate nodes (the geometry needs them) but carry a
+       group id, so selection and deletion can treat the run as the single
+       thing the user actually drew. Same idea as parent_wall_id on the
+       pipeline's arc sub-walls. */
+    const groupId = generateId("bgrp");
     let n = 0;
     for (const [a, b] of pending) {
       const wall = WallNode.parse({
@@ -1332,6 +1344,7 @@ export function IconRail({
         barrierType: preset.barrierType,
         height: preset.height,
         thickness: preset.thickness,
+        metadata: { barrierGroupId: groupId },
       });
       createNode(wall, levelId as AnyNodeId);
     }

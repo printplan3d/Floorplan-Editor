@@ -50,6 +50,15 @@ export interface CanonicalWall {
   /** 'railing' | 'fence'. Absent means an ordinary solid wall — which is also
    *  what a parapet is — so nothing is written for the common case. */
   barrier_type?: string;
+  /** Spans generated together as one railing run along a slab edge.
+   *
+   *  A curved edge is tessellated into many short straight walls because the
+   *  pipeline takes straight segments only. This is what lets the editor
+   *  delete the run as the single railing the user actually added, so it has
+   *  to survive a save/load — metadata does NOT cross this wire, which is
+   *  precisely how the auto-created room flag was lost and rooms duplicated
+   *  on every open. */
+  barrier_group_id?: string;
 }
 export interface CanonicalDoor {
   id: string;
@@ -58,6 +67,18 @@ export interface CanonicalDoor {
   width: number;
   height: number;
   door_type?: string;
+  /** The editor's FULL style, because door_type cannot carry it.
+   *
+   *  door_type is the shared mobile vocabulary — single / double / patio /
+   *  glass — and 'garage' and 'sliding' both collapse into "single" on the
+   *  way out and come back as "pedestrian". A garage door survived until the
+   *  plan was reopened and then rendered as a plain wooden slab, which got
+   *  worse once garage doors became 2.4 m wide: one big brown door.
+   *
+   *  Kept alongside door_type rather than widening it, so iOS and Flutter
+   *  keep reading the vocabulary they know and simply ignore this. Absent on
+   *  every plan saved before now, which is what the fallback is for. */
+  door_style?: string;
   swing_direction?: string;
   swing_side?: string;
   /* Leaf detailing. The render path has carried these since doors gained a
@@ -275,6 +296,9 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
          serialises byte-identically to before. */
       const barrier = (w as { barrierType?: string }).barrierType;
       if (barrier && barrier !== "solid") wall.barrier_type = barrier;
+      const grp = (n.metadata as Record<string, unknown> | undefined)
+        ?.barrierGroupId as string | undefined;
+      if (grp) wall.barrier_group_id = grp;
       walls.push(wall);
 
       const wallLen = arcLength(w.start, w.end, bulge);
@@ -291,6 +315,7 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
             width: c.width ?? 0.9,
             height: c.height ?? 2.1,
             door_type: styleToDoorType(c.style),
+            door_style: c.style || "pedestrian",
             swing_direction: c.hingesSide === "left" ? "left" : "right",
             swing_side: c.swingDirection === "outward" ? "outside" : "inside",
             frame_thickness: c.frameThickness,
@@ -536,6 +561,13 @@ export function canonicalToSceneGraph(
           : "solid",
       frontSide: w.type === "exterior" ? "exterior" : "unknown",
       backSide: w.type === "exterior" ? "exterior" : "unknown",
+      /* Put the railing run back together. Without this the group id
+         survives the save and is dropped on load, so deleting a curved
+         balcony rail works until you reopen the plan and then goes back to
+         one-span-at-a-time — the worst kind of bug, because it looks fixed. */
+      ...(w.barrier_group_id
+        ? { metadata: { barrierGroupId: w.barrier_group_id } }
+        : {}),
     });
     nodes[wall.id] = wall;
     owner.children.push(wall.id);
@@ -553,7 +585,13 @@ export function canonicalToSceneGraph(
       position: [(d.position_along_wall ?? 0.5) * len, height / 2, 0],
       width: d.width ?? 0.9,
       height,
-      style: doorTypeToStyle(d.door_type),
+      /* The preserved style wins; door_type is the fallback.
+         door_type collapses garage and sliding into "single", which comes
+         back as "pedestrian" — so a garage door reverted to a plain wooden
+         slab the first time its plan was reopened. Plans saved before
+         door_style existed have no such field and still take the old
+         mapping, which is exactly the behaviour they were written under. */
+      style: d.door_style || doorTypeToStyle(d.door_type),
       hingesSide: d.swing_direction === "left" ? "left" : "right",
       swingDirection: d.swing_side === "outside" ? "outward" : "inward",
       /* Spread only what the document actually carried. Writing `undefined`

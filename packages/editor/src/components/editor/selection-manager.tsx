@@ -283,7 +283,34 @@ export const SelectionManager = () => {
         sfxEmitter.emit('sfx:structure-delete')
       }
 
-      useScene.getState().deleteNode(node.id as AnyNodeId)
+      /* Delete the whole barrier run, not the one span that was clicked.
+
+         A railing along a curved slab edge is stored as many short straight
+         walls, because the pipeline takes straight segments only — without
+         that, a rail round a curved balcony cut the chord. To the user it is
+         ONE railing added with one click, so removing it has to be one click
+         too; otherwise a curved balcony rail takes dozens of deletes and
+         looks broken half-way through.
+
+         Only spans generated together share a barrierGroupId, so a
+         hand-drawn wall has none and deletes exactly as before. */
+      const _grp = (node as { metadata?: { barrierGroupId?: string } })
+        .metadata?.barrierGroupId
+      const _victims: string[] = [node.id]
+      if (_grp) {
+        for (const other of Object.values(useScene.getState().nodes)) {
+          const o = other as {
+            id: string
+            metadata?: { barrierGroupId?: string }
+          }
+          if (o.id !== node.id && o.metadata?.barrierGroupId === _grp) {
+            _victims.push(o.id)
+          }
+        }
+      }
+      for (const _id of _victims) {
+        useScene.getState().deleteNode(_id as AnyNodeId)
+      }
       if (node.parentId) useScene.getState().dirtyNodes.add(node.parentId as AnyNodeId)
 
       // Clear hover since the node is gone
