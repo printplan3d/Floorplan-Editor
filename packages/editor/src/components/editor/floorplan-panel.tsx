@@ -5016,8 +5016,17 @@ export function FloorplanPanel() {
     //
     // Same condition iOS uses in CalibrationOverlay.apply().
     const sceneNodes = useScene.getState().nodes as Record<string, AnyNode>;
+    /* Walls ON THE LEVEL BEING TRACED, not anywhere in the plan.
+       Scene-wide was right while a plan was one storey. On a multi-storey
+       one it is actively destructive: add a tracing image to a fresh level 3
+       of an existing three-storey plan and levels G/1/2 have walls, so this
+       took the "plan exists" branch and rescaled ALL THREE STOREYS instead of
+       sizing the image just added. The level you are tracing has no walls yet
+       — that is the whole reason you are tracing it. */
     const hasWalls = Object.values(sceneNodes).some(
-      (n) => (n as any)?.type === "wall",
+      (n) =>
+        (n as any)?.type === "wall" &&
+        (!levelId || (n as any)?.parentId === levelId),
     );
 
     if (!hasWalls) {
