@@ -5021,9 +5021,23 @@ export function FloorplanPanel() {
     );
 
     if (!hasWalls) {
+      /* Scale the guide on THIS level.
+
+         The fallback took the first guide anywhere in the scene, which is
+         fine while a plan has one. Trace a multi-storey building and each
+         level has its own, so calibrating the first floor could rescale the
+         ground floor's image instead — leaving the one you were measuring
+         untouched and silently resizing one you were not looking at.
+
+         calibration.guideId is set when calibration was triggered from a
+         specific guide (the upload flow does this), so it still wins. */
       const guideId =
         calibration.guideId ??
-        Object.values(sceneNodes).find((n) => (n as any)?.type === "guide")?.id;
+        Object.values(sceneNodes).find(
+          (n) =>
+            (n as any)?.type === "guide" &&
+            (!levelId || (n as any)?.parentId === levelId),
+        )?.id;
       if (!guideId) return;
       const guide = sceneNodes[guideId as AnyNodeId] as GuideNode | undefined;
       if (!guide) return;
