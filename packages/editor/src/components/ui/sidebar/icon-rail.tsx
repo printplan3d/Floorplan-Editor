@@ -695,7 +695,21 @@ export function IconRail({
       const dataUrl = reader.result as string;
       const state = useScene.getState() as any;
       const nodes = state.nodes as Record<string, any>;
-      const level = Object.values(nodes).find((n: any) => n.type === "level");
+      /* The level you are LOOKING at, not the first one in the map.
+         Object.values(nodes).find(type === 'level') returns whichever level
+         happens to be first — the ground floor — so on a multi-storey plan
+         every trace image was parented to G regardless of the level open.
+         The canvas only draws the active level's guides, so the image was
+         invisible on the level you uploaded it from AND silently stacked on
+         the ground floor. Tracing an upper storey was impossible.
+         The Calibrate button below already scopes to activeLevelId; this is
+         the one place that did not. */
+      const activeId = useViewer.getState().selection.levelId;
+      const level =
+        (activeId && nodes[activeId]?.type === "level"
+          ? nodes[activeId]
+          : null) ??
+        Object.values(nodes).find((n: any) => n.type === "level");
       if (!level) return;
       const guide = {
         id: generateId("guide"),
