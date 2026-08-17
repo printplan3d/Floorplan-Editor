@@ -1481,21 +1481,34 @@ function snapPolygonDraftPoint({
   point,
   start,
   angleSnap,
+  freehand = false,
 }: {
   point: WallPlanPoint;
   start?: WallPlanPoint;
   angleSnap: boolean;
+  freehand?: boolean;
 }): WallPlanPoint {
-  const snappedPoint: WallPlanPoint = [
-    snapToHalf(point[0]),
-    snapToHalf(point[1]),
-  ];
+  // `freehand` is the grid-snap toggle, and it used not to exist here: the
+  // 0.5 m quantize below was unconditional, so turning grid snap off did
+  // nothing at all to a floor polygon. The wall tool has always honoured it —
+  // snapWallDraftPoint takes the same flag — the polygon path just never had
+  // it threaded in, even though both polygon callbacks already list snapActive
+  // in their dependency arrays.
+  //
+  // Angle snap stays independent of it, and the ORDER is deliberately left as
+  // grid-then-angle rather than matching the wall tool's angle-then-grid: with
+  // the grid ON this function now returns exactly what it always returned, so
+  // this is a fix for the OFF case only and cannot move a vertex anyone has
+  // already placed with snapping on.
+  const basePoint: WallPlanPoint = freehand
+    ? [point[0], point[1]]
+    : [snapToHalf(point[0]), snapToHalf(point[1])];
 
   if (!(start && angleSnap)) {
-    return snappedPoint;
+    return basePoint;
   }
 
-  return calculatePolygonSnapPoint(start, snappedPoint);
+  return calculatePolygonSnapPoint(start, basePoint);
 }
 
 function pointMatchesWallPlanPoint(
@@ -7686,10 +7699,11 @@ export function FloorplanPanel() {
         return;
       }
 
-      const snappedPoint: WallPlanPoint = [
-        snapToHalf(planPoint[0]),
-        snapToHalf(planPoint[1]),
-      ];
+      // Dragging a floor polygon's corner obeys the grid toggle for the same
+      // reason drawing one does — it was the other half of the same complaint.
+      const snappedPoint: WallPlanPoint = snapActive
+        ? [snapToHalf(planPoint[0]), snapToHalf(planPoint[1])]
+        : [planPoint[0], planPoint[1]];
       setCursorPoint(snappedPoint);
 
       setSlabBoundaryDraft((currentDraft) => {
@@ -7765,6 +7779,7 @@ export function FloorplanPanel() {
     getPlanPointFromClientPoint,
     slabById,
     slabVertexDragState,
+    snapActive,
     updateNode,
   ]);
 
@@ -7988,6 +8003,7 @@ export function FloorplanPanel() {
           point: planPoint,
           start: activePolygonDraftPoints[activePolygonDraftPoints.length - 1],
           angleSnap: activePolygonDraftPoints.length > 0 && orthoActive,
+          freehand: !snapActive,
         });
 
         setCursorPoint((previousPoint) => {
@@ -8456,6 +8472,7 @@ export function FloorplanPanel() {
           point: planPoint,
           start: activePolygonDraftPoints[activePolygonDraftPoints.length - 1],
           angleSnap: activePolygonDraftPoints.length > 0 && orthoActive,
+          freehand: !snapActive,
         });
 
         if (isZoneBuildActive) {
@@ -8580,6 +8597,7 @@ export function FloorplanPanel() {
         point: planPoint,
         start: activePolygonDraftPoints[activePolygonDraftPoints.length - 1],
         angleSnap: activePolygonDraftPoints.length > 0 && orthoActive,
+        freehand: !snapActive,
       });
 
       if (isZoneBuildActive) {
