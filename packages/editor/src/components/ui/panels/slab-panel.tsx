@@ -70,6 +70,40 @@ export function SlabPanel() {
     [selectedId, updateNode],
   );
 
+  /* Picking a surface renames the slab to match.
+
+     The name is what the plan label and the site tree actually show
+     (`slab.name ?? surfaceType`), and it is set ONCE at draw time. There is a
+     single floor tool, so `pendingSlabSurfaceType` is always "interior" and
+     every slab is born `Slab N` — the `${label} N` branch in floorplan-panel
+     is only reachable from a sidebar that is not the live UI. Change the
+     surface here and the label kept saying `Slab 3` for a lawn.
+
+     Only auto-generated names are rewritten. If someone has typed a real name
+     it survives, which is why this matches the pattern rather than always
+     overwriting. The trailing number is carried across so `Slab 3` becomes
+     `Grass 3`, not `Grass 1` colliding with an existing one.
+
+     Worth knowing: slab `name` does not cross the cloud-sync wire, so after a
+     reload the label falls back to `surfaceType` and reads "grass" in lower
+     case. Both spellings say the same thing, so this is cosmetic drift, not a
+     second bug to chase. */
+  const handleSurfaceChange = useCallback(
+    (s: { id: SlabSurfaceType; label: string }) => {
+      const updates: Partial<SlabNode> = { surfaceType: s.id };
+      const current = (node?.name ?? "").trim();
+      const auto = /^(slab|interior|patio|deck|driveway|garage|gravel|grass|wood)(?:\s+(\d+))?$/i;
+      const m = auto.exec(current);
+      if (!current || m) {
+        const base = s.id === "interior" ? "Slab" : s.label;
+        const n = m && m[2] ? m[2] : "";
+        updates.name = n ? `${base} ${n}` : base;
+      }
+      handleUpdate(updates);
+    },
+    [node, handleUpdate],
+  );
+
   const handleClose = useCallback(() => {
     setSelection({ selectedIds: [] });
     setEditingHole(null);
@@ -195,7 +229,7 @@ export function SlabPanel() {
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => handleUpdate({ surfaceType: s.id })}
+                  onClick={() => handleSurfaceChange(s)}
                   className={`rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
                     isActive
                       ? "border-amber-500/50 bg-amber-500/20 text-amber-100"
