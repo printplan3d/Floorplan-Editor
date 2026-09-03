@@ -108,6 +108,22 @@ type EditorState = {
   setGridSnapEnabled: (enabled: boolean) => void
   orthoEnabled: boolean
   setOrthoEnabled: (enabled: boolean) => void
+  // Ritn3D 2026-09-02 (D1): Finishes panel visibility. When true, the
+  // right-sidebar shows the FinishesPanel (per-surface finishes v2).
+  // Persisted through the same UI-preferences store as the other panel
+  // toggles.
+  isFinishesPanelOpen: boolean
+  setFinishesPanelOpen: (open: boolean) => void
+  // Ritn3D 2026-09-02 (D5): material picker drawer state. Opens with the
+  // slot the picker is picking for so the caller (region tool, scheme
+  // panel) can wire the result. `null` = closed.
+  materialPickerTarget:
+    | null
+    | { kind: 'global-wall'; schemeId: string }
+    | { kind: 'global-floor'; schemeId: string }
+    | { kind: 'region'; schemeId: string; regionId: string; slotHint: 'wall' | 'floor' }
+    | { kind: 'override'; schemeId: string; scope: string; slot: string }
+  setMaterialPickerTarget: (t: EditorState['materialPickerTarget']) => void
 }
 
 export type PersistedEditorUiState = Pick<
@@ -396,6 +412,12 @@ const useEditor = create<EditorState>()(
       setGridSnapEnabled: (enabled) => set({ gridSnapEnabled: enabled }),
       orthoEnabled: true,
       setOrthoEnabled: (enabled) => set({ orthoEnabled: enabled }),
+
+      // 2026-09-02: Finishes panel + material picker drawer.
+      isFinishesPanelOpen: false,
+      setFinishesPanelOpen: (open) => set({ isFinishesPanelOpen: open }),
+      materialPickerTarget: null,
+      setMaterialPickerTarget: (t) => set({ materialPickerTarget: t }),
     }),
     {
       name: 'pascal-editor-ui-preferences',
@@ -412,6 +434,7 @@ const useEditor = create<EditorState>()(
         isFloorplanOpen: state.isFloorplanOpen,
         gridSnapEnabled: state.gridSnapEnabled,
         orthoEnabled: state.orthoEnabled,
+        isFinishesPanelOpen: state.isFinishesPanelOpen,
       }),
     },
   ),

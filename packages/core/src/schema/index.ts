@@ -4,6 +4,24 @@ export { BaseNode, generateId, Material, nodeType, objectId } from './base'
 export { CameraSchema } from './camera'
 // Collections
 export { type Collection, type CollectionId, generateCollectionId } from './collections'
+// Finishes (per-surface finishes v2)
+export {
+  type FinishesState,
+  type MaterialId,
+  type Region,
+  type RegionId,
+  type RegionPolygonPoint,
+  type RegionTarget,
+  type RegionTargetFloor,
+  type RegionTargetWall,
+  type Scheme,
+  type SchemeId,
+  type WallSide,
+  generateRegionId,
+  generateSchemeId,
+  makeDefaultFinishes,
+  makeEmptyScheme,
+} from './finishes'
 export { BuildingNode } from './nodes/building'
 export { CeilingNode } from './nodes/ceiling'
 export { DoorNode, DoorSegment, DoorStyle } from './nodes/door'

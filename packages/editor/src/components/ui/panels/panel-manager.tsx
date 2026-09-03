@@ -5,7 +5,9 @@ import { useViewer } from '@ritn3d/viewer'
 import useEditor from '../../../store/use-editor'
 import { CeilingPanel } from './ceiling-panel'
 import { DoorPanel } from './door-panel'
+import { FinishesPanel } from './finishes-panel'
 import { ItemPanel } from './item-panel'
+import { MaterialPickerDrawer } from './material-picker-drawer'
 import { ReferencePanel } from './reference-panel'
 import { RoofPanel } from './roof-panel'
 import { RoofSegmentPanel } from './roof-segment-panel'
@@ -18,11 +20,24 @@ export function PanelManager() {
   const selectedIds = useViewer((s) => s.selection.selectedIds)
   const zoneId = useViewer((s) => s.selection.zoneId)
   const selectedReferenceId = useEditor((s) => s.selectedReferenceId)
+  const isFinishesPanelOpen = useEditor((s) => s.isFinishesPanelOpen)
   const nodes = useScene((s) => s.nodes)
+
+  const pickerDrawer = <MaterialPickerDrawer />
+
+  // 2026-09-02: Finishes panel is toggled independently of node
+  // selection — it lives on top of whichever selection panel is up.
+  // Rendered first so the picker drawer sits alongside it.
+  const finishesLayer = isFinishesPanelOpen
+    ? (<>
+        <FinishesPanel />
+        {pickerDrawer}
+      </>)
+    : null
 
   // Show reference panel if a reference is selected
   if (selectedReferenceId) {
-    return <ReferencePanel />
+    return <>{finishesLayer}<ReferencePanel /></>
   }
 
   // 2026-07-27: zones are selected via `selection.zoneId` (not
@@ -31,7 +46,7 @@ export function PanelManager() {
   if (zoneId) {
     const node = nodes[zoneId as AnyNodeId]
     if (node?.type === 'zone') {
-      return <ZonePanel />
+      return <>{finishesLayer}<ZonePanel /></>
     }
   }
 
@@ -42,26 +57,26 @@ export function PanelManager() {
     if (node) {
       switch (node.type) {
         case 'item':
-          return <ItemPanel />
+          return <>{finishesLayer}<ItemPanel /></>
         case 'roof':
-          return <RoofPanel />
+          return <>{finishesLayer}<RoofPanel /></>
         case 'roof-segment':
-          return <RoofSegmentPanel />
+          return <>{finishesLayer}<RoofSegmentPanel /></>
         case 'slab':
-          return <SlabPanel />
+          return <>{finishesLayer}<SlabPanel /></>
         case 'ceiling':
-          return <CeilingPanel />
+          return <>{finishesLayer}<CeilingPanel /></>
         case 'wall':
-          return <WallPanel />
+          return <>{finishesLayer}<WallPanel /></>
         case 'door':
-          return <DoorPanel />
+          return <>{finishesLayer}<DoorPanel /></>
         case 'window':
-          return <WindowPanel />
+          return <>{finishesLayer}<WindowPanel /></>
         case 'zone':
-          return <ZonePanel />
+          return <>{finishesLayer}<ZonePanel /></>
       }
     }
   }
 
-  return null
+  return finishesLayer
 }

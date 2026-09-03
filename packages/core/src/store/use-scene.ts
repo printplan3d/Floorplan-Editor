@@ -6,6 +6,15 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import { BuildingNode } from '../schema'
 import type { Collection, CollectionId } from '../schema/collections'
 import { generateCollectionId } from '../schema/collections'
+import {
+  type FinishesState,
+  type Region,
+  type RegionId,
+  type Scheme,
+  type SchemeId,
+  makeDefaultFinishes,
+  makeEmptyScheme,
+} from '../schema/finishes'
 import { LevelNode } from '../schema/nodes/level'
 import { SiteNode } from '../schema/nodes/site'
 import type { AnyNode, AnyNodeId } from '../schema/types'
@@ -67,11 +76,17 @@ export type SceneState = {
   // 4. Relational metadata — not nodes
   collections: Record<CollectionId, Collection>
 
+  // 5. Per-surface finishes (D2). Not nodes — parallel metadata that
+  // maps to Project.furniture_scene.schemes on the backend. Shape frozen
+  // in D:/Planprint3d Cursor/PER_SURFACE_FINISHES_STORAGE_SPEC.md.
+  finishes: FinishesState
+
   // Actions
   loadScene: () => void
   clearScene: () => void
   unloadScene: () => void
   setScene: (nodes: Record<AnyNodeId, AnyNode>, rootNodeIds: AnyNodeId[]) => void
+  setFinishes: (finishes: FinishesState) => void
 
   markDirty: (id: AnyNodeId) => void
   clearDirty: (id: AnyNodeId) => void
@@ -91,6 +106,24 @@ export type SceneState = {
   updateCollection: (id: CollectionId, data: Partial<Omit<Collection, 'id'>>) => void
   addToCollection: (id: CollectionId, nodeId: AnyNodeId) => void
   removeFromCollection: (id: CollectionId, nodeId: AnyNodeId) => void
+
+  // Finishes actions (D2). Non-destructive on legacy plans: a scene
+  // loaded with no `finishes` state gets a synthesised 'default' scheme
+  // via setScene / loadScene.
+  setActiveScheme: (id: SchemeId) => void
+  createScheme: (name: string, fromSchemeId?: SchemeId) => SchemeId
+  renameScheme: (id: SchemeId, name: string) => void
+  deleteScheme: (id: SchemeId) => void
+  setSchemeGlobalWall: (id: SchemeId, materialId: string | null) => void
+  setSchemeGlobalFloor: (id: SchemeId, materialId: string | null) => void
+  setSchemeOverride: (
+    id: SchemeId,
+    scope: string,      // "obj:<name>" or "room:<id>"
+    slot: string,       // "wall_interior" | "floor_default" | ...
+    materialId: string | null,
+  ) => void
+  upsertRegion: (schemeId: SchemeId, region: Region) => void
+  deleteRegion: (schemeId: SchemeId, regionId: RegionId) => void
 }
 
 // type PartializedStoreState = Pick<SceneState, 'rootNodeIds' | 'nodes'>;
@@ -114,6 +147,9 @@ const useScene: UseSceneStore = create<SceneState>()(
       // 4. Collections
       collections: {} as Record<CollectionId, Collection>,
 
+      // 5. Finishes (D2)
+      finishes: makeDefaultFinishes(),
+
       unloadScene: () => {
         // Clear temporal tracking to prevent memory leaks from stale node references
         prevPastLength = 0
@@ -125,6 +161,7 @@ const useScene: UseSceneStore = create<SceneState>()(
           rootNodeIds: [],
           dirtyNodes: new Set<AnyNodeId>(),
           collections: {},
+          finishes: makeDefaultFinishes(),
         })
       },
 
@@ -142,11 +179,27 @@ const useScene: UseSceneStore = create<SceneState>()(
           rootNodeIds,
           dirtyNodes: new Set<AnyNodeId>(),
           collections: {},
+          // Reset finishes on new scene load — the plan being loaded
+          // brings its own via setFinishes if it has any (called after
+          // setScene by the loader).
+          finishes: makeDefaultFinishes(),
         })
         // Mark all nodes as dirty to trigger re-validation
         Object.values(patchedNodes).forEach((node) => {
           get().markDirty(node.id)
         })
+      },
+
+      setFinishes: (finishes) => {
+        // Sanity: ensure `active` refers to an existing set; fall back
+        // to the first key, then to a fresh default.
+        const setsKeys = Object.keys(finishes.sets) as SchemeId[]
+        if (setsKeys.length === 0) {
+          set({ finishes: makeDefaultFinishes() })
+          return
+        }
+        const active = setsKeys.includes(finishes.active) ? finishes.active : setsKeys[0]!
+        set({ finishes: { active, sets: finishes.sets } })
       },
 
       loadScene: () => {
@@ -293,6 +346,129 @@ const useScene: UseSceneStore = create<SceneState>()(
           return { collections: nextCollections, nodes: nextNodes }
         })
       },
+
+      // ── Finishes actions (D2) ────────────────────────────────────────
+      // All mutations are immutable clones so React re-renders pick them
+      // up and the temporal middleware (undo/redo) can snapshot them.
+      // `finishes` is deliberately NOT in the temporal partialize list
+      // below in this first cut — undo/redo on regions is a v2 feature.
+
+      setActiveScheme: (id) => set((state) => {
+        if (!state.finishes.sets[id]) return state
+        return { finishes: { ...state.finishes, active: id } }
+      }),
+
+      createScheme: (name, fromSchemeId) => {
+        const state = get()
+        const source = fromSchemeId ? state.finishes.sets[fromSchemeId] : undefined
+        const cloned: Scheme = source
+          ? { ...source, name, regions: source.regions.map(r => ({ ...r })), overrides: { ...source.overrides } }
+          : makeEmptyScheme(name)
+        const newId = `scheme_${Math.random().toString(36).slice(2, 10)}` as SchemeId
+        set({
+          finishes: {
+            active: newId,
+            sets: { ...state.finishes.sets, [newId]: cloned },
+          },
+        })
+        return newId
+      },
+
+      renameScheme: (id, name) => set((state) => {
+        const s = state.finishes.sets[id]
+        if (!s) return state
+        return {
+          finishes: {
+            ...state.finishes,
+            sets: { ...state.finishes.sets, [id]: { ...s, name } },
+          },
+        }
+      }),
+
+      deleteScheme: (id) => set((state) => {
+        if (id === 'default') return state // can't delete the default
+        if (!state.finishes.sets[id]) return state
+        const nextSets = { ...state.finishes.sets }
+        delete nextSets[id]
+        const active = state.finishes.active === id
+          ? (Object.keys(nextSets)[0] as SchemeId ?? 'default')
+          : state.finishes.active
+        return { finishes: { active, sets: nextSets } }
+      }),
+
+      setSchemeGlobalWall: (id, materialId) => set((state) => {
+        const s = state.finishes.sets[id]
+        if (!s) return state
+        return {
+          finishes: {
+            ...state.finishes,
+            sets: { ...state.finishes.sets, [id]: { ...s, wall: materialId } },
+          },
+        }
+      }),
+
+      setSchemeGlobalFloor: (id, materialId) => set((state) => {
+        const s = state.finishes.sets[id]
+        if (!s) return state
+        return {
+          finishes: {
+            ...state.finishes,
+            sets: { ...state.finishes.sets, [id]: { ...s, floor: materialId } },
+          },
+        }
+      }),
+
+      setSchemeOverride: (id, scope, slot, materialId) => set((state) => {
+        const s = state.finishes.sets[id]
+        if (!s) return state
+        const nextOverrides = { ...s.overrides }
+        const scopeMap = { ...(nextOverrides[scope] || {}) }
+        if (materialId == null) {
+          delete scopeMap[slot]
+        } else {
+          scopeMap[slot] = materialId
+        }
+        if (Object.keys(scopeMap).length === 0) {
+          delete nextOverrides[scope]
+        } else {
+          nextOverrides[scope] = scopeMap
+        }
+        return {
+          finishes: {
+            ...state.finishes,
+            sets: { ...state.finishes.sets, [id]: { ...s, overrides: nextOverrides } },
+          },
+        }
+      }),
+
+      upsertRegion: (schemeId, region) => set((state) => {
+        const s = state.finishes.sets[schemeId]
+        if (!s) return state
+        const idx = s.regions.findIndex(r => r.id === region.id)
+        const nextRegions = idx >= 0
+          ? [...s.regions.slice(0, idx), region, ...s.regions.slice(idx + 1)]
+          : [...s.regions, region]
+        return {
+          finishes: {
+            ...state.finishes,
+            sets: { ...state.finishes.sets, [schemeId]: { ...s, regions: nextRegions } },
+          },
+        }
+      }),
+
+      deleteRegion: (schemeId, regionId) => set((state) => {
+        const s = state.finishes.sets[schemeId]
+        if (!s) return state
+        return {
+          finishes: {
+            ...state.finishes,
+            sets: {
+              ...state.finishes.sets,
+              [schemeId]: { ...s, regions: s.regions.filter(r => r.id !== regionId) },
+            },
+          },
+        }
+      }),
     }),
     {
       partialize: (state) => {

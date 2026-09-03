@@ -155,6 +155,11 @@ export function exportFloorPlanJSON(): object {
         floors,
         stairs: [],
         furniture: [],
+        // D6: per-surface finishes (schemes + regions). Empty when the
+        // user hasn't drawn anything — the backend synthesises a
+        // 'default' scheme from legacy Project.furniture_scene.textures
+        // so consumer projects without regions still render as before.
+        finishes: exportFinishes(),
         metadata: {
           unit: 'meters',
           scale: 1.0,
@@ -229,12 +234,39 @@ export function exportFloorPlanJSON(): object {
     floors,
     stairs: [],
     furniture: [],
+    finishes: exportFinishes(),
     metadata: {
       unit: 'meters',
       scale: 1.0,
       created_at: new Date().toISOString(),
       source: 'web_editor',
       version: '1.0',
+    },
+  }
+}
+
+/**
+ * Extract the per-surface finishes payload from useScene for
+ * embedding in the exported plan JSON (D6).
+ *
+ * Shape is a subset of what the backend expects on
+ * Project.furniture_scene.schemes — see
+ * PER_SURFACE_FINISHES_STORAGE_SPEC.md. Returned as-is; the backend
+ * mirror-copies it into furniture_scene during save.
+ */
+function exportFinishes(): object | undefined {
+  const { finishes } = useScene.getState()
+  if (!finishes) return undefined
+  // Skip when the scheme is a completely-empty default (fresh plan with
+  // no user interaction) — cleaner to omit the key entirely.
+  const anyRegions = Object.values(finishes.sets).some(s => s.regions.length > 0)
+  const anyOverrides = Object.values(finishes.sets).some(s => Object.keys(s.overrides).length > 0)
+  const anyGlobal = Object.values(finishes.sets).some(s => s.wall || s.floor)
+  if (!(anyRegions || anyOverrides || anyGlobal)) return undefined
+  return {
+    schemes: {
+      active: finishes.active,
+      sets: finishes.sets,
     },
   }
 }
