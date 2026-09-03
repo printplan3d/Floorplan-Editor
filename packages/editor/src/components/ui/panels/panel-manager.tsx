@@ -3,6 +3,7 @@
 import { type AnyNodeId, useScene } from '@ritn3d/core'
 import { useViewer } from '@ritn3d/viewer'
 import useEditor from '../../../store/use-editor'
+import { RegionDrawController } from '../../region-draw-controller'
 import { CeilingPanel } from './ceiling-panel'
 import { DoorPanel } from './door-panel'
 import { FinishesPanel } from './finishes-panel'
@@ -28,12 +29,15 @@ export function PanelManager() {
   // 2026-09-02: Finishes panel is toggled independently of node
   // selection — it lives on top of whichever selection panel is up.
   // Rendered first so the picker drawer sits alongside it.
-  const finishesLayer = isFinishesPanelOpen
-    ? (<>
-        <FinishesPanel />
-        {pickerDrawer}
-      </>)
-    : null
+  // RegionDrawController is always mounted so its event subscriptions
+  // survive panel-toggle cycles.
+  const finishesLayer = (
+    <>
+      <RegionDrawController />
+      {isFinishesPanelOpen && <FinishesPanel />}
+      {isFinishesPanelOpen && pickerDrawer}
+    </>
+  )
 
   // Show reference panel if a reference is selected
   if (selectedReferenceId) {

@@ -10,7 +10,13 @@
  * Companion: MaterialPickerDrawer for the actual material choice UI.
  */
 
-import { useScene, type Scheme, type SchemeId } from '@ritn3d/core'
+import {
+  generateRegionId,
+  useScene,
+  type Region,
+  type Scheme,
+  type SchemeId,
+} from '@ritn3d/core'
 import useEditor from '../../../store/use-editor'
 import { PanelWrapper } from './panel-wrapper'
 
@@ -21,9 +27,14 @@ export function FinishesPanel() {
   const renameScheme = useScene((s) => s.renameScheme)
   const deleteScheme = useScene((s) => s.deleteScheme)
   const deleteRegion = useScene((s) => s.deleteRegion)
+  const upsertRegion = useScene((s) => s.upsertRegion)
 
   const setPanelOpen = useEditor((s) => s.setFinishesPanelOpen)
   const setPickerTarget = useEditor((s) => s.setMaterialPickerTarget)
+  const tool = useEditor((s) => s.tool)
+  const setTool = useEditor((s) => s.setTool)
+  const draft = useEditor((s) => s.regionDraft)
+  const cancelRegionDraw = useEditor((s) => s.cancelRegionDraw)
 
   const activeId = finishes.active
   const active: Scheme | undefined = finishes.sets[activeId]
@@ -138,6 +149,79 @@ export function FinishesPanel() {
           )}
         </div>
 
+        {/* Region tool + draft state (D3) */}
+        <div>
+          <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-ink/60">
+            Region tool
+          </label>
+          {tool !== 'region' && !draft && (
+            <button
+              className="w-full rounded border border-hair bg-paper px-2 py-1.5 text-[12px] hover:border-ink/30"
+              onClick={() => setTool('region')}
+              type="button"
+            >
+              Draw a region on a wall
+            </button>
+          )}
+          {tool === 'region' && !draft && (
+            <p className="text-[11px] text-ink/60">
+              Click a wall in the 3D preview to start drawing. Curved
+              walls are not supported yet.
+            </p>
+          )}
+          {draft && (
+            <div className="rounded border border-hair bg-paper p-2">
+              <div className="text-[11px]">
+                Drawing on <strong>{draft.wallId}</strong> ({draft.side}),{' '}
+                <strong>{draft.points.length}</strong> point
+                {draft.points.length === 1 ? '' : 's'}.
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  className="flex-1 rounded bg-ink px-2 py-1 text-[11px] text-paper hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={draft.points.length < 3}
+                  onClick={() => {
+                    const region: Region = {
+                      id: generateRegionId(),
+                      target: {
+                        type: 'wall',
+                        wall_id: draft.wallId,
+                        side: draft.side,
+                      },
+                      polygon: draft.points.slice(),
+                      material: '',
+                    }
+                    upsertRegion(activeId, region)
+                    cancelRegionDraw()
+                    setTool(null)
+                    // Immediately open the picker for the fresh region
+                    // so the user picks a material without a detour.
+                    setPickerTarget({
+                      kind: 'region',
+                      schemeId: activeId,
+                      regionId: region.id,
+                      slotHint: 'wall',
+                    })
+                  }}
+                  type="button"
+                >
+                  Finish region ({draft.points.length} pts)
+                </button>
+                <button
+                  className="rounded border border-hair px-2 py-1 text-[11px] hover:bg-ink/5"
+                  onClick={() => {
+                    cancelRegionDraw()
+                    setTool(null)
+                  }}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Regions list */}
         <div>
           <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-ink/60">
@@ -145,8 +229,8 @@ export function FinishesPanel() {
           </label>
           {active.regions.length === 0 ? (
             <p className="text-[11px] text-ink/50">
-              No accent regions yet. Add one with the Region tool in the
-              3D preview (D3, coming next).
+              No accent regions yet. Draw one with the Region tool
+              above.
             </p>
           ) : (
             <ul className="space-y-1">
@@ -155,16 +239,24 @@ export function FinishesPanel() {
                   className="flex items-start justify-between gap-2 rounded border border-hair bg-paper p-1.5"
                   key={r.id}
                 >
-                  <div className="min-w-0 flex-1">
+                  <button
+                    className="min-w-0 flex-1 text-left hover:opacity-75"
+                    onClick={() => setPickerTarget({
+                      kind: 'region', schemeId: activeId, regionId: r.id,
+                      slotHint: r.target.type === 'floor' ? 'floor' : 'wall',
+                    })}
+                    type="button"
+                    title="Click to change material"
+                  >
                     <div className="truncate text-[11px] font-medium">
                       {r.target.type === 'wall'
                         ? `Wall ${r.target.wall_id} · ${r.target.side}`
                         : `Floor L${r.target.level}${r.target.region_id ? ` · ${r.target.region_id}` : ''}`}
                     </div>
                     <div className="text-[10px] text-ink/60">
-                      {r.polygon.length} pts · {r.material}
+                      {r.polygon.length} pts · {r.material || <span className="italic text-ink/40">pick material</span>}
                     </div>
-                  </div>
+                  </button>
                   <button
                     className="rounded px-1.5 py-0.5 text-[10px] text-ink/50 hover:bg-ink/5 hover:text-ink"
                     onClick={() => deleteRegion(activeId, r.id)}

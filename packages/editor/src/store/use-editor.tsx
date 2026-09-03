@@ -36,6 +36,11 @@ export type StructureTool =
   | 'zone'
   | 'window'
   | 'door'
+  // Ritn3D 2026-09-02 (D3): region-draw tool. Activate → click a wall
+  // → click points on its face to build a polygon → double-click to
+  // close. Straight walls only (D7 guard). Deferred selection-side of
+  // regions handled by the FinishesPanel's list.
+  | 'region'
 
 // Furnish mode tools (items and decoration)
 export type FurnishTool = 'item'
@@ -124,6 +129,21 @@ type EditorState = {
     | { kind: 'region'; schemeId: string; regionId: string; slotHint: 'wall' | 'floor' }
     | { kind: 'override'; schemeId: string; scope: string; slot: string }
   setMaterialPickerTarget: (t: EditorState['materialPickerTarget']) => void
+
+  // Ritn3D 2026-09-02 (D3): region-draw draft state. Set when the user
+  // first-clicks a wall in the region tool; extended by subsequent
+  // clicks; committed on double-click (or a Finish button in the panel).
+  // Points are wall-local (along, up) in metres.
+  regionDraft:
+    | null
+    | {
+        wallId: string
+        side: 'interior' | 'exterior'
+        points: [number, number][]
+      }
+  startRegionDraw: (wallId: string, side: 'interior' | 'exterior') => void
+  addRegionPoint: (along: number, up: number) => void
+  cancelRegionDraw: () => void
 }
 
 export type PersistedEditorUiState = Pick<
@@ -418,6 +438,17 @@ const useEditor = create<EditorState>()(
       setFinishesPanelOpen: (open) => set({ isFinishesPanelOpen: open }),
       materialPickerTarget: null,
       setMaterialPickerTarget: (t) => set({ materialPickerTarget: t }),
+
+      // 2026-09-02 (D3): region-draw draft state.
+      regionDraft: null,
+      startRegionDraw: (wallId, side) =>
+        set({ regionDraft: { wallId, side, points: [] } }),
+      addRegionPoint: (along, up) => set((state) => {
+        const d = state.regionDraft
+        if (!d) return state
+        return { regionDraft: { ...d, points: [...d.points, [along, up]] } }
+      }),
+      cancelRegionDraw: () => set({ regionDraft: null }),
     }),
     {
       name: 'pascal-editor-ui-preferences',
