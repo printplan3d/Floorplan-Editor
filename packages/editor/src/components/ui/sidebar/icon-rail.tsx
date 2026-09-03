@@ -131,6 +131,17 @@ const OrthoIconNode = (
   </svg>
 )
 
+// Ritn3D 2026-09-02: Finishes icon — a paint roller. Recognisable
+// at 18px and distinct from the Wall / Room / Grid icons in the rail.
+const FinishesIconNode = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <rect x="3" y="5" width="14" height="5" rx="1" stroke="currentColor" strokeWidth="1.6"/>
+    <path d="M17 7.5 H20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+    <path d="M12 10 V13 H10 V21" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+    <rect x="7" y="13" width="6" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.6" fill="currentColor" fillOpacity="0.15"/>
+  </svg>
+)
+
 export function IconRail({ activePanel, onPanelChange, appMenuButton, className }: IconRailProps) {
   const theme = useViewer((state) => state.theme)
   const setTheme = useViewer((state) => state.setTheme)
@@ -143,6 +154,8 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
   const setGridSnapEnabled = useEditor((s) => s.setGridSnapEnabled)
   const orthoEnabled = useEditor((s) => s.orthoEnabled)
   const setOrthoEnabled = useEditor((s) => s.setOrthoEnabled)
+  const isFinishesPanelOpen = useEditor((s) => s.isFinishesPanelOpen)
+  const setFinishesPanelOpen = useEditor((s) => s.setFinishesPanelOpen)
   const { canUndo, canRedo, undo, redo } = useUndoRedo()
   const [mounted, setMounted] = useState(false)
   const traceInputRef = useRef<HTMLInputElement>(null)
@@ -364,6 +377,18 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         disabled={!canRedo}
         label="Redo"
         iconNode={RedoIconNode}
+      />
+
+      {/* Ritn3D 2026-09-02: Finishes panel toggle. Opens the Finishes
+          sidebar (per-surface finishes v2 — schemes, per-object/room
+          overrides, drawn regions). Panel stays open across selection
+          changes; click the same icon (or the panel's X) to dismiss. */}
+      <div className="my-0.5 h-px w-full bg-hair" />
+      <RailButton
+        isActive={isFinishesPanelOpen}
+        onClick={() => setFinishesPanelOpen(!isFinishesPanelOpen)}
+        label="Finishes"
+        iconNode={FinishesIconNode}
       />
 
       {/* Divider between tools and utility icons below */}
