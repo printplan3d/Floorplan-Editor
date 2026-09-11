@@ -680,18 +680,23 @@ export function IconRail({
   // creates a GuideNode from the chosen image on the active level.
   // Previously it opened the Site panel which required extra clicks.
   const handleTraceFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("[trace-dbg] handleTraceFile entered");
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file) return;
+    if (!file) { console.log("[trace-dbg] no file — bail"); return; }
+    console.log("[trace-dbg] file", { name: file.name, type: file.type, size: file.size });
     const isImage = file.type.startsWith("image/");
     if (!isImage) {
+      console.log("[trace-dbg] not image — routing to site panel for PDF");
       // Fall back to opening the site panel for PDF uploads -- that
       // path already handles pdf.js rendering.
       onPanelChange("site");
       return;
     }
     const reader = new FileReader();
+    reader.onerror = () => console.log("[trace-dbg] FileReader error", reader.error);
     reader.onload = () => {
+      console.log("[trace-dbg] reader loaded, dataUrl len =", (reader.result as string)?.length);
       const dataUrl = reader.result as string;
       const state = useScene.getState() as any;
       const nodes = state.nodes as Record<string, any>;
@@ -705,12 +710,15 @@ export function IconRail({
          The Calibrate button below already scopes to activeLevelId; this is
          the one place that did not. */
       const activeId = useViewer.getState().selection.levelId;
+      const activeNode = activeId ? nodes[activeId] : null;
+      console.log("[trace-dbg] activeLevelId =", activeId, "activeNodeType =", activeNode?.type);
       const level =
         (activeId && nodes[activeId]?.type === "level"
           ? nodes[activeId]
           : null) ??
         Object.values(nodes).find((n: any) => n.type === "level");
-      if (!level) return;
+      console.log("[trace-dbg] chosen level =", level?.id, "level.level =", (level as any)?.level);
+      if (!level) { console.log("[trace-dbg] NO level found — bail"); return; }
       const guide = {
         id: generateId("guide"),
         type: "guide" as const,
@@ -722,7 +730,26 @@ export function IconRail({
         scale: 5,
         opacity: 40,
       };
-      state.createNode(guide, level.id);
+      console.log("[trace-dbg] about to createNode", { guideId: guide.id, parentId: guide.parentId });
+      try {
+        state.createNode(guide, level.id);
+        console.log("[trace-dbg] createNode returned; nodes[guide.id] =",
+          !!useScene.getState().nodes[guide.id],
+          "level.children now =", (useScene.getState().nodes[level.id] as any)?.children);
+      } catch (err) {
+        console.error("[trace-dbg] createNode THREW", err);
+      }
+      // Check again 500ms later — did anything wipe it?
+      setTimeout(() => {
+        const still = useScene.getState().nodes[guide.id];
+        console.log("[trace-dbg] +500ms guide still present?", !!still, "url prefix =",
+          still ? String((still as any).url).slice(0, 30) : "(gone)");
+      }, 500);
+      setTimeout(() => {
+        const still = useScene.getState().nodes[guide.id];
+        console.log("[trace-dbg] +2000ms guide still present?", !!still, "url prefix =",
+          still ? String((still as any).url).slice(0, 30) : "(gone)");
+      }, 2000);
       // 2026-07-28: auto-start scale calibration right after upload.
       // Without this, first-time users don't discover the calibrate
       // flow and their trace ends up at editor-default scale (1 unit
