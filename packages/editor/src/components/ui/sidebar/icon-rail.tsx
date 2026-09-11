@@ -680,24 +680,25 @@ export function IconRail({
   // creates a GuideNode from the chosen image on the active level.
   // Previously it opened the Site panel which required extra clicks.
   const handleTraceFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log("[trace-dbg] handleTraceFile entered");
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file) { console.log("[trace-dbg] no file — bail"); return; }
-    console.log("[trace-dbg] file", { name: file.name, type: file.type, size: file.size });
+    if (!file) return;
     const isImage = file.type.startsWith("image/");
-    if (!isImage) {
-      console.log("[trace-dbg] not image — routing to site panel for PDF");
-      // Fall back to opening the site panel for PDF uploads -- that
-      // path already handles pdf.js rendering.
+    const isPdf =
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf");
+    if (!isImage && !isPdf) {
+      // Anything else falls back to the Site panel where the user can
+      // read a proper "invalid file" error next to the upload button.
       onPanelChange("site");
       return;
     }
-    const reader = new FileReader();
-    reader.onerror = () => console.log("[trace-dbg] FileReader error", reader.error);
-    reader.onload = () => {
-      console.log("[trace-dbg] reader loaded, dataUrl len =", (reader.result as string)?.length);
-      const dataUrl = reader.result as string;
+
+    /* Commit a fresh dataUrl (image or a PDF page rendered to a PNG) as a
+       GuideNode on the level the user is looking at. Same shape the
+       site-panel upload flow produces, so scene lifecycle (autosave,
+       dehydrate, rehydrate) treats them identically. */
+    const commitGuide = (dataUrl: string) => {
       const state = useScene.getState() as any;
       const nodes = state.nodes as Record<string, any>;
       /* The level you are LOOKING at, not the first one in the map.
@@ -710,15 +711,12 @@ export function IconRail({
          The Calibrate button below already scopes to activeLevelId; this is
          the one place that did not. */
       const activeId = useViewer.getState().selection.levelId;
-      const activeNode = activeId ? nodes[activeId] : null;
-      console.log("[trace-dbg] activeLevelId =", activeId, "activeNodeType =", activeNode?.type);
       const level =
         (activeId && nodes[activeId]?.type === "level"
           ? nodes[activeId]
           : null) ??
         Object.values(nodes).find((n: any) => n.type === "level");
-      console.log("[trace-dbg] chosen level =", level?.id, "level.level =", (level as any)?.level);
-      if (!level) { console.log("[trace-dbg] NO level found — bail"); return; }
+      if (!level) return;
       const guide = {
         id: generateId("guide"),
         type: "guide" as const,
@@ -730,26 +728,7 @@ export function IconRail({
         scale: 5,
         opacity: 40,
       };
-      console.log("[trace-dbg] about to createNode", { guideId: guide.id, parentId: guide.parentId });
-      try {
-        state.createNode(guide, level.id);
-        console.log("[trace-dbg] createNode returned; nodes[guide.id] =",
-          !!useScene.getState().nodes[guide.id],
-          "level.children now =", (useScene.getState().nodes[level.id] as any)?.children);
-      } catch (err) {
-        console.error("[trace-dbg] createNode THREW", err);
-      }
-      // Check again 500ms later — did anything wipe it?
-      setTimeout(() => {
-        const still = useScene.getState().nodes[guide.id];
-        console.log("[trace-dbg] +500ms guide still present?", !!still, "url prefix =",
-          still ? String((still as any).url).slice(0, 30) : "(gone)");
-      }, 500);
-      setTimeout(() => {
-        const still = useScene.getState().nodes[guide.id];
-        console.log("[trace-dbg] +2000ms guide still present?", !!still, "url prefix =",
-          still ? String((still as any).url).slice(0, 30) : "(gone)");
-      }, 2000);
+      state.createNode(guide, level.id);
       // 2026-07-28: auto-start scale calibration right after upload.
       // Without this, first-time users don't discover the calibrate
       // flow and their trace ends up at editor-default scale (1 unit
@@ -759,6 +738,42 @@ export function IconRail({
         emitter.emit("floorplan:calibrate-scale" as any, { guideId: guide.id });
       }, 200);
     };
+
+    if (isPdf) {
+      /* PDF path used to bail out of this handler entirely
+         (`onPanelChange("site"); return;`) and just OPEN the site panel,
+         which looked like "nothing happens" on any level except the ground
+         floor — where the panel is often already expanded so the user
+         re-uploaded from there without thinking. Render page 1 to a PNG in
+         the same shape the site-panel LevelReferences already does, and
+         commit the guide from here directly. Same idempotent contract as
+         the image branch. */
+      (async () => {
+        try {
+          const { pdfFileToImageDataUrl } = await import(
+            "./../../../lib/pdf-to-image"
+          );
+          const { dataUrl, totalPages } = await pdfFileToImageDataUrl(file);
+          if (totalPages > 1) {
+            // Page picker is a planned follow-up; log so it isn't silent.
+            console.info(
+              `[ritn3d] PDF has ${totalPages} pages; rendered page 1 only. ` +
+                "Page picker is a planned follow-up.",
+            );
+          }
+          commitGuide(dataUrl);
+        } catch (err) {
+          console.warn("[ritn3d] PDF trace upload failed", err);
+          // Punt to the site panel so the user sees an inline error
+          // rather than a silent no-op.
+          onPanelChange("site");
+        }
+      })();
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => commitGuide(reader.result as string);
     reader.readAsDataURL(file);
   };
 
