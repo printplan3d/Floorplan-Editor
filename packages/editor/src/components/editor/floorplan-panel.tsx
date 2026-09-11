@@ -7045,7 +7045,18 @@ export function FloorplanPanel() {
          double-click/Enter through handleSlabPlacementConfirm. It was
          originally only on the first, so closing a cut the other way drew a
          second slab on top of the floor instead of opening it. One choke
-         point, one behaviour. */
+         point, one behaviour.
+
+         2026-09-12: staying in cut mode after commit so a second, third,
+         nth hole can be drawn back-to-back without re-arming through the
+         slab panel. Previously the commit did setCuttingSlabId(null) +
+         setMode('select') + setTool(null), which meant one Cut floor
+         click = at most one hole — carving three light-well holes in a
+         mezzanine slab required three trips to the panel. Exit paths
+         still cover every intended way out: switching to any non-slab
+         tool clears cuttingSlabId (see use-editor.tsx setTool), and
+         Escape mid-draft cancels the pending polygon the same as it
+         does for a fresh slab draw. */
       const cutting = useEditor.getState().cuttingSlabId;
       if (cutting) {
         const slab = slabById.get(cutting as SlabNode["id"]);
@@ -7059,9 +7070,6 @@ export function FloorplanPanel() {
           setSelection({ selectedIds: [slab.id] });
           sfxEmitter.emit("sfx:structure-build");
         }
-        useEditor.getState().setCuttingSlabId(null);
-        useEditor.getState().setMode("select");
-        useEditor.getState().setTool(null);
         return null;
       }
 

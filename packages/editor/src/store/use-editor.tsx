@@ -352,7 +352,21 @@ const useEditor = create<EditorState>()(
         }
       },
       tool: DEFAULT_PERSISTED_EDITOR_UI_STATE.tool,
-      setTool: (tool) => set({ tool }),
+      setTool: (tool) => {
+        /* Disarm the "cut floor" mode when the user switches to any tool
+           other than the slab tool. Cut floor uses the slab tool as its
+           polygon drafter — so staying on 'slab' keeps the current cut
+           session alive, which is how the user can carve several holes
+           in one slab back-to-back. Switching to Wall / Door / Window /
+           Select / etc. was previously an escape hatch that leaked: the
+           next polygon they drew became a hole in the old slab instead
+           of a new floor. Fixed here so tool changes are the natural
+           way out of cut mode. */
+        if (tool !== 'slab' && get().cuttingSlabId) {
+          set({ cuttingSlabId: null })
+        }
+        set({ tool })
+      },
       structureLayer: DEFAULT_PERSISTED_EDITOR_UI_STATE.structureLayer,
       setStructureLayer: (layer) => {
         const { mode } = get()
