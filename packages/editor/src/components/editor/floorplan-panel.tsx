@@ -4941,6 +4941,42 @@ export function FloorplanPanel() {
     return () => window.removeEventListener("keydown", onKey);
   }, [calibration]);
 
+  // R rotates a selected roof segment 90° — swaps width and depth so
+  // the ridge lands on the perpendicular axis. Simplest possible
+  // ridge-direction toggle until the properties panel ships. Only
+  // fires when EXACTLY ONE roof-segment is selected and no input
+  // element has focus (so typing R in a name field still types R).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "r" && e.key !== "R") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      if (selectedIds.length !== 1) return;
+      const nodes = useScene.getState().nodes;
+      const seg = nodes[selectedIds[0] as AnyNodeId] as any;
+      if (!seg || seg.type !== "roof-segment") return;
+      e.preventDefault();
+      // Swap width / depth. Rectangle geometry unchanged from above,
+      // ridge_direction flips because it's derived from width vs depth
+      // in the export/translator chain. Rotation stays 0 so the
+      // rectangle in the plan doesn't visibly turn; only the ridge does.
+      useScene.getState().updateNode(seg.id, {
+        width: seg.depth,
+        depth: seg.width,
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedIds]);
+
   // Scale every plan coordinate by k, about the world origin.
   //
   // One shared origin, never per-wall: scaling each wall about its own centre
