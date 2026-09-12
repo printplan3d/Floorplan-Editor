@@ -356,6 +356,14 @@ export function exportFloorPlanJSON(): object {
           // (slate, terracotta, metal, shingle, flat). Unknown values
           // fall back to shingle in the pipeline parser.
           material: rs.material ?? 'slate',
+          // Explicit ridge axis when set (from the R shortcut). When
+          // 'auto' (default) the translator picks by width>=depth like
+          // before. Sending it here lets the pipeline honour a user's
+          // deliberate direction even after later dimension edits.
+          ridge_axis:
+            (rs as any).ridgeAxis && (rs as any).ridgeAxis !== 'auto'
+              ? (rs as any).ridgeAxis
+              : undefined,
           // Polygon in plan (x, y) — the pipeline reads these as metres.
           polygon: polygonWorld,
           // Editor's wallHeight is the parapet UNDER the roof; base_z is

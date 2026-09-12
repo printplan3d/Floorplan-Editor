@@ -170,6 +170,11 @@ export interface CanonicalRoof {
   wall_height: number;
   roof_height: number;
   overhang?: number;
+  // Optional explicit ridge axis — 'auto' | 'east-west' | 'north-south'.
+  // Absent-or-'auto' means the load side falls back to the width>=depth
+  // heuristic that governed pre-2026-09-12 saves; a real value survives
+  // any later width/depth edit.
+  ridge_axis?: string;
 }
 export interface CanonicalScene {
   walls: CanonicalWall[];
@@ -453,6 +458,9 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
           wall_height: seg.wallHeight ?? 0,
           roof_height: seg.roofHeight ?? 2.5,
           overhang: seg.overhang ?? 0.3,
+          ...((seg as any).ridgeAxis && (seg as any).ridgeAxis !== "auto"
+            ? { ridge_axis: (seg as any).ridgeAxis }
+            : {}),
         });
       }
       // Suppress the unused-var warning for groupPos — it's kept in case
@@ -855,6 +863,9 @@ export function canonicalToSceneGraph(
         roofHeight:
           typeof s.roof_height === "number" ? s.roof_height : 2.5,
         overhang: typeof s.overhang === "number" ? s.overhang : 0.3,
+        ...(s.ridge_axis === "east-west" || s.ridge_axis === "north-south"
+          ? { ridgeAxis: s.ridge_axis }
+          : {}),
       });
       segNodes.push(seg);
     }

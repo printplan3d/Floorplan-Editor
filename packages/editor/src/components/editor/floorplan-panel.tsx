@@ -4964,14 +4964,19 @@ export function FloorplanPanel() {
       const seg = nodes[selectedIds[0] as AnyNodeId] as any;
       if (!seg || seg.type !== "roof-segment") return;
       e.preventDefault();
-      // Swap width / depth. Rectangle geometry unchanged from above,
-      // ridge_direction flips because it's derived from width vs depth
-      // in the export/translator chain. Rotation stays 0 so the
-      // rectangle in the plan doesn't visibly turn; only the ridge does.
-      useScene.getState().updateNode(seg.id, {
-        width: seg.depth,
-        depth: seg.width,
-      });
+      // Toggle the explicit ridgeAxis. Was 'auto' (derived from
+      // width>=depth) → force it to whichever axis it currently is NOT.
+      // Adjusting width/depth later no longer flips the ridge back
+      // automatically. Rectangle stays in place; only the ridge line
+      // flips.
+      const width = Number(seg.width ?? 8);
+      const depth = Number(seg.depth ?? 6);
+      const cur =
+        seg.ridgeAxis === 'east-west' || seg.ridgeAxis === 'north-south'
+          ? (seg.ridgeAxis as 'east-west' | 'north-south')
+          : (width >= depth ? 'east-west' : 'north-south');
+      const next = cur === 'east-west' ? 'north-south' : 'east-west';
+      useScene.getState().updateNode(seg.id, { ridgeAxis: next });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

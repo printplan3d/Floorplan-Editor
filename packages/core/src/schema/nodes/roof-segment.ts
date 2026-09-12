@@ -23,6 +23,11 @@ export const RoofSegmentNode = BaseNode.extend({
   rotation: z.number().default(0),
   // Roof shape type
   roofType: RoofType.default('gable'),
+  // Which axis the ridge runs along, INDEPENDENT of width/depth. Set
+  // explicitly so a later width/depth edit doesn't silently flip it
+  // to whichever axis is currently longer. "auto" keeps the old
+  // width>=depth heuristic for anything the user hasn't touched.
+  ridgeAxis: z.enum(['auto', 'east-west', 'north-south']).default('auto'),
   // Material (drives the manifest slot the viewer swaps in)
   material: RoofMaterial.default('slate'),
   // Footprint dimensions
