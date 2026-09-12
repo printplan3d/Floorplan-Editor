@@ -597,6 +597,7 @@ export function canonicalToSceneGraph(
       "rooms",
       "stairs",
       "slabs",
+      "roofs",
     ]) {
       for (const id of (f?.[key] ?? []) as string[]) {
         levelOfCanonicalId.set(String(id), lvl);
