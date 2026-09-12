@@ -6,6 +6,8 @@ import {
   DEFAULT_WALL_THICKNESS,
   type DoorNode,
   getStairFootprint,
+  type RoofNode,
+  type RoofSegmentNode,
   type StairNode,
   type WallNode,
   type WindowNode,
@@ -49,6 +51,7 @@ export function exportFloorPlanJSON(): object {
   const allRooms: any[] = [];
   const allSlabs: any[] = [];
   const allStairs: any[] = [];
+  const allRoofs: any[] = [];
   /** Height of everything below this level — i.e. where this floor starts. */
   let cumulativeElevation = 0;
 
@@ -63,6 +66,8 @@ export function exportFloorPlanJSON(): object {
     const children = (level.children || [])
       .map((id: string) => nodes[id as AnyNodeId])
       .filter(Boolean);
+
+    const levelRoofs: any[] = [];
 
     for (const child of children) {
       if (child.type === "wall") {
@@ -306,6 +311,66 @@ export function exportFloorPlanJSON(): object {
        floor 2 on top of floor 1 instead of through it. */
     const levelHeight = stairLevelHeight;
 
+    /* Roofs — each roof group on the level flattens to its segments; each
+       segment maps to one entry in `roof.masses[]` for the pipeline. Two
+       coordinate hops: segment position is LOCAL to the RoofNode group,
+       and the group itself has a position/rotation. Compose them into
+       world coordinates here so the translator sees plain polygons. */
+    for (const child of children) {
+      if (child.type !== "roof") continue;
+      const roof = child as RoofNode;
+      const segChildren = (roof.children || [])
+        .map((id: string) => nodes[id as AnyNodeId])
+        .filter(Boolean);
+      for (const seg of segChildren) {
+        if (!seg || seg.type !== "roof-segment") continue;
+        const rs = seg as RoofSegmentNode;
+        // World-space center of the segment: rotate the segment's local
+        // XZ offset by the group rotation, then translate by the group.
+        const cosG = Math.cos(roof.rotation);
+        const sinG = Math.sin(roof.rotation);
+        const worldCx = roof.position[0] + rs.position[0] * cosG - rs.position[2] * sinG;
+        const worldCz = roof.position[2] + rs.position[0] * sinG + rs.position[2] * cosG;
+        // Absolute rotation of the segment about Y (radians).
+        const worldRot = roof.rotation + rs.rotation;
+        // Rectangle corners in world XZ. flipX applied so the polygon
+        // lands in the same frame walls do (mobile parity — the same
+        // reflection every other geometry gets).
+        const w2 = rs.width / 2;
+        const d2 = rs.depth / 2;
+        const local: [number, number][] = [
+          [-w2, -d2], [w2, -d2], [w2, d2], [-w2, d2],
+        ];
+        const cosR = Math.cos(worldRot);
+        const sinR = Math.sin(worldRot);
+        const polygonWorld: [number, number][] = local.map(([lx, lz]) => {
+          const wx = worldCx + lx * cosR - lz * sinR;
+          const wz = worldCz + lx * sinR + lz * cosR;
+          return flipX([wx, wz]);
+        });
+        levelRoofs.push({
+          id: rs.id,
+          roof_id: roof.id,
+          kind: rs.roofType, // one of hip/gable/shed/gambrel/dutch/mansard/flat
+          // Polygon in plan (x, y) — the pipeline reads these as metres.
+          polygon: polygonWorld,
+          // Editor's wallHeight is the parapet UNDER the roof; base_z is
+          // level elevation + that parapet (the eave line).
+          wall_height: rs.wallHeight,
+          // roofHeight is the peak rise above the eave; pipeline needs
+          // pitch. Peak-to-eave distance for a rectangle roof depends on
+          // kind: hip/gable use min(width, depth)/2, shed uses depth.
+          // Emit both so the translator can pick.
+          roof_height: rs.roofHeight,
+          width: rs.width,
+          depth: rs.depth,
+          overhang: rs.overhang,
+          // Multi-mass CSG picks up any other segments as-is; no
+          // per-segment material yet (editor UI to add).
+        });
+      }
+    }
+
     floors.push({
       id: level.id,
       level: level.level ?? 0,
@@ -318,6 +383,7 @@ export function exportFloorPlanJSON(): object {
       rooms: levelRooms.map((r: any) => r.id),
       slabs: levelSlabs.map((s: any) => s.id),
       stairs: levelStairs.map((s: any) => s.id),
+      roofs: levelRoofs.map((r: any) => r.id),
     });
     cumulativeElevation += levelHeight;
 
@@ -334,6 +400,7 @@ export function exportFloorPlanJSON(): object {
     allRooms.push(...levelRooms);
     allSlabs.push(...levelSlabs);
     allStairs.push(...levelStairs);
+    allRoofs.push(...levelRoofs);
   }
 
   return {
@@ -347,6 +414,7 @@ export function exportFloorPlanJSON(): object {
     slabs: allSlabs,
     floors,
     stairs: allStairs,
+    roofs: allRoofs,
     furniture: [],
     metadata: {
       unit: "meters",
