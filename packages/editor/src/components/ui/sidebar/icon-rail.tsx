@@ -286,6 +286,17 @@ const MINIMAL_TOOLS: {
     icon: "/icons/floor.png",
     hint: "Each level already has its floor. Use this to add another — a balcony, portico or sun shade beyond the walls.",
   },
+  // Roof segments. RoofTool + RoofNode/RoofSegmentNode + RoofSystem have
+  // been in place; the tool was reachable from the type but never listed
+  // on the rail, so the DFY workflow had no way to place one until now.
+  // Clicking pickTool('roof') puts the editor into structure/build/roof;
+  // ToolManager mounts RoofTool inside the Viewer for the draw + drag.
+  {
+    id: "roof",
+    label: "Roof",
+    icon: "/icons/roof.png",
+    hint: "Click and drag a rectangle. Type + pitch + material live in the properties panel after placement.",
+  },
 ];
 
 // Ritn3D 2026-07-19: Select-mode icon (arrow cursor). Distinct from
