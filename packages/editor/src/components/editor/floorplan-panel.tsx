@@ -4664,66 +4664,58 @@ export function FloorplanPanel() {
         .filter((node): node is GuideNode => node?.type === "guide");
     }),
   );
-  // Roof groups on this level, each flattened to its RoofSegmentNode
-  // children so the 2D layer can render one rectangle per segment.
-  const roofRects = useScene(
-    useShallow((state) => {
-      if (!levelId) return [] as Array<{
-        roofId: string;
-        segId: string;
-        cx: number;
-        cz: number;
-        width: number;
-        depth: number;
-        rotation: number;
-        roofType: string;
-        material: string;
-      }>;
-      const lvl = state.nodes[levelId];
-      if (!lvl || lvl.type !== "level") return [];
-      const rects: Array<{
-        roofId: string;
-        segId: string;
-        cx: number;
-        cz: number;
-        width: number;
-        depth: number;
-        rotation: number;
-        roofType: string;
-        material: string;
-      }> = [];
-      for (const childId of lvl.children) {
-        const roof = state.nodes[childId];
-        if (!roof || roof.type !== "roof") continue;
-        const gx = roof.position[0];
-        const gz = roof.position[2];
-        const grot = roof.rotation;
-        for (const segId of roof.children ?? []) {
-          const seg = state.nodes[segId as AnyNodeId];
-          if (!seg || seg.type !== "roof-segment") continue;
-          // Compose group + segment position (segment position is local).
-          const cos = Math.cos(grot);
-          const sin = Math.sin(grot);
-          const lx = seg.position[0];
-          const lz = seg.position[2];
-          const cx = gx + lx * cos - lz * sin;
-          const cz = gz + lx * sin + lz * cos;
-          rects.push({
-            roofId: roof.id,
-            segId: seg.id,
-            cx,
-            cz,
-            width: seg.width,
-            depth: seg.depth,
-            rotation: grot + seg.rotation,
-            roofType: seg.roofType,
-            material: (seg as any).material ?? "slate",
-          });
-        }
+  // Roof rectangles for the 2D layer. Subscribes to the whole nodes
+  // map (Zustand keeps its reference stable across renders when
+  // nothing changed, so no loop) and computes rects in a useMemo that
+  // re-runs only when the map ref updates. Do NOT wrap the selector in
+  // useShallow returning fresh objects — every call would produce new
+  // references, shallow would see them as different, and Zustand would
+  // force a re-render on every render → React error #185 "Maximum
+  // update depth exceeded".
+  const allNodes = useScene((state) => state.nodes);
+  const roofRects = useMemo(() => {
+    const rects: Array<{
+      roofId: string;
+      segId: string;
+      cx: number;
+      cz: number;
+      width: number;
+      depth: number;
+      rotation: number;
+      roofType: string;
+      material: string;
+    }> = [];
+    if (!levelId) return rects;
+    const lvl = allNodes[levelId] as any;
+    if (!lvl || lvl.type !== "level") return rects;
+    for (const childId of lvl.children ?? []) {
+      const roof = allNodes[childId as AnyNodeId] as any;
+      if (!roof || roof.type !== "roof") continue;
+      const gx = roof.position?.[0] ?? 0;
+      const gz = roof.position?.[2] ?? 0;
+      const grot = roof.rotation ?? 0;
+      const cos = Math.cos(grot);
+      const sin = Math.sin(grot);
+      for (const segId of roof.children ?? []) {
+        const seg = allNodes[segId as AnyNodeId] as any;
+        if (!seg || seg.type !== "roof-segment") continue;
+        const lx = seg.position?.[0] ?? 0;
+        const lz = seg.position?.[2] ?? 0;
+        rects.push({
+          roofId: roof.id,
+          segId: seg.id,
+          cx: gx + lx * cos - lz * sin,
+          cz: gz + lx * sin + lz * cos,
+          width: seg.width ?? 8,
+          depth: seg.depth ?? 6,
+          rotation: grot + (seg.rotation ?? 0),
+          roofType: seg.roofType ?? "gable",
+          material: seg.material ?? "slate",
+        });
       }
-      return rects;
-    }),
-  );
+    }
+    return rects;
+  }, [allNodes, levelId]);
   const zones = useScene(
     useShallow((state) => {
       if (!levelId) {
