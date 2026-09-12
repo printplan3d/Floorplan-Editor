@@ -21,6 +21,8 @@ import {
   loadAssetUrl,
   type Point2D,
   pointAndTangentAtT,
+  RoofNode,
+  RoofSegmentNode,
   type SiteNode,
   SlabNode,
   StairNode,
@@ -4662,6 +4664,66 @@ export function FloorplanPanel() {
         .filter((node): node is GuideNode => node?.type === "guide");
     }),
   );
+  // Roof groups on this level, each flattened to its RoofSegmentNode
+  // children so the 2D layer can render one rectangle per segment.
+  const roofRects = useScene(
+    useShallow((state) => {
+      if (!levelId) return [] as Array<{
+        roofId: string;
+        segId: string;
+        cx: number;
+        cz: number;
+        width: number;
+        depth: number;
+        rotation: number;
+        roofType: string;
+        material: string;
+      }>;
+      const lvl = state.nodes[levelId];
+      if (!lvl || lvl.type !== "level") return [];
+      const rects: Array<{
+        roofId: string;
+        segId: string;
+        cx: number;
+        cz: number;
+        width: number;
+        depth: number;
+        rotation: number;
+        roofType: string;
+        material: string;
+      }> = [];
+      for (const childId of lvl.children) {
+        const roof = state.nodes[childId];
+        if (!roof || roof.type !== "roof") continue;
+        const gx = roof.position[0];
+        const gz = roof.position[2];
+        const grot = roof.rotation;
+        for (const segId of roof.children ?? []) {
+          const seg = state.nodes[segId as AnyNodeId];
+          if (!seg || seg.type !== "roof-segment") continue;
+          // Compose group + segment position (segment position is local).
+          const cos = Math.cos(grot);
+          const sin = Math.sin(grot);
+          const lx = seg.position[0];
+          const lz = seg.position[2];
+          const cx = gx + lx * cos - lz * sin;
+          const cz = gz + lx * sin + lz * cos;
+          rects.push({
+            roofId: roof.id,
+            segId: seg.id,
+            cx,
+            cz,
+            width: seg.width,
+            depth: seg.depth,
+            rotation: grot + seg.rotation,
+            roofType: seg.roofType,
+            material: (seg as any).material ?? "slate",
+          });
+        }
+      }
+      return rects;
+    }),
+  );
   const zones = useScene(
     useShallow((state) => {
       if (!levelId) {
@@ -4745,6 +4807,12 @@ export function FloorplanPanel() {
     null,
   );
   const [slabDraftPoints, setSlabDraftPoints] = useState<WallPlanPoint[]>([]);
+  // 2D roof placement: two-click rectangle, first corner then diagonal.
+  // Held in the SAME plan-space WallPlanPoint type walls use, so grid /
+  // ortho / snap all keep working without any custom snap code.
+  const [roofDraftStart, setRoofDraftStart] = useState<WallPlanPoint | null>(
+    null,
+  );
   const [zoneDraftPoints, setZoneDraftPoints] = useState<WallPlanPoint[]>([]);
   const [siteBoundaryDraft, setSiteBoundaryDraft] =
     useState<SiteBoundaryDraft | null>(null);
@@ -5628,6 +5696,8 @@ export function FloorplanPanel() {
   // user traces. So it is deliberately not part of isPolygonBuildActive.
   const isStairBuildActive =
     phase === "structure" && mode === "build" && tool === "stair";
+  const isRoofBuildActive =
+    phase === "structure" && mode === "build" && tool === "roof";
   const isDoorBuildActive =
     phase === "structure" && mode === "build" && tool === "door";
   const isWindowBuildActive =
@@ -7141,6 +7211,57 @@ export function FloorplanPanel() {
     },
     [levelId, setSelection],
   );
+  // 2D roof placement — takes two corner points (from consecutive clicks on
+  // the plan) and drops a RoofNode group + one RoofSegmentNode covering the
+  // rectangle between them. Rectangle sides are axis-aligned in plan space;
+  // per-orientation rotation is a follow-up.
+  const createRoofOnCurrentLevel = useCallback(
+    (a: WallPlanPoint, b: WallPlanPoint) => {
+      if (!levelId) return null;
+      const { createNodes, nodes } = useScene.getState();
+      const roofCount = Object.values(nodes).filter(
+        (n) => n.type === "roof",
+      ).length;
+      const cx = (a[0] + b[0]) / 2;
+      const cz = (a[1] + b[1]) / 2;
+      const width = Math.max(Math.abs(b[0] - a[0]), 1.0);
+      const depth = Math.max(Math.abs(b[1] - a[1]), 1.0);
+
+      const roof = RoofNode.parse({
+        name: `Roof ${roofCount + 1}`,
+        position: [cx, 0, cz] as [number, number, number],
+        rotation: 0,
+        children: [],
+      });
+      const segment = RoofSegmentNode.parse({
+        // Segment position is LOCAL to the roof group; the roof group
+        // already sits at the rectangle center, so the segment stays at
+        // the origin.
+        position: [0, 0, 0] as [number, number, number],
+        rotation: 0,
+        roofType: "gable",
+        material: "slate",
+        width,
+        depth,
+        wallHeight: 0.0,
+        roofHeight: Math.max(Math.min(width, depth) / 4, 1.0),
+      });
+      roof.children = [segment.id];
+      // parent the segment to the roof group so the scene graph reads right;
+      // createNodes takes an array with explicit parents.
+      createNodes([
+        { node: roof, parentId: levelId as AnyNodeId },
+        { node: segment, parentId: roof.id },
+      ]);
+      sfxEmitter.emit("sfx:structure-build");
+      setSelection({ selectedIds: [segment.id] });
+      // Back to select so the panel opens on the segment for dimension edits.
+      useEditor.getState().setMode("select");
+      useEditor.getState().setTool(null);
+      return segment.id;
+    },
+    [levelId, setSelection],
+  );
   const createZoneOnCurrentLevel = useCallback(
     (points: WallPlanPoint[]) => {
       if (!levelId) {
@@ -8475,6 +8596,21 @@ export function FloorplanPanel() {
         return;
       }
 
+      // Roof: 2-click rectangle. First click = one corner (held in
+      // roofDraftStart), second click = diagonal corner → create
+      // RoofNode + RoofSegmentNode covering the rectangle. Grid snap
+      // and ortho behave the same way stair/slab do because we route
+      // planPoint through the same source.
+      if (isRoofBuildActive) {
+        if (roofDraftStart == null) {
+          setRoofDraftStart(planPoint);
+        } else {
+          createRoofOnCurrentLevel(roofDraftStart, planPoint);
+          setRoofDraftStart(null);
+        }
+        return;
+      }
+
       if (isPolygonBuildActive) {
         const snappedPoint = snapPolygonDraftPoint({
           point: planPoint,
@@ -8577,6 +8713,9 @@ export function FloorplanPanel() {
       isZoneBuildActive,
       isStairBuildActive,
       createStairOnCurrentLevel,
+      isRoofBuildActive,
+      roofDraftStart,
+      createRoofOnCurrentLevel,
       setSelectedReferenceId,
       setSelection,
       shiftPressed,
@@ -11501,6 +11640,101 @@ export function FloorplanPanel() {
               wallPolygons={displayWallPolygons}
               worldUnitsPerPixel={floorplanWorldUnitsPerPixel}
             />
+
+            {/* Roof rectangles on this level. Each RoofSegmentNode
+                renders as a dashed rectangle with a small type/material
+                label so the plan reads without a legend. Selection wires
+                straight into the existing selectedIdSet so the standard
+                properties panel opens on click. */}
+            {roofRects.length > 0 && (
+              <g data-element="roof-layer" pointerEvents="auto">
+                {roofRects.map((r) => {
+                  const svgCx = toSvgX(r.cx);
+                  const svgCy = toSvgY(r.cz);
+                  const w = r.width;
+                  const d = r.depth;
+                  const isSel =
+                    selectedIdSet.has(r.segId) || selectedIdSet.has(r.roofId);
+                  return (
+                    <g
+                      key={r.segId}
+                      data-element="roof"
+                      transform={`translate(${svgCx} ${svgCy}) rotate(${
+                        (r.rotation * 180) / Math.PI
+                      })`}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        setSelection({ selectedIds: [r.segId] });
+                      }}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <rect
+                        x={-w / 2}
+                        y={-d / 2}
+                        width={w}
+                        height={d}
+                        fill={isSel ? "rgba(180,83,9,0.16)" : "rgba(180,83,9,0.08)"}
+                        stroke={isSel ? "#b45309" : "#8a5a20"}
+                        strokeWidth={isSel ? 0.06 : 0.04}
+                        strokeDasharray="0.35 0.2"
+                      />
+                      {/* Ridge line indicator — running along the longer axis.
+                          Purely visual; the pipeline decides the actual ridge
+                          from ridge_direction / edges in the translator. */}
+                      {w >= d ? (
+                        <line
+                          x1={-w / 2}
+                          y1={0}
+                          x2={w / 2}
+                          y2={0}
+                          stroke={isSel ? "#b45309" : "#8a5a20"}
+                          strokeWidth={0.04}
+                          strokeDasharray="0.15 0.15"
+                        />
+                      ) : (
+                        <line
+                          x1={0}
+                          y1={-d / 2}
+                          x2={0}
+                          y2={d / 2}
+                          stroke={isSel ? "#b45309" : "#8a5a20"}
+                          strokeWidth={0.04}
+                          strokeDasharray="0.15 0.15"
+                        />
+                      )}
+                      <text
+                        x={0}
+                        y={0.15}
+                        textAnchor="middle"
+                        fontSize={0.4}
+                        fill={isSel ? "#7c3a08" : "#8a5a20"}
+                        fontFamily="ui-sans-serif, system-ui"
+                      >
+                        {r.roofType} · {r.material}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
+            )}
+
+            {/* Roof draft: pin marker for the first corner while the
+                second click is still pending. No rubber-band preview yet —
+                pointer position isn't tracked at this component level.
+                First-corner marker is enough to signal "click again to
+                place the diagonal corner". */}
+            {isRoofBuildActive && roofDraftStart && (
+              <g data-element="roof-draft" pointerEvents="none">
+                <circle
+                  cx={toSvgX(roofDraftStart[0])}
+                  cy={toSvgY(roofDraftStart[1])}
+                  r={0.18}
+                  fill="#b45309"
+                  stroke="white"
+                  strokeWidth={0.06}
+                />
+              </g>
+            )}
 
             <FloorplanPolygonHandleLayer
               hoveredHandleId={hoveredSiteHandleId}

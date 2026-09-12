@@ -352,7 +352,10 @@ export default function Editor({
   // path in FloorplanPanel. The dummy-mounted 1px-hidden trick previously kept
   // 3D-only tools (selection manager, grid, etc.) alive even in 2D mode; we
   // don't need them anymore. Preview mode still uses the full 3D scene.
-  const needs3D = isPreviewMode || tool === 'roof' || tool === 'ceiling'
+  // 2026-09-12: roof is now a 2D-canvas placement (click-drag rectangle in
+  // FloorplanPanel) matching the DFY editor mockup, not a 3D corner-picker.
+  // Ceiling still lives in the 3D viewer for now.
+  const needs3D = isPreviewMode || tool === 'ceiling'
 
   useEffect(() => {
     initializeEditorRuntime()
