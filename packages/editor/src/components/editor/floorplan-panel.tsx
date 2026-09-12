@@ -7219,12 +7219,11 @@ export function FloorplanPanel() {
       const width = Math.max(Math.abs(b[0] - a[0]), 1.0);
       const depth = Math.max(Math.abs(b[1] - a[1]), 1.0);
 
-      const roof = RoofNode.parse({
-        name: `Roof ${roofCount + 1}`,
-        position: [cx, 0, cz] as [number, number, number],
-        rotation: 0,
-        children: [],
-      });
+      // Parse SEGMENT FIRST so its id can be passed inline to the roof's
+      // `children`. Mutating `roof.children = [segment.id]` AFTER
+      // RoofNode.parse would not survive immer's clone in the store — the
+      // roof would land with children:[] and disappear from any child-of-
+      // roof lookup, including the SVG render and the export.
       const segment = RoofSegmentNode.parse({
         // Segment position is LOCAL to the roof group; the roof group
         // already sits at the rectangle center, so the segment stays at
@@ -7238,9 +7237,14 @@ export function FloorplanPanel() {
         wallHeight: 0.0,
         roofHeight: Math.max(Math.min(width, depth) / 4, 1.0),
       });
-      roof.children = [segment.id];
-      // parent the segment to the roof group so the scene graph reads right;
-      // createNodes takes an array with explicit parents.
+      const roof = RoofNode.parse({
+        name: `Roof ${roofCount + 1}`,
+        position: [cx, 0, cz] as [number, number, number],
+        rotation: 0,
+        children: [segment.id],
+      });
+      // Roof first so segment can be parented to it (createNodes runs
+      // them in order); same pattern as roof-tool.tsx's 3D placement.
       createNodes([
         { node: roof, parentId: levelId as AnyNodeId },
         { node: segment, parentId: roof.id },
@@ -8633,6 +8637,30 @@ export function FloorplanPanel() {
         return;
       }
 
+      // Roof rectangles are hit-tested here too. The SVG group has its own
+      // onPointerDown that stops propagation, but the browser still fires a
+      // subsequent click event which falls through to this handler and its
+      // final setSelection([]) would immediately clear the roof selection —
+      // that's the "properties panel flashes then disappears" symptom.
+      // Testing here mirrors the stair/zone flow and keeps the selection.
+      const roofClick = roofRects.find((r) => {
+        // Local point in the roof's un-rotated frame.
+        const dx = planPoint[0] - r.cx;
+        const dy = planPoint[1] - r.cz;
+        const cos = Math.cos(-r.rotation);
+        const sin = Math.sin(-r.rotation);
+        const lx = dx * cos - dy * sin;
+        const ly = dx * sin + dy * cos;
+        return (
+          Math.abs(lx) <= r.width / 2 && Math.abs(ly) <= r.depth / 2
+        );
+      });
+      if (roofClick) {
+        setSelectedReferenceId(null);
+        setSelection({ selectedIds: [roofClick.segId], zoneId: null });
+        return;
+      }
+
       if (canSelectFloorplanZones) {
         const zoneHit = visibleZonePolygons.find(({ polygon }) =>
           isPointInsidePolygon(toPoint2D(planPoint), polygon),
@@ -8708,6 +8736,7 @@ export function FloorplanPanel() {
       isRoofBuildActive,
       roofDraftStart,
       createRoofOnCurrentLevel,
+      roofRects,
       setSelectedReferenceId,
       setSelection,
       shiftPressed,
@@ -11654,11 +11683,7 @@ export function FloorplanPanel() {
                       transform={`translate(${svgCx} ${svgCy}) rotate(${
                         (r.rotation * 180) / Math.PI
                       })`}
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        setSelection({ selectedIds: [r.segId] });
-                      }}
-                      style={{ cursor: "pointer" }}
+                      pointerEvents="none"
                     >
                       <rect
                         x={-w / 2}
