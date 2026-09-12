@@ -11683,7 +11683,22 @@ export function FloorplanPanel() {
                       transform={`translate(${svgCx} ${svgCy}) rotate(${
                         (r.rotation * 180) / Math.PI
                       })`}
-                      pointerEvents="none"
+                      onClick={(event) => {
+                        // Stop the click before it bubbles to the SVG
+                        // background handler, which would clear
+                        // selection. Same pattern zones use. The
+                        // handleBackgroundClick hit-test below is a
+                        // fallback for cases where pointerEvents can't
+                        // pick this up (e.g. when the roof sits under
+                        // another interactive element).
+                        event.stopPropagation();
+                        setSelectedReferenceId(null);
+                        setSelection({
+                          selectedIds: [r.segId],
+                          zoneId: null,
+                        });
+                      }}
+                      style={{ cursor: "pointer" }}
                     >
                       <rect
                         x={-w / 2}
