@@ -352,6 +352,10 @@ export function exportFloorPlanJSON(): object {
           id: rs.id,
           roof_id: roof.id,
           kind: rs.roofType, // one of hip/gable/shed/gambrel/dutch/mansard/flat
+          // Material drives the manifest slot the viewer swaps in
+          // (slate, terracotta, metal, shingle, flat). Unknown values
+          // fall back to shingle in the pipeline parser.
+          material: rs.material ?? 'slate',
           // Polygon in plan (x, y) — the pipeline reads these as metres.
           polygon: polygonWorld,
           // Editor's wallHeight is the parapet UNDER the roof; base_z is
@@ -365,8 +369,6 @@ export function exportFloorPlanJSON(): object {
           width: rs.width,
           depth: rs.depth,
           overhang: rs.overhang,
-          // Multi-mass CSG picks up any other segments as-is; no
-          // per-segment material yet (editor UI to add).
         });
       }
     }

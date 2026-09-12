@@ -6,6 +6,14 @@ export const RoofType = z.enum(['hip', 'gable', 'shed', 'gambrel', 'dutch', 'man
 
 export type RoofType = z.infer<typeof RoofType>
 
+// Roof material picker — the pipeline maps these to concrete PBR packs
+// (roof_slates_03 for slate, terracotta for terracotta, etc). Unknown
+// values fall back to the shingle default at parse time. Keep this list
+// in sync with SUPPORTED_MATERIALS in blender_pipeline_dev/roof/scene.py.
+export const RoofMaterial = z.enum(['slate', 'terracotta', 'metal', 'shingle', 'flat'])
+
+export type RoofMaterial = z.infer<typeof RoofMaterial>
+
 export const RoofSegmentNode = BaseNode.extend({
   id: objectId('rseg'),
   type: nodeType('roof-segment'),
@@ -15,6 +23,8 @@ export const RoofSegmentNode = BaseNode.extend({
   rotation: z.number().default(0),
   // Roof shape type
   roofType: RoofType.default('gable'),
+  // Material (drives the manifest slot the viewer swaps in)
+  material: RoofMaterial.default('slate'),
   // Footprint dimensions
   width: z.number().default(8),
   depth: z.number().default(6),
