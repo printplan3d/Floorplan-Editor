@@ -29,6 +29,8 @@ import {
   DEFAULT_WALL_THICKNESS,
   DoorNode,
   LevelNode,
+  RoofNode,
+  RoofSegmentNode,
   SiteNode,
   SlabNode,
   StairNode,
@@ -150,6 +152,25 @@ export interface CanonicalSlab {
   thickness?: number;
   surface_type?: string;
 }
+/** One roof segment (rectangle placed by the 2D roof tool). One
+ *  RoofNode group can hold several segments; this flattens them so the
+ *  save/load round-trip stays purely canonical (no group hierarchy).
+ *  A save re-groups by roof_id on load; segments from the same roof_id
+ *  land under one restored RoofNode. */
+export interface CanonicalRoof {
+  id: string;
+  roof_id: string;
+  level: number;
+  position: [number, number];
+  rotation: number;
+  roof_type: string;
+  material: string;
+  width: number;
+  depth: number;
+  wall_height: number;
+  roof_height: number;
+  overhang?: number;
+}
 export interface CanonicalScene {
   walls: CanonicalWall[];
   doors: CanonicalDoor[];
@@ -158,6 +179,7 @@ export interface CanonicalScene {
   floors: unknown[];
   stairs: CanonicalStair[];
   slabs?: CanonicalSlab[];
+  roofs?: CanonicalRoof[];
   furniture: unknown[];
   metadata: Record<string, unknown>;
 }
@@ -253,6 +275,7 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
   const rooms: CanonicalRoom[] = [];
   const stairs: CanonicalStair[] = [];
   const slabs: CanonicalSlab[] = [];
+  const roofs: CanonicalRoof[] = [];
 
   /* Which storey each node belongs to. Levels own their children, so the
      map is built once from the LevelNodes rather than re-derived per node.
@@ -398,6 +421,43 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
         depth: n.depth,
         railing: n.railing !== false,
       });
+    } else if (n?.type === "roof") {
+      // A RoofNode is a group; its children are RoofSegmentNodes. One
+      // CanonicalRoof entry per segment, keyed by the parent's id so the
+      // load side can re-group them under a single reconstructed
+      // RoofNode. Position is rotated 180° like every other coord (the
+      // canonical frame is rotated relative to the editor's).
+      const groupPos = rot180([n.position?.[0] ?? 0, n.position?.[2] ?? 0]);
+      const groupRot = (Number(n.rotation ?? 0) + Math.PI) % (2 * Math.PI);
+      for (const segId of n.children ?? []) {
+        const seg = nodes[segId];
+        if (!seg || seg.type !== "roof-segment") continue;
+        // Segment world center = group position + rotated local offset.
+        const lx = seg.position?.[0] ?? 0;
+        const lz = seg.position?.[2] ?? 0;
+        const cos = Math.cos(n.rotation ?? 0);
+        const sin = Math.sin(n.rotation ?? 0);
+        const wx = (n.position?.[0] ?? 0) + lx * cos - lz * sin;
+        const wz = (n.position?.[2] ?? 0) + lx * sin + lz * cos;
+        const segPos = rot180([wx, wz]);
+        roofs.push({
+          id: seg.id,
+          roof_id: n.id,
+          level: levelOf.get(n.id) ?? levelOf.get(seg.id) ?? 0,
+          position: segPos,
+          rotation: (groupRot + (Number(seg.rotation ?? 0))) % (2 * Math.PI),
+          roof_type: seg.roofType ?? "gable",
+          material: (seg as any).material ?? "slate",
+          width: seg.width ?? 8,
+          depth: seg.depth ?? 6,
+          wall_height: seg.wallHeight ?? 0,
+          roof_height: seg.roofHeight ?? 2.5,
+          overhang: seg.overhang ?? 0.3,
+        });
+      }
+      // Suppress the unused-var warning for groupPos — it's kept in case
+      // the schema wants to record the group center in a follow-up.
+      void groupPos;
     } else if (n?.type === "slab") {
       slabs.push({
         id: n.id,
@@ -461,6 +521,7 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
       ),
       stairs: stairs.filter((st) => st.level === lvl).map((st) => st.id),
       slabs: slabs.filter((sl) => sl.level === lvl).map((sl) => sl.id),
+      roofs: roofs.filter((r) => r.level === lvl).map((r) => r.id),
     };
   });
 
@@ -472,6 +533,7 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
     floors,
     stairs,
     slabs,
+    roofs,
     furniture: [],
     metadata: {
       unit: "meters",
@@ -731,6 +793,74 @@ export function canonicalToSceneGraph(
     });
     nodes[slab.id] = slab;
     owner.children.push(slab.id);
+  }
+
+  /* Roofs. Canonical entries are per-segment; re-group them by roof_id
+     so multi-segment roofs come back under one RoofNode. Each restored
+     RoofNode sits at the level; its segments live at LOCAL position
+     (0,0,0) — the round-trip stores the segment's world center on the
+     canonical entry, which becomes the RoofNode's position on load. If
+     a roof_id has multiple segments, the RoofNode goes at the CENTROID
+     of the segments and each segment's local position is that segment's
+     world center minus the centroid. */
+  const roofsByGroup = new Map<string, any[]>();
+  for (const r of (canonical.roofs ?? []) as any[]) {
+    if (!r) continue;
+    const key = String(r.roof_id ?? r.id);
+    const arr = roofsByGroup.get(key) ?? [];
+    arr.push(r);
+    roofsByGroup.set(key, arr);
+  }
+  for (const [_groupKey, segs] of roofsByGroup) {
+    void _groupKey;
+    if (segs.length === 0) continue;
+    // Level from the first segment; a single roof group cannot span
+    // multiple storeys in this schema.
+    const owner = levelFor(segs[0].id);
+    // Group center = centroid of segments (world coords, editor frame).
+    let cx = 0, cz = 0;
+    const segWorldPositions: [number, number][] = [];
+    for (const s of segs) {
+      const p = rot180([s.position?.[0] ?? 0, s.position?.[1] ?? 0]);
+      segWorldPositions.push(p);
+      cx += p[0];
+      cz += p[1];
+    }
+    cx /= segs.length;
+    cz /= segs.length;
+    const roof: any = RoofNode.parse({
+      parentId: owner.id,
+      position: [cx, 0, cz] as [number, number, number],
+      rotation: 0,
+      children: [],
+    });
+    const segNodes: any[] = [];
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      const [wx, wz] = segWorldPositions[i];
+      const seg: any = RoofSegmentNode.parse({
+        parentId: roof.id,
+        position: [wx - cx, 0, wz - cz] as [number, number, number],
+        // Reverse the +pi the encoder applied so the ridge lands where
+        // it was drawn.
+        rotation:
+          (Number(s.rotation ?? 0) + Math.PI) % (2 * Math.PI),
+        roofType: s.roof_type ?? "gable",
+        material: s.material ?? "slate",
+        width: typeof s.width === "number" ? s.width : 8,
+        depth: typeof s.depth === "number" ? s.depth : 6,
+        wallHeight:
+          typeof s.wall_height === "number" ? s.wall_height : 0,
+        roofHeight:
+          typeof s.roof_height === "number" ? s.roof_height : 2.5,
+        overhang: typeof s.overhang === "number" ? s.overhang : 0.3,
+      });
+      segNodes.push(seg);
+    }
+    roof.children = segNodes.map((s) => s.id);
+    nodes[roof.id] = roof;
+    for (const s of segNodes) nodes[s.id] = s;
+    owner.children.push(roof.id);
   }
 
   return { nodes, rootNodeIds: [site.id] };
