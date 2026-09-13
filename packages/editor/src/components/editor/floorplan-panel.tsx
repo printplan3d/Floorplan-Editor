@@ -4684,6 +4684,7 @@ export function FloorplanPanel() {
       rotation: number;
       roofType: string;
       material: string;
+      ridgeAxis: "auto" | "east-west" | "north-south";
     }> = [];
     if (!levelId) return rects;
     const lvl = allNodes[levelId] as any;
@@ -4711,6 +4712,10 @@ export function FloorplanPanel() {
           rotation: grot + (seg.rotation ?? 0),
           roofType: seg.roofType ?? "gable",
           material: seg.material ?? "slate",
+          ridgeAxis: (seg.ridgeAxis ?? "auto") as
+            | "auto"
+            | "east-west"
+            | "north-south",
         });
       }
     }
@@ -11751,30 +11756,47 @@ export function FloorplanPanel() {
                         strokeWidth={isSel ? 0.06 : 0.04}
                         strokeDasharray="0.35 0.2"
                       />
-                      {/* Ridge line indicator — running along the longer axis.
-                          Purely visual; the pipeline decides the actual ridge
-                          from ridge_direction / edges in the translator. */}
-                      {w >= d ? (
-                        <line
-                          x1={-w / 2}
-                          y1={0}
-                          x2={w / 2}
-                          y2={0}
-                          stroke={isSel ? "#b45309" : "#8a5a20"}
-                          strokeWidth={0.04}
-                          strokeDasharray="0.15 0.15"
-                        />
-                      ) : (
-                        <line
-                          x1={0}
-                          y1={-d / 2}
-                          x2={0}
-                          y2={d / 2}
-                          stroke={isSel ? "#b45309" : "#8a5a20"}
-                          strokeWidth={0.04}
-                          strokeDasharray="0.15 0.15"
-                        />
-                      )}
+                      {/* Ridge line indicator — honours the explicit
+                          ridgeAxis on the segment. 'auto' falls back to the
+                          width>=depth heuristic, so old plans and freshly
+                          drawn ones keep the same visual as before.
+                          Local axes here are canvas SVG axes: X = width
+                          (world east-west), Y = depth (world north-south).
+                          A ridge along the world east-west axis is a
+                          horizontal line here; along north-south, vertical. */}
+                      {(() => {
+                        const axis =
+                          r.ridgeAxis === "east-west" ||
+                          r.ridgeAxis === "north-south"
+                            ? r.ridgeAxis
+                            : w >= d
+                              ? "east-west"
+                              : "north-south";
+                        if (axis === "east-west") {
+                          return (
+                            <line
+                              x1={-w / 2}
+                              y1={0}
+                              x2={w / 2}
+                              y2={0}
+                              stroke={isSel ? "#b45309" : "#8a5a20"}
+                              strokeWidth={0.06}
+                              strokeDasharray="0.15 0.15"
+                            />
+                          );
+                        }
+                        return (
+                          <line
+                            x1={0}
+                            y1={-d / 2}
+                            x2={0}
+                            y2={d / 2}
+                            stroke={isSel ? "#b45309" : "#8a5a20"}
+                            strokeWidth={0.06}
+                            strokeDasharray="0.15 0.15"
+                          />
+                        );
+                      })()}
                       <text
                         x={0}
                         y={0.15}
