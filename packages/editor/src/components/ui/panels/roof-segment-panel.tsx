@@ -33,6 +33,15 @@ const ROOF_TYPE_OPTIONS_2: { label: string; value: RoofType }[] = [
   { label: 'Mansard', value: 'mansard' },
 ]
 
+// Ridge direction — explicit user choice, never inferred from width/depth
+// after this control is touched. "Auto" keeps the width>=depth heuristic
+// for anything the user hasn't set.
+const RIDGE_AXIS_OPTIONS: { label: string; value: 'auto' | 'east-west' | 'north-south' }[] = [
+  { label: 'Auto', value: 'auto' },
+  { label: '↕ N–S', value: 'north-south' },
+  { label: '↔ E–W', value: 'east-west' },
+]
+
 export function RoofSegmentPanel() {
   const selectedIds = useViewer((s) => s.selection.selectedIds)
   const setSelection = useViewer((s) => s.setSelection)
@@ -128,6 +137,14 @@ export function RoofSegmentPanel() {
           onChange={(v) => handleUpdate({ roofType: v })}
           options={ROOF_TYPE_OPTIONS_2}
           value={node.roofType}
+        />
+      </PanelSection>
+
+      <PanelSection title="Ridge Direction">
+        <SegmentedControl
+          onChange={(v) => handleUpdate({ ridgeAxis: v })}
+          options={RIDGE_AXIS_OPTIONS}
+          value={node.ridgeAxis ?? 'auto'}
         />
       </PanelSection>
 
