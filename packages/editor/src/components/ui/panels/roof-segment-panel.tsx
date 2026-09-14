@@ -209,27 +209,13 @@ export function RoofSegmentPanel() {
         />
       </PanelSection>
 
+      {/* Structure — only Overhang is wired into blender_pipeline_dev/roof
+          today. Wall Thick / Deck Thick / Shingle Thick sit on the schema
+          (so plans that carry them keep round-tripping) but the multi-mass
+          solids builder ignores them, so hiding them from the panel until
+          they're implemented avoids the user tuning a slider that changes
+          nothing in the render. */}
       <PanelSection title="Structure">
-        <SliderControl
-          label="Wall Thick."
-          max={1}
-          min={0.05}
-          onChange={(v) => handleUpdate({ wallThickness: v })}
-          precision={2}
-          step={0.05}
-          unit="m"
-          value={Math.round(node.wallThickness * 100) / 100}
-        />
-        <SliderControl
-          label="Deck Thick."
-          max={0.3}
-          min={0.04}
-          onChange={(v) => handleUpdate({ deckThickness: v })}
-          precision={2}
-          step={0.01}
-          unit="m"
-          value={Math.round(node.deckThickness * 100) / 100}
-        />
         <SliderControl
           label="Overhang"
           max={1}
@@ -239,16 +225,6 @@ export function RoofSegmentPanel() {
           step={0.05}
           unit="m"
           value={Math.round(node.overhang * 100) / 100}
-        />
-        <SliderControl
-          label="Shingle Thick."
-          max={0.3}
-          min={0.02}
-          onChange={(v) => handleUpdate({ shingleThickness: v })}
-          precision={2}
-          step={0.01}
-          unit="m"
-          value={Math.round(node.shingleThickness * 100) / 100}
         />
       </PanelSection>
 
