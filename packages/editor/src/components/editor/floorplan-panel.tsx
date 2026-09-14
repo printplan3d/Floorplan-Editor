@@ -4815,6 +4815,14 @@ export function FloorplanPanel() {
   const [roofDraftStart, setRoofDraftStart] = useState<WallPlanPoint | null>(
     null,
   );
+  // Which corner of which roof segment is currently being dragged on
+  // the 2D plan. Set on pointerdown on a corner handle, cleared on
+  // pointerup. During a drag the SVG's onPointerMove translates the
+  // client pointer into a plan point and rewrites polygon[cornerIdx].
+  const [roofCornerDrag, setRoofCornerDrag] = useState<{
+    segId: string;
+    cornerIdx: number;
+  } | null>(null);
   const [zoneDraftPoints, setZoneDraftPoints] = useState<WallPlanPoint[]>([]);
   const [siteBoundaryDraft, setSiteBoundaryDraft] =
     useState<SiteBoundaryDraft | null>(null);
@@ -11602,10 +11610,72 @@ export function FloorplanPanel() {
             onPointerMove={(event) => {
               handleStairPointerMove(event);
               handleSvgPointerMove(event);
+              // Roof corner drag: rewrite the current polygon[cornerIdx]
+              // to the pointer's plan location. Only active while
+              // roofCornerDrag is set. The store update reruns
+              // roofRects and the handle follows the pointer.
+              if (roofCornerDrag) {
+                const planPt = getPlanPointFromClientPoint(
+                  event.clientX,
+                  event.clientY,
+                );
+                if (planPt) {
+                  const state = useScene.getState();
+                  const seg = state.nodes[roofCornerDrag.segId as AnyNodeId] as
+                    | any
+                    | undefined;
+                  if (seg && seg.type === "roof-segment") {
+                    const roof = state.nodes[seg.parentId as AnyNodeId] as
+                      | any
+                      | undefined;
+                    const gx = roof?.position?.[0] ?? 0;
+                    const gz = roof?.position?.[2] ?? 0;
+                    const grot = roof?.rotation ?? 0;
+                    const lx = seg.position?.[0] ?? 0;
+                    const lz = seg.position?.[2] ?? 0;
+                    const totalRot = grot + (seg.rotation ?? 0);
+                    // Segment center in plan coords, then inverse-transform
+                    // the pointer into segment-local coords (undo translate
+                    // + rotate).
+                    const cosG = Math.cos(grot);
+                    const sinG = Math.sin(grot);
+                    const cx = gx + lx * cosG - lz * sinG;
+                    const cz = gz + lx * sinG + lz * cosG;
+                    const dx = planPt.x - cx;
+                    const dz = planPt.z - cz;
+                    const cosR = Math.cos(-totalRot);
+                    const sinR = Math.sin(-totalRot);
+                    const localX = dx * cosR - dz * sinR;
+                    const localZ = dx * sinR + dz * cosR;
+                    // Ensure custom-shape mode: if the segment still has
+                    // no polygon (rectangle mode), seed one from the
+                    // current width/depth before writing the drag.
+                    const currentPoly = Array.isArray(seg.polygon)
+                      ? (seg.polygon as [number, number][])
+                      : ([
+                          [-seg.width / 2, -seg.depth / 2],
+                          [seg.width / 2, -seg.depth / 2],
+                          [seg.width / 2, seg.depth / 2],
+                          [-seg.width / 2, seg.depth / 2],
+                        ] as [number, number][]);
+                    if (roofCornerDrag.cornerIdx < currentPoly.length) {
+                      const next = currentPoly.map((p, i) =>
+                        i === roofCornerDrag.cornerIdx
+                          ? ([localX, localZ] as [number, number])
+                          : p,
+                      );
+                      state.updateNode(seg.id as AnyNodeId, {
+                        polygon: next,
+                      } as any);
+                    }
+                  }
+                }
+              }
             }}
             onPointerUp={(event) => {
               handleStairPointerUp(event);
               endPanning(event);
+              if (roofCornerDrag) setRoofCornerDrag(null);
             }}
             ref={svgRef}
             style={{
@@ -11717,9 +11787,17 @@ export function FloorplanPanel() {
                 renders as a dashed rectangle with a small type/material
                 label so the plan reads without a legend. Selection wires
                 straight into the existing selectedIdSet so the standard
-                properties panel opens on click. */}
+                properties panel opens on click.
+                While the roof tool is active for point placement, block
+                pointer events on the roof layer so clicks reach the SVG
+                background handler — otherwise trying to place a corner
+                INSIDE an existing roof would select the existing roof
+                instead of dropping the new point. */}
             {roofRects.length > 0 && (
-              <g data-element="roof-layer" pointerEvents="auto">
+              <g
+                data-element="roof-layer"
+                pointerEvents={isRoofBuildActive ? "none" : "auto"}
+              >
                 {roofRects.map((r) => {
                   const svgCx = toSvgX(r.cx);
                   const svgCy = toSvgY(r.cz);
@@ -11827,6 +11905,70 @@ export function FloorplanPanel() {
                     </g>
                   );
                 })}
+                {/* Corner drag handles — one per polygon vertex (or per
+                    rectangle corner) on the SELECTED segment. Rendered
+                    at WORLD coords outside the segment's transform so
+                    the pointer math stays a straight plan-to-svg map.
+                    Grab-and-drag to reshape the roof directly on the
+                    plan (in place of the panel's Px X / Px Z inputs).
+                    Only shown when the roof tool is NOT in point-
+                    placement mode — otherwise the handles would
+                    intercept a new-roof click. */}
+                {!isRoofBuildActive &&
+                  roofRects.map((r) => {
+                    const isSel =
+                      selectedIdSet.has(r.segId) ||
+                      selectedIdSet.has(r.roofId);
+                    if (!isSel) return null;
+                    const localCorners: [number, number][] =
+                      r.polygon && r.polygon.length >= 3
+                        ? r.polygon
+                        : [
+                            [-r.width / 2, -r.depth / 2],
+                            [r.width / 2, -r.depth / 2],
+                            [r.width / 2, r.depth / 2],
+                            [-r.width / 2, r.depth / 2],
+                          ];
+                    const cos = Math.cos(r.rotation);
+                    const sin = Math.sin(r.rotation);
+                    return (
+                      <g
+                        data-element="roof-corners"
+                        key={`${r.segId}-corners`}
+                      >
+                        {localCorners.map((lp, i) => {
+                          const wx = r.cx + lp[0] * cos - lp[1] * sin;
+                          const wz = r.cz + lp[0] * sin + lp[1] * cos;
+                          const active =
+                            roofCornerDrag &&
+                            roofCornerDrag.segId === r.segId &&
+                            roofCornerDrag.cornerIdx === i;
+                          return (
+                            <circle
+                              key={i}
+                              cx={toSvgX(wx)}
+                              cy={toSvgY(wz)}
+                              r={0.18}
+                              fill={active ? "#b45309" : "white"}
+                              stroke="#b45309"
+                              strokeWidth={0.06}
+                              style={{ cursor: "grab" }}
+                              onPointerDown={(event) => {
+                                event.stopPropagation();
+                                (
+                                  event.target as SVGCircleElement
+                                ).setPointerCapture?.(event.pointerId);
+                                setRoofCornerDrag({
+                                  segId: r.segId,
+                                  cornerIdx: i,
+                                });
+                              }}
+                            />
+                          );
+                        })}
+                      </g>
+                    );
+                  })}
               </g>
             )}
 
