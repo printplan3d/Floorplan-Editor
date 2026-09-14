@@ -11641,8 +11641,8 @@ export function FloorplanPanel() {
                     const sinG = Math.sin(grot);
                     const cx = gx + lx * cosG - lz * sinG;
                     const cz = gz + lx * sinG + lz * cosG;
-                    const dx = planPt.x - cx;
-                    const dz = planPt.z - cz;
+                    const dx = planPt[0] - cx;
+                    const dz = planPt[1] - cz;
                     const cosR = Math.cos(-totalRot);
                     const sinR = Math.sin(-totalRot);
                     const localX = dx * cosR - dz * sinR;
