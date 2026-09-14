@@ -4685,6 +4685,7 @@ export function FloorplanPanel() {
       roofType: string;
       material: string;
       ridgeAxis: "auto" | "east-west" | "north-south";
+      polygon?: [number, number][];
     }> = [];
     if (!levelId) return rects;
     const lvl = allNodes[levelId] as any;
@@ -4716,6 +4717,10 @@ export function FloorplanPanel() {
             | "auto"
             | "east-west"
             | "north-south",
+          polygon:
+            Array.isArray(seg.polygon) && seg.polygon.length >= 3
+              ? (seg.polygon as [number, number][])
+              : undefined,
         });
       }
     }
@@ -11746,16 +11751,28 @@ export function FloorplanPanel() {
                       }}
                       style={{ cursor: "pointer" }}
                     >
-                      <rect
-                        x={-w / 2}
-                        y={-d / 2}
-                        width={w}
-                        height={d}
-                        fill={isSel ? "rgba(180,83,9,0.16)" : "rgba(180,83,9,0.08)"}
-                        stroke={isSel ? "#b45309" : "#8a5a20"}
-                        strokeWidth={isSel ? 0.06 : 0.04}
-                        strokeDasharray="0.35 0.2"
-                      />
+                      {r.polygon && r.polygon.length >= 3 ? (
+                        <polygon
+                          points={r.polygon
+                            .map((p) => `${p[0]},${p[1]}`)
+                            .join(' ')}
+                          fill={isSel ? "rgba(180,83,9,0.16)" : "rgba(180,83,9,0.08)"}
+                          stroke={isSel ? "#b45309" : "#8a5a20"}
+                          strokeWidth={isSel ? 0.06 : 0.04}
+                          strokeDasharray="0.35 0.2"
+                        />
+                      ) : (
+                        <rect
+                          x={-w / 2}
+                          y={-d / 2}
+                          width={w}
+                          height={d}
+                          fill={isSel ? "rgba(180,83,9,0.16)" : "rgba(180,83,9,0.08)"}
+                          stroke={isSel ? "#b45309" : "#8a5a20"}
+                          strokeWidth={isSel ? 0.06 : 0.04}
+                          strokeDasharray="0.35 0.2"
+                        />
+                      )}
                       {/* Ridge line indicator — honours the explicit
                           ridgeAxis on the segment. 'auto' falls back to the
                           width>=depth heuristic, so old plans and freshly

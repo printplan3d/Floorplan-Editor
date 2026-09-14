@@ -30,9 +30,17 @@ export const RoofSegmentNode = BaseNode.extend({
   ridgeAxis: z.enum(['auto', 'east-west', 'north-south']).default('auto'),
   // Material (drives the manifest slot the viewer swaps in)
   material: RoofMaterial.default('slate'),
-  // Footprint dimensions
+  // Footprint dimensions — width/depth define a rectangle. Ignored when
+  // `polygon` is set (four-point mode).
   width: z.number().default(8),
   depth: z.number().default(6),
+  // Optional explicit polygon (world plan coords) — when set, the
+  // pipeline uses this instead of the width/depth rectangle. Lets the
+  // user draw non-rectangular gables (trapezoidal footprints where the
+  // two gable ends are different lengths). Four vertices for now;
+  // arbitrary N later. Position + rotation still apply as a rigid
+  // transform on top of the polygon.
+  polygon: z.array(z.tuple([z.number(), z.number()])).optional(),
   // Vertical dimensions
   wallHeight: z.number().default(0.5),
   roofHeight: z.number().default(2.5),

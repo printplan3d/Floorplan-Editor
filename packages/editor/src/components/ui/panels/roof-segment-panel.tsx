@@ -163,28 +163,94 @@ export function RoofSegmentPanel() {
         />
       </PanelSection>
 
-      <PanelSection title="Footprint">
-        <SliderControl
-          label="Width"
-          max={25}
-          min={0.5}
-          onChange={(v) => handleUpdate({ width: v })}
-          precision={2}
-          step={0.5}
-          unit="m"
-          value={Math.round(node.width * 100) / 100}
-        />
-        <SliderControl
-          label="Depth"
-          max={25}
-          min={0.5}
-          onChange={(v) => handleUpdate({ depth: v })}
-          precision={2}
-          step={0.5}
-          unit="m"
-          value={Math.round(node.depth * 100) / 100}
-        />
-      </PanelSection>
+      {(() => {
+        // Custom-shape mode: user has an explicit polygon on the node.
+        // When toggled on, expose per-corner X/Z sliders instead of
+        // width/depth. Toggling off reverts to the width/depth
+        // rectangle — clearing the polygon field.
+        const poly = (node as any).polygon as [number, number][] | undefined
+        const isCustom = Array.isArray(poly) && poly.length >= 3
+        const rectCorners: [number, number][] = [
+          [-node.width / 2, -node.depth / 2],
+          [node.width / 2, -node.depth / 2],
+          [node.width / 2, node.depth / 2],
+          [-node.width / 2, node.depth / 2],
+        ]
+        const enterCustom = () => handleUpdate({ polygon: rectCorners } as any)
+        const exitCustom = () => handleUpdate({ polygon: undefined } as any)
+        const updateCorner = (i: number, xz: [number, number]) => {
+          if (!isCustom) return
+          const next = poly!.map((p, j) => (j === i ? xz : p))
+          handleUpdate({ polygon: next } as any)
+        }
+        return (
+          <>
+            <PanelSection title="Footprint">
+              <SegmentedControl
+                onChange={(v) =>
+                  v === 'custom' ? enterCustom() : exitCustom()
+                }
+                options={[
+                  { label: 'Rectangle', value: 'rect' },
+                  { label: '4-point', value: 'custom' },
+                ]}
+                value={isCustom ? 'custom' : 'rect'}
+              />
+              {isCustom ? (
+                <div className="mt-1 flex flex-col gap-0.5">
+                  {(poly || []).slice(0, 4).map((p, i) => (
+                    <div className="flex gap-1" key={i}>
+                      <MetricControl
+                        label={`P${i + 1} X`}
+                        max={25}
+                        min={-25}
+                        onChange={(v) => updateCorner(i, [v, p[1]])}
+                        precision={2}
+                        step={0.1}
+                        unit="m"
+                        value={Math.round(p[0] * 100) / 100}
+                      />
+                      <MetricControl
+                        label={`P${i + 1} Z`}
+                        max={25}
+                        min={-25}
+                        onChange={(v) => updateCorner(i, [p[0], v])}
+                        precision={2}
+                        step={0.1}
+                        unit="m"
+                        value={Math.round(p[1] * 100) / 100}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <SliderControl
+                    label="Width"
+                    max={25}
+                    min={0.5}
+                    onChange={(v) => handleUpdate({ width: v })}
+                    precision={2}
+                    step={0.5}
+                    unit="m"
+                    value={Math.round(node.width * 100) / 100}
+                  />
+                  <SliderControl
+                    label="Depth"
+                    max={25}
+                    min={0.5}
+                    onChange={(v) => handleUpdate({ depth: v })}
+                    precision={2}
+                    step={0.5}
+                    unit="m"
+                    value={Math.round(node.depth * 100) / 100}
+                  />
+                </>
+              )}
+            </PanelSection>
+          </>
+        )
+      })()}
 
       <PanelSection title="Heights">
         <SliderControl

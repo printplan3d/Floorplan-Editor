@@ -333,16 +333,26 @@ export function exportFloorPlanJSON(): object {
         const worldCz = roof.position[2] + rs.position[0] * sinG + rs.position[2] * cosG;
         // Absolute rotation of the segment about Y (radians).
         const worldRot = roof.rotation + rs.rotation;
-        // Rectangle corners in world XZ. flipX applied so the polygon
-        // lands in the same frame walls do (mobile parity — the same
-        // reflection every other geometry gets).
-        const w2 = rs.width / 2;
-        const d2 = rs.depth / 2;
-        const local: [number, number][] = [
-          [-w2, -d2], [w2, -d2], [w2, d2], [-w2, d2],
-        ];
+        // Corners in world XZ. Prefer the explicit polygon field when
+        // set (user-drawn quadrilateral / trapezoidal footprint) —
+        // interpret those verts as local plan coords, then apply the
+        // same worldCx/worldCz translation and worldRot rotation as
+        // the width/depth path. Fall back to the width/depth rectangle
+        // for anything without an explicit polygon. flipX applied at
+        // the end so the polygon lands in the same frame walls do.
         const cosR = Math.cos(worldRot);
         const sinR = Math.sin(worldRot);
+        let local: [number, number][];
+        const rsPoly = (rs as any).polygon as [number, number][] | undefined;
+        if (rsPoly && Array.isArray(rsPoly) && rsPoly.length >= 3) {
+          local = rsPoly.map((p) => [Number(p[0]), Number(p[1])] as [number, number]);
+        } else {
+          const w2 = rs.width / 2;
+          const d2 = rs.depth / 2;
+          local = [
+            [-w2, -d2], [w2, -d2], [w2, d2], [-w2, d2],
+          ];
+        }
         const polygonWorld: [number, number][] = local.map(([lx, lz]) => {
           const wx = worldCx + lx * cosR - lz * sinR;
           const wz = worldCz + lx * sinR + lz * cosR;

@@ -175,6 +175,12 @@ export interface CanonicalRoof {
   // heuristic that governed pre-2026-09-12 saves; a real value survives
   // any later width/depth edit.
   ridge_axis?: string;
+  // Optional explicit polygon (local XZ, un-rotated). When set the
+  // pipeline uses this instead of the width/depth rectangle. Lets the
+  // user draw non-rectangular gables (trapezoids where the two gable
+  // ends have different lengths). At least three vertices required to
+  // be honoured on load.
+  polygon?: [number, number][];
 }
 export interface CanonicalScene {
   walls: CanonicalWall[];
@@ -460,6 +466,13 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
           overhang: seg.overhang ?? 0.3,
           ...((seg as any).ridgeAxis && (seg as any).ridgeAxis !== "auto"
             ? { ridge_axis: (seg as any).ridgeAxis }
+            : {}),
+          ...(Array.isArray((seg as any).polygon) && (seg as any).polygon.length >= 3
+            ? {
+                polygon: (seg as any).polygon.map(
+                  (p: [number, number]) => [Number(p[0]), Number(p[1])] as [number, number],
+                ),
+              }
             : {}),
         });
       }
@@ -865,6 +878,13 @@ export function canonicalToSceneGraph(
         overhang: typeof s.overhang === "number" ? s.overhang : 0.3,
         ...(s.ridge_axis === "east-west" || s.ridge_axis === "north-south"
           ? { ridgeAxis: s.ridge_axis }
+          : {}),
+        ...(Array.isArray(s.polygon) && s.polygon.length >= 3
+          ? {
+              polygon: s.polygon.map(
+                (p: [number, number]) => [Number(p[0]), Number(p[1])] as [number, number],
+              ),
+            }
           : {}),
       });
       segNodes.push(seg);
