@@ -10,7 +10,7 @@ import {
 } from '@ritn3d/core'
 import { useViewer } from '@ritn3d/viewer'
 import { Copy, Move, Trash2 } from 'lucide-react'
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import useEditor from '../../../store/use-editor'
 import { ActionButton, ActionGroup } from '../controls/action-button'
@@ -27,11 +27,11 @@ const ROOF_TYPE_OPTIONS: { label: string; value: RoofType }[] = [
   { label: 'Flat', value: 'flat' },
 ]
 
-const ROOF_TYPE_OPTIONS_2: { label: string; value: RoofType }[] = [
-  { label: 'Gambrel', value: 'gambrel' },
-  { label: 'Dutch', value: 'dutch' },
-  { label: 'Mansard', value: 'mansard' },
-]
+// Gambrel / Dutch / Mansard are DEFERRED in blender_pipeline_dev/roof/scene.py
+// — the backend raises NotImplementedError on those kinds, so the pipeline
+// silently skips the roof and the user gets no roof at all. Hidden from the
+// picker until the geometry code lands. Values still exist on the schema
+// so plans that already carry one keep parsing.
 
 // Ridge direction — explicit user choice, never inferred from width/depth
 // after this control is touched. "Auto" keeps the width>=depth heuristic
@@ -61,6 +61,19 @@ export function RoofSegmentPanel() {
     },
     [selectedId, updateNode],
   )
+
+  // Auto-migrate roof segments that were saved with a deferred kind
+  // (gambrel / dutch / mansard) — the backend rejects those and drops
+  // the whole roof silently. Force to 'gable' the first time such a
+  // segment is opened, so the user's existing plans don't render an
+  // invisible roof forever.
+  useEffect(() => {
+    if (!node || node.type !== 'roof-segment') return
+    const kind = node.roofType
+    if (kind === 'gambrel' || kind === 'dutch' || kind === 'mansard') {
+      updateNode(node.id as AnyNode['id'], { roofType: 'gable' })
+    }
+  }, [node?.id, node?.roofType, updateNode])
 
   const handleClose = useCallback(() => {
     setSelection({ selectedIds: [] })
@@ -131,13 +144,15 @@ export function RoofSegmentPanel() {
         <SegmentedControl
           onChange={(v) => handleUpdate({ roofType: v })}
           options={ROOF_TYPE_OPTIONS}
-          value={node.roofType}
+          value={
+            (['hip', 'gable', 'shed', 'flat'] as RoofType[]).includes(node.roofType)
+              ? node.roofType
+              : 'gable'
+          }
         />
-        <SegmentedControl
-          onChange={(v) => handleUpdate({ roofType: v })}
-          options={ROOF_TYPE_OPTIONS_2}
-          value={node.roofType}
-        />
+        <div className="px-1 pt-1 text-[10px] leading-tight text-neutral-500">
+          Gambrel, Dutch and Mansard are coming soon.
+        </div>
       </PanelSection>
 
       <PanelSection title="Ridge Direction">
