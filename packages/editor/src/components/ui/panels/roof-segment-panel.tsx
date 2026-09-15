@@ -36,8 +36,11 @@ const ROOF_TYPE_OPTIONS: { label: string; value: RoofType }[] = [
 // Ridge direction — explicit user choice, never inferred from width/depth
 // after this control is touched. "Auto" keeps the width>=depth heuristic
 // for anything the user hasn't set.
-const RIDGE_AXIS_OPTIONS: { label: string; value: 'auto' | 'east-west' | 'north-south' }[] = [
-  { label: 'Auto', value: 'auto' },
+// Ridge direction is always an explicit user pick — Auto was removed
+// because its length-based fallback silently overrode gable direction on
+// clear rectangles, wasting render credit. Every gable mass now carries
+// an explicit E-W or N-S; new masses default to E-W (see plan-scene.ts).
+const RIDGE_AXIS_OPTIONS: { label: string; value: 'east-west' | 'north-south' }[] = [
   { label: '↕ N–S', value: 'north-south' },
   { label: '↔ E–W', value: 'east-west' },
 ]
@@ -159,7 +162,11 @@ export function RoofSegmentPanel() {
         <SegmentedControl
           onChange={(v) => handleUpdate({ ridgeAxis: v })}
           options={RIDGE_AXIS_OPTIONS}
-          value={node.ridgeAxis ?? 'auto'}
+          value={
+            node.ridgeAxis === 'east-west' || node.ridgeAxis === 'north-south'
+              ? node.ridgeAxis
+              : 'east-west'
+          }
         />
       </PanelSection>
 

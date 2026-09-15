@@ -7295,6 +7295,12 @@ export function FloorplanPanel() {
         depth,
         wallHeight: 0.0,
         roofHeight: Math.max(Math.min(width, depth) / 4, 1.0),
+        // Explicit ridge direction from the start — 'auto' was removed
+        // because the pipeline's length-based fallback silently overrode
+        // gable direction on clear rectangles. Default to the axis the
+        // rectangle is wider along so the visual first render matches
+        // what a real gable looks like on that footprint.
+        ridgeAxis: width >= depth ? "east-west" : "north-south",
       });
       const roof = RoofNode.parse({
         name: `Roof ${roofCount + 1}`,
