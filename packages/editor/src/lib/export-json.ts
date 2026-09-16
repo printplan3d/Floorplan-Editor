@@ -387,6 +387,14 @@ export function exportFloorPlanJSON(): object {
           width: rs.width,
           depth: rs.depth,
           overhang: rs.overhang,
+          // Shell-rebuild pass-throughs. Backend accepts these
+          // additively — old plans render unchanged. When set, the
+          // pipeline routes through shell.build_roof for this
+          // segment; when absent, the legacy path handles it.
+          edge_weights: (rs as any).edgeWeights,
+          faces_override: (rs as any).facesOverride,
+          dormers: (rs as any).dormers,
+          roof_override_mesh: (rs as any).roofOverrideMesh,
         });
       }
     }

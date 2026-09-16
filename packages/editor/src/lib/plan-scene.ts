@@ -181,6 +181,29 @@ export interface CanonicalRoof {
   // ends have different lengths). At least three vertices required to
   // be honoured on load.
   polygon?: [number, number][];
+  // Shell-rebuild fields — all optional, backend pipeline accepts
+  // additively. See ROOF_REBUILD_PLAN.md §"Data model — additions to
+  // roof_masses" for semantics.
+  edge_weights?: number[];
+  faces_override?: { edgeIds: number[]; pitchDeg: number }[];
+  dormers?: Array<{
+    id: string;
+    parentFaceId: number;
+    footOnParent: [[number, number], [number, number]];
+    type?: "gable" | "shed" | "hip";
+    ridgeHeight?: number;
+    cheekWidth?: number;
+    ridgeOrientation?: "orthogonal" | "parallel";
+    window?: {
+      w?: number;
+      h?: number;
+      sill?: number;
+      frameThicknessCm?: number;
+    };
+    materialCheek?: string;
+    materialRoof?: string;
+  }>;
+  roof_override_mesh?: string;
 }
 export interface CanonicalScene {
   walls: CanonicalWall[];
@@ -466,6 +489,21 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
           overhang: seg.overhang ?? 0.3,
           ...((seg as any).ridgeAxis && (seg as any).ridgeAxis !== "auto"
             ? { ridge_axis: (seg as any).ridgeAxis }
+            : {}),
+          // Shell-rebuild fields — omit when empty so old plans round-trip
+          // unchanged and the pipeline's legacy path stays default.
+          ...(Array.isArray((seg as any).edgeWeights) && (seg as any).edgeWeights.length
+            ? { edge_weights: (seg as any).edgeWeights }
+            : {}),
+          ...(Array.isArray((seg as any).facesOverride) && (seg as any).facesOverride.length
+            ? { faces_override: (seg as any).facesOverride }
+            : {}),
+          ...(Array.isArray((seg as any).dormers) && (seg as any).dormers.length
+            ? { dormers: (seg as any).dormers }
+            : {}),
+          ...(typeof (seg as any).roofOverrideMesh === "string" &&
+          (seg as any).roofOverrideMesh
+            ? { roof_override_mesh: (seg as any).roofOverrideMesh }
             : {}),
           ...(Array.isArray((seg as any).polygon) && (seg as any).polygon.length >= 3
             ? {
@@ -885,6 +923,19 @@ export function canonicalToSceneGraph(
                 (p: [number, number]) => [Number(p[0]), Number(p[1])] as [number, number],
               ),
             }
+          : {}),
+        // Shell-rebuild pass-throughs when present in the saved plan.
+        ...(Array.isArray(s.edge_weights) && s.edge_weights.length
+          ? { edgeWeights: s.edge_weights }
+          : {}),
+        ...(Array.isArray(s.faces_override) && s.faces_override.length
+          ? { facesOverride: s.faces_override }
+          : {}),
+        ...(Array.isArray(s.dormers) && s.dormers.length
+          ? { dormers: s.dormers }
+          : {}),
+        ...(typeof s.roof_override_mesh === "string" && s.roof_override_mesh
+          ? { roofOverrideMesh: s.roof_override_mesh }
           : {}),
       });
       segNodes.push(seg);

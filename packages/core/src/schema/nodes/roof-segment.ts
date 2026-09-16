@@ -49,6 +49,68 @@ export const RoofSegmentNode = BaseNode.extend({
   deckThickness: z.number().default(0.1),
   overhang: z.number().default(0.3),
   shingleThickness: z.number().default(0.05),
+  // ---- Shell-rebuild fields ---------------------------------------
+  // Per-edge pitch weight — one entry per base-polygon edge (or per
+  // width/depth-rectangle edge if no polygon is set). Values are
+  // dimensionless multiplicative weights the shell subsystem
+  // interprets as tan(pitch_angle). All entries at 1.0 = uniform 45°
+  // pitch; different entries produce a variable-pitch roof (Melissa's
+  // case — steeper eaves on one pair, shallower on the other).
+  // Optional: omitted means the pipeline defaults all edges to
+  // tan(pitch_rad) derived from roofHeight / half_span.
+  edgeWeights: z.array(z.number()).optional(),
+  // Explicit per-face pitch overrides — for when the automatic
+  // skeleton produces a face whose pitch we want to force. Each entry
+  // names which input-edge indices define the face and the pitch in
+  // degrees. Rare; edgeWeights covers the common case.
+  facesOverride: z
+    .array(
+      z.object({
+        edgeIds: z.array(z.number()),
+        pitchDeg: z.number(),
+      }),
+    )
+    .optional(),
+  // Manually-authored dormers on this roof segment. Each dormer is a
+  // child roof mass attached to a specific parent face of this
+  // segment's skeleton. See blender_pipeline_dev/roof/shell/dormers.py
+  // for the primitive builders.
+  dormers: z
+    .array(
+      z.object({
+        id: z.string(),
+        parentFaceId: z.number(),
+        // foot_on_parent in UV coordinates on the parent face:
+        // u ∈ [0, 1] along the eave, v ∈ [0, 1] toward the ridge.
+        // Two points defining the dormer's footprint rectangle.
+        footOnParent: z.tuple([
+          z.tuple([z.number(), z.number()]),
+          z.tuple([z.number(), z.number()]),
+        ]),
+        type: z.enum(['gable', 'shed', 'hip']).default('gable'),
+        ridgeHeight: z.number().default(0.8),
+        cheekWidth: z.number().default(1.2),
+        ridgeOrientation: z
+          .enum(['orthogonal', 'parallel'])
+          .default('orthogonal'),
+        window: z
+          .object({
+            w: z.number().default(0.8),
+            h: z.number().default(1.0),
+            sill: z.number().default(0.3),
+            frameThicknessCm: z.number().default(5),
+          })
+          .optional(),
+        materialCheek: z.string().optional(),
+        materialRoof: z.string().optional(),
+      }),
+    )
+    .optional(),
+  // Escape hatch: path to a manually-authored OBJ that replaces the
+  // pipeline-generated shell for this segment. Validation still runs
+  // on the loaded mesh. Rare; used for eyebrow dormers / bay windows /
+  // any shape the skeleton subsystem doesn't handle.
+  roofOverrideMesh: z.string().optional(),
 }).describe(
   dedent`
   Roof segment node - an individual roof module within a roof group.
