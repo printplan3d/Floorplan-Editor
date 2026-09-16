@@ -20,6 +20,55 @@ import { SegmentedControl } from '../controls/segmented-control'
 import { SliderControl } from '../controls/slider-control'
 import { PanelWrapper } from './panel-wrapper'
 
+// --- Shell-rebuild helpers (per-edge pitch + dormers) --------------------
+//
+// Pitch <-> weight: our backend shell subsystem interprets `edge_weights`
+// as tan(pitch_angle) for each edge — 1.0 == 45 degrees uniform. The
+// panel shows PITCH ANGLE in degrees (0-70) since that's what humans
+// author against; conversion happens on write / read at the UI edge.
+const DEG_TO_RAD = Math.PI / 180
+const RAD_TO_DEG = 180 / Math.PI
+const DEFAULT_PITCH_DEG = 30
+function weightToDeg(w: number): number {
+  return Math.round(Math.atan(w) * RAD_TO_DEG)
+}
+function degToWeight(d: number): number {
+  return Math.max(0.01, Math.tan(d * DEG_TO_RAD))
+}
+const EDGE_LABEL_RECT = ['South', 'East', 'North', 'West']
+// n_edges for a rect segment is always 4; for a 4-point polygon it's 4
+// too. Custom polygons with != 4 vertices are deferred UI (rare in DFY).
+function edgeCount(seg: RoofSegmentNode): number {
+  const poly = (seg as any).polygon as [number, number][] | undefined
+  return Array.isArray(poly) && poly.length >= 3 ? poly.length : 4
+}
+function edgeLabel(i: number, n: number): string {
+  if (n === 4) return EDGE_LABEL_RECT[i] ?? `Edge ${i + 1}`
+  return `Edge ${i + 1}`
+}
+
+type DormerType = 'gable' | 'shed' | 'hip'
+const DORMER_TYPE_OPTIONS: { label: string; value: DormerType }[] = [
+  { label: 'Gable', value: 'gable' },
+  { label: 'Shed', value: 'shed' },
+  { label: 'Hip', value: 'hip' },
+]
+
+function newDormerDefaults(seg: RoofSegmentNode): any {
+  return {
+    id: `dorm_${Math.random().toString(36).slice(2, 10)}`,
+    parentFaceId: 0,
+    footOnParent: [
+      [0.35, 0.15],
+      [0.55, 0.35],
+    ],
+    type: 'gable',
+    ridgeHeight: 0.8,
+    cheekWidth: 1.2,
+    ridgeOrientation: 'orthogonal',
+  }
+}
+
 const ROOF_TYPE_OPTIONS: { label: string; value: RoofType }[] = [
   { label: 'Hip', value: 'hip' },
   { label: 'Gable', value: 'gable' },
@@ -373,6 +422,196 @@ export function RoofSegmentPanel() {
           />
         </div>
       </PanelSection>
+
+      {(() => {
+        // Per-edge pitch section. Reads / writes edgeWeights[] — one
+        // entry per polygon edge. UI shows PITCH ANGLE in degrees; we
+        // convert to tan(pitch) on write. When all edges have the
+        // default pitch we clear edgeWeights so old plans that used
+        // the roofHeight/half-span pitch still work unchanged.
+        const n = edgeCount(node)
+        const currentWeights = ((node as any).edgeWeights as number[] | undefined) ?? []
+        const pitches: number[] = Array.from({ length: n }, (_, i) => {
+          const w = currentWeights[i]
+          return typeof w === 'number' ? weightToDeg(w) : DEFAULT_PITCH_DEG
+        })
+        const setPitch = (i: number, deg: number) => {
+          const next = [...pitches]
+          next[i] = deg
+          const weights = next.map(degToWeight)
+          const allDefault = next.every((d) => d === DEFAULT_PITCH_DEG)
+          handleUpdate({
+            edgeWeights: allDefault ? undefined : weights,
+          } as any)
+        }
+        const clearAll = () => handleUpdate({ edgeWeights: undefined } as any)
+        return (
+          <PanelSection title="Per-Edge Pitch">
+            <div className="px-1 pt-1 text-[10px] leading-tight text-neutral-500">
+              Shell-rebuild only (RITN3D_USE_SHELL_BUILDER=1). Different
+              pitches per edge produce a variable-pitch roof.
+            </div>
+            {pitches.map((p, i) => (
+              <SliderControl
+                key={i}
+                label={edgeLabel(i, n)}
+                max={70}
+                min={5}
+                onChange={(v) => setPitch(i, v)}
+                precision={0}
+                step={1}
+                unit="°"
+                value={p}
+              />
+            ))}
+            <div className="flex gap-1.5 px-1 pt-2 pb-1">
+              <ActionButton label="Reset to Default" onClick={clearAll} />
+            </div>
+          </PanelSection>
+        )
+      })()}
+
+      {(() => {
+        // Dormer list. Each dormer stored on the segment as a
+        // {id, parentFaceId, footOnParent, type, ridgeHeight,
+        //  cheekWidth, ...} object. The shell backend cuts the parent
+        // roof around each dormer at render time.
+        const dormers = ((node as any).dormers as any[] | undefined) ?? []
+        const n = edgeCount(node)
+        const setDormers = (next: any[]) =>
+          handleUpdate({ dormers: next.length ? next : undefined } as any)
+        const addDormer = () => setDormers([...dormers, newDormerDefaults(node)])
+        const updateDormer = (idx: number, patch: any) => {
+          const next = dormers.map((d, i) => (i === idx ? { ...d, ...patch } : d))
+          setDormers(next)
+        }
+        const deleteDormer = (idx: number) =>
+          setDormers(dormers.filter((_, i) => i !== idx))
+        return (
+          <PanelSection title={`Dormers (${dormers.length})`}>
+            <div className="px-1 pt-1 text-[10px] leading-tight text-neutral-500">
+              Manually placed on a parent face (0…{n - 1}). Foot U/V is a
+              position on the face — U along the eave, V toward the ridge.
+            </div>
+            {dormers.map((d, idx) => {
+              const u = d.footOnParent?.[0]?.[0] ?? 0.35
+              const v = d.footOnParent?.[0]?.[1] ?? 0.15
+              const setFoot = (nu: number, nv: number) => {
+                const half_w = (d.cheekWidth ?? 1.2) / 20 // tiny UV span, mostly cosmetic
+                updateDormer(idx, {
+                  footOnParent: [
+                    [nu - half_w, nv],
+                    [nu + half_w, nv + 0.15],
+                  ],
+                })
+              }
+              return (
+                <div
+                  className="mt-1.5 rounded border border-neutral-700/60 p-1.5"
+                  key={d.id ?? idx}
+                >
+                  <div className="flex items-center justify-between px-0.5 pb-1">
+                    <span className="text-[11px] text-neutral-300">
+                      Dormer {idx + 1}
+                    </span>
+                    <ActionButton
+                      className="hover:bg-red-500/20"
+                      icon={<Trash2 className="h-3 w-3 text-red-400" />}
+                      label=""
+                      onClick={() => deleteDormer(idx)}
+                    />
+                  </div>
+                  <SegmentedControl
+                    onChange={(v) => updateDormer(idx, { type: v })}
+                    options={DORMER_TYPE_OPTIONS}
+                    value={d.type ?? 'gable'}
+                  />
+                  <MetricControl
+                    label="Parent face"
+                    max={n - 1}
+                    min={0}
+                    onChange={(v) =>
+                      updateDormer(idx, { parentFaceId: Math.round(v) })
+                    }
+                    precision={0}
+                    step={1}
+                    unit=""
+                    value={d.parentFaceId ?? 0}
+                  />
+                  <SliderControl
+                    label="U (along eave)"
+                    max={0.9}
+                    min={0.1}
+                    onChange={(nv) => setFoot(nv, v)}
+                    precision={2}
+                    step={0.05}
+                    unit=""
+                    value={u}
+                  />
+                  <SliderControl
+                    label="V (toward ridge)"
+                    max={0.9}
+                    min={0.05}
+                    onChange={(nv) => setFoot(u, nv)}
+                    precision={2}
+                    step={0.05}
+                    unit=""
+                    value={v}
+                  />
+                  <SliderControl
+                    label="Ridge height"
+                    max={2.5}
+                    min={0.3}
+                    onChange={(nv) => updateDormer(idx, { ridgeHeight: nv })}
+                    precision={2}
+                    step={0.1}
+                    unit="m"
+                    value={d.ridgeHeight ?? 0.8}
+                  />
+                  <SliderControl
+                    label="Cheek width"
+                    max={4}
+                    min={0.6}
+                    onChange={(nv) => updateDormer(idx, { cheekWidth: nv })}
+                    precision={2}
+                    step={0.1}
+                    unit="m"
+                    value={d.cheekWidth ?? 1.2}
+                  />
+                </div>
+              )
+            })}
+            <div className="flex gap-1.5 px-1 pt-2 pb-1">
+              <ActionButton label="+ Add Dormer" onClick={addDormer} />
+            </div>
+          </PanelSection>
+        )
+      })()}
+
+      {(() => {
+        const currentOverride =
+          ((node as any).roofOverrideMesh as string | undefined) ?? ''
+        return (
+          <PanelSection title="Advanced">
+            <div className="px-1 pt-1 pb-1 text-[10px] leading-tight text-neutral-500">
+              roof_override_mesh — path to an OBJ. When set, the pipeline
+              uses this mesh verbatim (still validated). For eyebrows /
+              arcs / hand-authored assets only.
+            </div>
+            <input
+              className="w-full rounded border border-neutral-700/60 bg-neutral-900 px-1.5 py-1 text-[11px] text-neutral-200 outline-none focus:border-neutral-500"
+              onChange={(e) =>
+                handleUpdate({
+                  roofOverrideMesh: e.target.value || undefined,
+                } as any)
+              }
+              placeholder="e.g. /assets/roofs/eyebrow_a.obj"
+              type="text"
+              value={currentOverride}
+            />
+          </PanelSection>
+        )
+      })()}
 
       <PanelSection title="Actions">
         <ActionGroup>
