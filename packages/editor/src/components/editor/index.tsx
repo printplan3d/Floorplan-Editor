@@ -465,12 +465,13 @@ export default function Editor({
             {/* Ritn3D 2026-09-23: 3D preview toggle. Flips isPreviewMode →
                 mounts the full <Viewer> scene (walls / doors / windows /
                 roofs) with live geometry from the client-side systems.
-                Sits at top-right BELOW the Generate 3D CTA (which
-                occupies top-4) so both actions are visible without
-                overlap. Hidden while already in 3D mode; ViewerOverlay's
-                Back button returns to 2D. */}
+                Positioned bottom-right at z-[10000] to sit ABOVE the
+                webapp shell's Export/Generate 3D cards (which use
+                z-[9999] at top-4/top-16). Top-right can't be used
+                without a collision. Hidden while already in 3D mode;
+                ViewerOverlay's Back button returns to 2D. */}
             {!needs3D && (
-              <div className="pointer-events-none fixed top-16 right-4 z-40 flex flex-col items-end">
+              <div className="pointer-events-none fixed bottom-6 right-6 z-[10000] flex flex-col items-end">
                 <div className="pointer-events-auto">
                   <PreviewButton />
                 </div>
