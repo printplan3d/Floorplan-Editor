@@ -78,6 +78,11 @@ const commitRoofPlacement = (
       depth,
       wallHeight: DEFAULT_WALL_HEIGHT,
       roofHeight: DEFAULT_ROOF_HEIGHT,
+      // 2026-09-22: new roofs opt into auto-height by default so the
+      // ridge lifts off any upper-storey walls sitting under the
+      // polygon without the user touching the slider. Toggle off to
+      // pin roofHeight manually.
+      autoRoofHeight: true,
       roofType: 'gable',
       position: [localX, 0, localZ],
     })
@@ -97,6 +102,7 @@ const commitRoofPlacement = (
     depth,
     wallHeight: DEFAULT_WALL_HEIGHT,
     roofHeight: DEFAULT_ROOF_HEIGHT,
+    autoRoofHeight: true,  // see the add-segment branch above
     roofType: 'gable',
     position: [0, 0, 0],
   })

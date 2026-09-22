@@ -44,6 +44,17 @@ export const RoofSegmentNode = BaseNode.extend({
   // Vertical dimensions
   wallHeight: z.number().default(0.5),
   roofHeight: z.number().default(2.5),
+  // Auto-compute `roofHeight` from any upper-storey walls that sit
+  // under this roof polygon. When true, the roof-segment panel writes
+  // `max(intersecting_wall.top_z) - eave_z + 1.0m` (or
+  // `min(width, depth) / 4` for a single-storey plan with no upper
+  // walls) back into `roofHeight` on every scene edit. When false the
+  // user drives `roofHeight` by hand, exactly as before. Default is
+  // false so plans authored before this field parses lands unchanged;
+  // new roofs get `autoRoofHeight: true` at creation time (see
+  // roof-tool.tsx). Agreed with the operator 2026-09-22 as part of
+  // the L0-roof-covers-L1 multi-storey model.
+  autoRoofHeight: z.boolean().default(false),
   // Structure thicknesses
   wallThickness: z.number().default(0.1),
   deckThickness: z.number().default(0.1),

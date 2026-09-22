@@ -8,9 +8,9 @@ import {
   type RoofType,
   useScene,
 } from '@ritn3d/core'
-import { useViewer } from '@ritn3d/viewer'
+import { DEFAULT_LEVEL_HEIGHT, getLevelHeight, useViewer } from '@ritn3d/viewer'
 import { Copy, Move, Trash2 } from 'lucide-react'
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import useEditor from '../../../store/use-editor'
 import { ActionButton, ActionGroup } from '../controls/action-button'
@@ -76,6 +76,138 @@ const ROOF_TYPE_OPTIONS: { label: string; value: RoofType }[] = [
   { label: 'Flat', value: 'flat' },
 ]
 
+// ─── Auto roofHeight computation ─────────────────────────────────────
+// Multi-storey L0-roof-covers-L1 model (2026-09-22): compute the
+// segment's roofHeight so the ridge sits at least AUTO_HEIGHT_MARGIN_M
+// above the tallest wall whose XY footprint falls under the segment's
+// polygon. Falls back to `min(width, depth) / 4` on single-storey
+// plans where no wall pokes into the roof volume.
+const AUTO_HEIGHT_MARGIN_M = 1.0
+
+function _segLocalPolygon(seg: RoofSegmentNode): [number, number][] {
+  const poly = (seg as any).polygon as [number, number][] | undefined
+  if (Array.isArray(poly) && poly.length >= 3) {
+    return poly.map((p) => [Number(p[0]), Number(p[1])] as [number, number])
+  }
+  const w2 = seg.width / 2
+  const d2 = seg.depth / 2
+  return [
+    [-w2, -d2],
+    [w2, -d2],
+    [w2, d2],
+    [-w2, d2],
+  ]
+}
+
+function _pointInPolygon(p: [number, number], poly: [number, number][]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const pi = poly[i]!
+    const pj = poly[j]!
+    const cross = pi[1] > p[1] !== pj[1] > p[1]
+    if (cross) {
+      const xat = pi[0] + ((p[1] - pi[1]) * (pj[0] - pi[0])) / (pj[1] - pi[1] || 1e-12)
+      if (p[0] < xat) inside = !inside
+    }
+  }
+  return inside
+}
+
+function _segsIntersect(
+  a: [number, number],
+  b: [number, number],
+  c: [number, number],
+  d: [number, number],
+): boolean {
+  const denom = (b[0] - a[0]) * (d[1] - c[1]) - (b[1] - a[1]) * (d[0] - c[0])
+  if (Math.abs(denom) < 1e-12) return false
+  const t = ((c[0] - a[0]) * (d[1] - c[1]) - (c[1] - a[1]) * (d[0] - c[0])) / denom
+  const u = ((c[0] - a[0]) * (b[1] - a[1]) - (c[1] - a[1]) * (b[0] - a[0])) / denom
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1
+}
+
+function _wallHitsPolygon(
+  start: [number, number],
+  end: [number, number],
+  poly: [number, number][],
+): boolean {
+  if (_pointInPolygon(start, poly) || _pointInPolygon(end, poly)) return true
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    if (_segsIntersect(start, end, poly[j]!, poly[i]!)) return true
+  }
+  return false
+}
+
+function computeAutoRoofHeight(
+  seg: RoofSegmentNode,
+  nodes: Record<string, AnyNode>,
+): number {
+  // 1. Elevations per level. getLevelHeight is cache-hit by
+  //    reference-equality of the nodes bag, so the useMemo below
+  //    keeps the whole computation cheap.
+  const levels = (Object.values(nodes).filter((n) => n?.type === 'level') as any[]).sort(
+    (a, b) => (a.level ?? 0) - (b.level ?? 0),
+  )
+  const levelElev = new Map<string, number>()
+  let cumEl = 0
+  for (const lvl of levels) {
+    levelElev.set(lvl.id, cumEl)
+    cumEl += getLevelHeight(lvl.id, nodes)
+  }
+
+  // 2. This segment's own level + eave elevation.
+  const parentRoof = seg.parentId ? nodes[seg.parentId as AnyNodeId] : null
+  const parentLevel =
+    parentRoof && parentRoof.parentId ? nodes[parentRoof.parentId as AnyNodeId] : null
+  const singleStoreyFallback = () => Math.max(0.5, Math.min(seg.width, seg.depth) / 4)
+  if (!parentLevel || parentLevel.type !== 'level') return singleStoreyFallback()
+  const ourElev = levelElev.get(parentLevel.id) ?? 0
+  const eaveZ = ourElev + (seg.wallHeight ?? 0)
+
+  // 3. World-plan polygon of the roof segment. The plan-scene emits
+  //    walls' start/end in the same UNFLIPPED frame this uses, so
+  //    intersection tests here match what the backend renders.
+  const local = _segLocalPolygon(seg)
+  const parentRoofPos = ((parentRoof as any)?.position ?? [0, 0, 0]) as number[]
+  const parentRoofRot = ((parentRoof as any)?.rotation ?? 0) as number
+  const cosG = Math.cos(parentRoofRot)
+  const sinG = Math.sin(parentRoofRot)
+  const worldCx =
+    (parentRoofPos[0] ?? 0) + seg.position[0] * cosG - seg.position[2] * sinG
+  const worldCz =
+    (parentRoofPos[2] ?? 0) + seg.position[0] * sinG + seg.position[2] * cosG
+  const worldRot = parentRoofRot + (seg.rotation ?? 0)
+  const cosR = Math.cos(worldRot)
+  const sinR = Math.sin(worldRot)
+  const worldPoly: [number, number][] = local.map(([lx, lz]) => [
+    worldCx + lx * cosR - lz * sinR,
+    worldCz + lx * sinR + lz * cosR,
+  ])
+
+  // 4. Iterate walls, find intersecting ones whose top is above eave.
+  let maxTop = -Infinity
+  let anyAbove = false
+  for (const n of Object.values(nodes)) {
+    if (!n || n.type !== 'wall') continue
+    const wLevel = n.parentId ? nodes[n.parentId as AnyNodeId] : null
+    if (!wLevel || wLevel.type !== 'level') continue
+    const wElev = levelElev.get(wLevel.id) ?? 0
+    const wTop = wElev + ((n as any).height ?? DEFAULT_LEVEL_HEIGHT)
+    if (wTop <= eaveZ + 1e-3) continue
+
+    const s = (n as any).start
+    const e = (n as any).end
+    if (!Array.isArray(s) || !Array.isArray(e) || s.length < 2 || e.length < 2) continue
+    if (!_wallHitsPolygon([s[0], s[1]], [e[0], e[1]], worldPoly)) continue
+
+    anyAbove = true
+    if (wTop > maxTop) maxTop = wTop
+  }
+
+  if (anyAbove) return Math.max(0.5, maxTop - eaveZ + AUTO_HEIGHT_MARGIN_M)
+  return singleStoreyFallback()
+}
+
 // Gambrel / Dutch / Mansard are DEFERRED in blender_pipeline_dev/roof/scene.py
 // — the backend raises NotImplementedError on those kinds, so the pipeline
 // silently skips the roof and the user gets no roof at all. Hidden from the
@@ -126,6 +258,23 @@ export function RoofSegmentPanel() {
       updateNode(node.id as AnyNode['id'], { roofType: 'gable' })
     }
   }, [node?.id, node?.roofType, updateNode])
+
+  // Reactive auto-roofHeight — recomputes any time the scene (walls,
+  // levels, this segment's polygon) changes. Zero cost when the toggle
+  // is off. When on, writes the computed height back into the node
+  // only when it drifts more than 1 cm from the current value, so the
+  // scene doesn't churn on floating-point noise.
+  const autoRoofH = useMemo(() => {
+    if (!node || node.type !== 'roof-segment') return null
+    if (!(node as any).autoRoofHeight) return null
+    return computeAutoRoofHeight(node, nodes as Record<string, AnyNode>)
+  }, [node, nodes])
+
+  useEffect(() => {
+    if (!node || autoRoofH == null) return
+    if (Math.abs(autoRoofH - node.roofHeight) < 0.01) return
+    updateNode(node.id as AnyNode['id'], { roofHeight: autoRoofH })
+  }, [autoRoofH, node?.id, node?.roofHeight, updateNode])
 
   const handleClose = useCallback(() => {
     setSelection({ selectedIds: [] })
@@ -319,16 +468,33 @@ export function RoofSegmentPanel() {
           unit="m"
           value={Math.round(node.wallHeight * 100) / 100}
         />
-        <SliderControl
-          label="Roof"
-          max={15}
-          min={0}
-          onChange={(v) => handleUpdate({ roofHeight: v })}
-          precision={2}
-          step={0.1}
-          unit="m"
-          value={Math.round(node.roofHeight * 100) / 100}
+        <SegmentedControl
+          onChange={(v) =>
+            handleUpdate({ autoRoofHeight: v === 'auto' } as Partial<RoofSegmentNode>)
+          }
+          options={[
+            { label: 'Auto', value: 'auto' },
+            { label: 'Manual', value: 'manual' },
+          ]}
+          value={(node as any).autoRoofHeight ? 'auto' : 'manual'}
         />
+        {(node as any).autoRoofHeight ? (
+          <div className="px-1 py-1 text-[11px] leading-tight text-neutral-500">
+            Roof <b>{(Math.round(node.roofHeight * 100) / 100).toFixed(2)} m</b>
+            {' '}— auto from upper walls + 1.0 m margin.
+          </div>
+        ) : (
+          <SliderControl
+            label="Roof"
+            max={15}
+            min={0}
+            onChange={(v) => handleUpdate({ roofHeight: v })}
+            precision={2}
+            step={0.1}
+            unit="m"
+            value={Math.round(node.roofHeight * 100) / 100}
+          />
+        )}
       </PanelSection>
 
       {/* Structure — only Overhang is wired into blender_pipeline_dev/roof
