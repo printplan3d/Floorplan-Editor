@@ -186,8 +186,15 @@ function updateMergedRoofGeometry(
 
   if (children.length === 0) {
     mergedMesh.geometry.dispose()
-    // Keep a valid position attribute so Drei's BVH can index safely.
-    mergedMesh.geometry = new THREE.BoxGeometry(0, 0, 0)
+    // Empty position attribute, NO groups. A BoxGeometry here would
+    // ship six groups (materialIndex 0-5) against roofMaterials'
+    // four entries, and three.js's Mesh.raycast would read
+    // materials[4].side → undefined.side → TypeError on every
+    // raycast, taking the render loop down with it. Same trap the
+    // per-segment path below already works around.
+    const empty = new THREE.BufferGeometry()
+    empty.setAttribute('position', new THREE.Float32BufferAttribute([], 3))
+    mergedMesh.geometry = empty
     return
   }
 
