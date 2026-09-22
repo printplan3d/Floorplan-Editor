@@ -4,6 +4,7 @@ import { Icon } from '@iconify/react'
 import { initSpaceDetectionSync, initSpatialGridSync, useScene } from '@ritn3d/core'
 import { InteractiveSystem, useViewer, Viewer } from '@ritn3d/viewer'
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { PreviewButton } from '../../components/preview-button'
 import { ViewerOverlay } from '../../components/viewer-overlay'
 import { ViewerZoneSystem } from '../../components/viewer-zone-system'
 import { type PresetsAdapter, PresetsProvider } from '../../contexts/presets-context'
@@ -460,6 +461,20 @@ export default function Editor({
                   await onGenerate3D(drawing)
                 }}
               />
+            )}
+            {/* Ritn3D 2026-09-23: 3D preview toggle. Flips isPreviewMode →
+                mounts the full <Viewer> scene (walls / doors / windows /
+                roofs) with live geometry from the client-side systems.
+                Sits at top-right BELOW the Generate 3D CTA (which
+                occupies top-4) so both actions are visible without
+                overlap. Hidden while already in 3D mode; ViewerOverlay's
+                Back button returns to 2D. */}
+            {!needs3D && (
+              <div className="pointer-events-none fixed top-16 right-4 z-40 flex flex-col items-end">
+                <div className="pointer-events-auto">
+                  <PreviewButton />
+                </div>
+              </div>
             )}
             <HelperManager />
 
