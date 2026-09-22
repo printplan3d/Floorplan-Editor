@@ -215,6 +215,79 @@ function computeAutoRoofHeight(
   return singleStoreyFallback()
 }
 
+// ─── Ridge-height / edge-weight coupling ─────────────────────────────
+// Backend interprets each `edgeWeights[i]` as tan(pitch_i) — the pipeline
+// adapter (mesh._pipeline_mass_to_shell_mass) inverts to cot before the
+// shell subsystem sees it. Under this convention the ridge rise above
+// eave for a gable rectangle with hip-edge tan values t_a, t_b and full
+// span W (perpendicular to the ridge) is:
+//     ridge_Z = W · (t_a · t_b) / (t_a + t_b)
+// (Backend derivation: two opposing edges with inward speeds c_i = 1/t_i
+// close a gap W in time W/(c_a+c_b); ridge Z = time under weight=speed
+// semantics — verified empirically against a 10×10 uniform-t=1 case
+// giving ridge Z = 5, matching a 45° pyramid.)
+//
+// So if the user drags the roof-height slider, we hold the RATIO between
+// the per-edge weights fixed and multiply every entry by
+//     scale = target_ridge / current_implied_ridge
+// preserving each edge's relative steepness while landing the ridge
+// where the slider says. When there are no edge_weights the slider
+// writes roof_height alone and the backend derives a uniform pitch —
+// same as before.
+function _impliedRidgeFromWeights(seg: RoofSegmentNode): number | null {
+  const weights = (seg as any).edgeWeights as number[] | undefined
+  if (!Array.isArray(weights) || weights.length !== 4) return null
+  // Determine which pair of edges drives the ridge (the hip pair).
+  // In editor rect frame, indices 0/2 are the S/N edges (running along
+  // X) and indices 1/3 are the E/W edges (running along Y). A
+  // ridge_axis of 'east-west' means the ridge runs east-west, so the
+  // gable ends are on E and W (indices 1, 3) and hips are on S/N
+  // (0, 2). For 'north-south' it's the mirror. 'auto' uses the same
+  // width>=depth heuristic the backend does.
+  const axis = (seg as any).ridgeAxis
+  const w = seg.width
+  const d = seg.depth
+  let idxA: number, idxB: number, span: number
+  if (axis === 'east-west') {
+    idxA = 0
+    idxB = 2
+    span = d
+  } else if (axis === 'north-south') {
+    idxA = 1
+    idxB = 3
+    span = w
+  } else if (w >= d) {
+    idxA = 1
+    idxB = 3
+    span = w
+  } else {
+    idxA = 0
+    idxB = 2
+    span = d
+  }
+  const tA = Number(weights[idxA])
+  const tB = Number(weights[idxB])
+  if (!(tA > 0 && tB > 0 && span > 0)) return null
+  return (span * (tA * tB)) / (tA + tB)
+}
+
+// Returns the edgeWeights we'd write alongside a roofHeight change, or
+// null when no scaling is needed (no weights set, or implied ridge is
+// zero / can't be computed).
+function _scaledEdgeWeights(
+  seg: RoofSegmentNode,
+  targetRoofHeight: number,
+): number[] | null {
+  const weights = (seg as any).edgeWeights as number[] | undefined
+  if (!Array.isArray(weights) || weights.length !== 4) return null
+  const current = _impliedRidgeFromWeights(seg)
+  if (current == null || current <= 1e-6) return null
+  const scale = targetRoofHeight / current
+  if (!isFinite(scale) || scale <= 0) return null
+  if (Math.abs(scale - 1) < 1e-3) return null
+  return weights.map((w) => Math.max(0.01, Number(w) * scale))
+}
+
 // Gambrel / Dutch / Mansard are DEFERRED in blender_pipeline_dev/roof/scene.py
 // — the backend raises NotImplementedError on those kinds, so the pipeline
 // silently skips the roof and the user gets no roof at all. Hidden from the
@@ -253,6 +326,26 @@ export function RoofSegmentPanel() {
     [selectedId, updateNode],
   )
 
+  // Height-slider handler that also rescales existing edge_weights
+  // proportionally so the ridge lands where the slider says even when
+  // Per-Edge Pitch is populated. Without this the shell path reads
+  // edge_weights and ignores roof_height, so the slider would be a
+  // no-op. Ratios between edges are preserved — steep edges stay
+  // proportionally steeper — matching the model agreed with the
+  // operator 2026-09-22.
+  const applyRoofHeight = useCallback(
+    (newHeight: number) => {
+      if (!node || !selectedId) return
+      const scaled = _scaledEdgeWeights(node, newHeight)
+      const updates: Partial<RoofSegmentNode> = { roofHeight: newHeight }
+      if (scaled) {
+        ;(updates as any).edgeWeights = scaled
+      }
+      updateNode(selectedId as AnyNode['id'], updates)
+    },
+    [node, selectedId, updateNode],
+  )
+
   // Auto-migrate roof segments that were saved with a deferred kind
   // (gambrel / dutch / mansard) — the backend rejects those and drops
   // the whole roof silently. Force to 'gable' the first time such a
@@ -280,8 +373,8 @@ export function RoofSegmentPanel() {
   useEffect(() => {
     if (!node || autoRoofH == null) return
     if (Math.abs(autoRoofH - node.roofHeight) < 0.01) return
-    updateNode(node.id as AnyNode['id'], { roofHeight: autoRoofH })
-  }, [autoRoofH, node?.id, node?.roofHeight, updateNode])
+    applyRoofHeight(autoRoofH)
+  }, [autoRoofH, node?.id, node?.roofHeight, applyRoofHeight])
 
   const handleClose = useCallback(() => {
     setSelection({ selectedIds: [] })
@@ -496,16 +589,24 @@ export function RoofSegmentPanel() {
             {' '}— auto from upper walls + 1.0 m margin.
           </div>
         ) : (
-          <SliderControl
-            label="Roof"
-            max={15}
-            min={0}
-            onChange={(v) => handleUpdate({ roofHeight: v })}
-            precision={2}
-            step={0.1}
-            unit="m"
-            value={Math.round(node.roofHeight * 100) / 100}
-          />
+          <>
+            <SliderControl
+              label="Roof"
+              max={15}
+              min={0}
+              onChange={(v) => applyRoofHeight(v)}
+              precision={2}
+              step={0.1}
+              unit="m"
+              value={Math.round(node.roofHeight * 100) / 100}
+            />
+            {Array.isArray((node as any).edgeWeights) &&
+              (node as any).edgeWeights.length > 0 && (
+                <div className="px-1 pt-0 pb-1 text-[10px] leading-tight text-neutral-500">
+                  Rescales per-edge pitches proportionally when set.
+                </div>
+              )}
+          </>
         )}
       </PanelSection>
 
