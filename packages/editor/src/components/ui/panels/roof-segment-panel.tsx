@@ -155,14 +155,21 @@ function computeAutoRoofHeight(
     cumEl += getLevelHeight(lvl.id, nodes)
   }
 
-  // 2. This segment's own level + eave elevation.
+  // 2. This segment's own level + eave elevation. Eave sits at
+  //    level_elevation + level_wall_height + optional roof-segment
+  //    parapet (seg.wallHeight). The BACKEND uses exactly this
+  //    formula (editor_scene_translator_dev.py:
+  //    `base_z = storey_elev + storey_height + wall_h`). If we skip
+  //    the storey_height term the auto value comes out ~2.7 m too
+  //    tall — a plain 1-storey house's roof looks like a church.
   const parentRoof = seg.parentId ? nodes[seg.parentId as AnyNodeId] : null
   const parentLevel =
     parentRoof && parentRoof.parentId ? nodes[parentRoof.parentId as AnyNodeId] : null
   const singleStoreyFallback = () => Math.max(0.5, Math.min(seg.width, seg.depth) / 4)
   if (!parentLevel || parentLevel.type !== 'level') return singleStoreyFallback()
   const ourElev = levelElev.get(parentLevel.id) ?? 0
-  const eaveZ = ourElev + (seg.wallHeight ?? 0)
+  const parentStoreyHeight = getLevelHeight(parentLevel.id, nodes)
+  const eaveZ = ourElev + parentStoreyHeight + (seg.wallHeight ?? 0)
 
   // 3. World-plan polygon of the roof segment. The plan-scene emits
   //    walls' start/end in the same UNFLIPPED frame this uses, so
@@ -459,7 +466,7 @@ export function RoofSegmentPanel() {
 
       <PanelSection title="Heights">
         <SliderControl
-          label="Wall"
+          label="Parapet"
           max={5}
           min={0}
           onChange={(v) => handleUpdate({ wallHeight: v })}
@@ -468,6 +475,11 @@ export function RoofSegmentPanel() {
           unit="m"
           value={Math.round(node.wallHeight * 100) / 100}
         />
+        <div className="px-1 pt-0 pb-1 text-[10px] leading-tight text-neutral-500">
+          Extra vertical rise above the storey wall top, before the roof pitch.
+          0 for a plain roof. Storey wall height comes from the wall segments
+          on the level, not from here.
+        </div>
         <SegmentedControl
           onChange={(v) =>
             handleUpdate({ autoRoofHeight: v === 'auto' } as Partial<RoofSegmentNode>)

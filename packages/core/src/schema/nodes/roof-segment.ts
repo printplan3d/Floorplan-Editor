@@ -42,7 +42,18 @@ export const RoofSegmentNode = BaseNode.extend({
   // transform on top of the polygon.
   polygon: z.array(z.tuple([z.number(), z.number()])).optional(),
   // Vertical dimensions
-  wallHeight: z.number().default(0.5),
+  // `wallHeight` here is NOT the storey wall height — that lives on each
+  // WallNode drawn on the level. This is a PARAPET: a short vertical
+  // extension added ABOVE the storey wall top, BEFORE the roof pitch
+  // begins. The backend uses it verbatim:
+  //   base_z = storey_elev + storey_height + wallHeight
+  // (editor_scene_translator_dev.py). Set to 0 for a plain roof (eave
+  // sitting flush on the storey wall top). Non-zero for mansard-style
+  // setbacks. Previous default was 0.5 m, which silently raised every
+  // eave 50 cm above the walls the user drew — confusing. Default
+  // dropped to 0 on 2026-09-22; existing plans keep their explicit
+  // value.
+  wallHeight: z.number().default(0),
   roofHeight: z.number().default(2.5),
   // Auto-compute `roofHeight` from any upper-storey walls that sit
   // under this roof polygon. When true, the roof-segment panel writes

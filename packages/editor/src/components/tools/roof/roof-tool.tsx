@@ -19,7 +19,11 @@ import { sfxEmitter } from '../../../lib/sfx-bus'
 import useEditor from '../../../store/use-editor'
 import { CursorSphere } from '../shared/cursor-sphere'
 
-const DEFAULT_WALL_HEIGHT = 0.5
+// Roof-segment parapet height. NOT the storey wall height — that lives
+// on WallNode.height per-wall. Zero = plain roof, eave flush on storey
+// wall top. Legacy was 0.5 m, changed 2026-09-22 to match the schema
+// default drop; every roof drawn before this bump kept 0.5 explicitly.
+const DEFAULT_WALL_HEIGHT = 0
 const DEFAULT_ROOF_HEIGHT = 2.5
 const GRID_OFFSET = 0.02
 
