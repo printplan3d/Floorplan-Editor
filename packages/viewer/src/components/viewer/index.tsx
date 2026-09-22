@@ -13,6 +13,7 @@ import { Bvh } from '@react-three/drei'
 import { Canvas, extend, type ThreeToJSXElements, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three/webgpu'
+import { installRaycastGuard } from '../../lib/raycast-guard'
 import useViewer from '../../store/use-viewer'
 import { GuideSystem } from '../../systems/guide/guide-system'
 import { ItemLightSystem } from '../../systems/item-light/item-light-system'
@@ -60,6 +61,12 @@ declare module '@react-three/fiber' {
 }
 
 extend(THREE as any)
+
+// TEMPORARY (2026-09-23): keeps a single mesh that throws inside
+// raycast from taking the whole render loop down, and names the
+// offender once in the console. See lib/raycast-guard.ts. Remove
+// after the preview-blanking bug is closed.
+installRaycastGuard()
 
 /**
  * Monitors the WebGPU device for loss events and logs them.

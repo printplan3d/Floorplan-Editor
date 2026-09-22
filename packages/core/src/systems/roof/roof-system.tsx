@@ -25,6 +25,26 @@ const _tmpMatrix = new THREE.Matrix4()
 const _tmpPosition = new THREE.Vector3()
 const _tmpQuaternion = new THREE.Quaternion()
 
+// roofMaterials / roofDebugMaterials both have exactly four entries.
+// Any group whose materialIndex lands outside that range makes
+// three.js resolve `material[idx]` to undefined, and both the stock
+// Mesh.raycast and the three-mesh-bvh accelerated raycast then throw
+// on `.side`. Clamp on the way in.
+const ROOF_MAX_SLOT = 3
+
+/**
+ * Concatenate roof part geometries into one, guaranteeing that EVERY
+ * index is covered by exactly one group with an in-range
+ * materialIndex.
+ *
+ * Why the guarantee matters: three-mesh-bvh's accelerated raycast
+ * looks up the group containing a hit triangle's face index. If a
+ * triangle falls in no group, the lookup yields undefined and the
+ * raycast throws `Cannot read properties of undefined (reading
+ * 'materialIndex')` — on every pointer move, which kills the render
+ * loop and blanks the scene. A part with an empty `groups` array
+ * (e.g. a CSG result that lost them) used to produce exactly that.
+ */
 function _mergeGeometries(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const positions: number[] = []
   const normals: number[] = []
@@ -42,12 +62,19 @@ function _mergeGeometries(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
       if (nrm) normals.push(nrm.getX(i), nrm.getY(i), nrm.getZ(i))
     }
     for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + base)
-    for (const g of p.groups)
-      groups.push({
-        start: g.start + indexBase,
-        count: g.count,
-        slot: g.materialIndex ?? 0,
-      })
+    if (p.groups && p.groups.length > 0) {
+      for (const g of p.groups) {
+        groups.push({
+          start: g.start + indexBase,
+          count: g.count,
+          slot: Math.min(ROOF_MAX_SLOT, Math.max(0, g.materialIndex ?? 0)),
+        })
+      }
+    } else {
+      // No groups on this part — cover its whole index range so no
+      // triangle is left orphaned.
+      groups.push({ start: indexBase, count: idx.count, slot: 0 })
+    }
     base += pos.count
     indexBase += idx.count
   }
@@ -56,7 +83,23 @@ function _mergeGeometries(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   if (normals.length === positions.length)
     geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
   geom.setIndex(indices)
-  for (const g of groups) geom.addGroup(g.start, g.count, g.slot)
+
+  // Final safety net: sort by start and verify the groups tile the
+  // whole index buffer with no gaps. Patch any hole with a slot-0
+  // group rather than shipping a geometry that can throw in raycast.
+  groups.sort((a, b) => a.start - b.start)
+  const patched: typeof groups = []
+  let cursor = 0
+  for (const g of groups) {
+    if (g.count <= 0) continue
+    if (g.start > cursor) patched.push({ start: cursor, count: g.start - cursor, slot: 0 })
+    patched.push(g)
+    cursor = Math.max(cursor, g.start + g.count)
+  }
+  if (cursor < indices.length) {
+    patched.push({ start: cursor, count: indices.length - cursor, slot: 0 })
+  }
+  for (const g of patched) geom.addGroup(g.start, g.count, g.slot)
   return geom
 }
 

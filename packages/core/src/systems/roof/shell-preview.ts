@@ -655,9 +655,53 @@ function _facesToGeometry(
   return geom
 }
 
+// roofMaterials has four entries; a group pointing past that makes
+// material[idx] undefined and both the stock and BVH-accelerated
+// raycast throw. Clamp every slot we emit.
+const MAX_SLOT = 3
+
+/**
+ * Ensure a geometry's groups tile its ENTIRE index buffer with
+ * in-range materialIndex values.
+ *
+ * three-mesh-bvh's raycast resolves a hit triangle's material by
+ * finding the group that contains its face index. A triangle in no
+ * group yields undefined, and reading `.materialIndex` off it throws
+ * on every pointer move — which takes down the render loop and
+ * blanks the scene. CSG results in particular can come back with no
+ * groups at all, so this runs on anything we hand downstream.
+ */
+export function ensureGroupCoverage(geom: THREE.BufferGeometry): THREE.BufferGeometry {
+  const idx = geom.getIndex()
+  const total = idx ? idx.count : (geom.getAttribute('position')?.count ?? 0)
+  if (total === 0) {
+    geom.clearGroups()
+    return geom
+  }
+  const src = (geom.groups ?? [])
+    .filter((g) => g.count > 0)
+    .map((g) => ({
+      start: g.start,
+      count: g.count,
+      slot: Math.min(MAX_SLOT, Math.max(0, g.materialIndex ?? 0)),
+    }))
+    .sort((a, b) => a.start - b.start)
+  const patched: typeof src = []
+  let cursor = 0
+  for (const g of src) {
+    if (g.start > cursor) patched.push({ start: cursor, count: g.start - cursor, slot: 0 })
+    patched.push(g)
+    cursor = Math.max(cursor, g.start + g.count)
+  }
+  if (cursor < total) patched.push({ start: cursor, count: total - cursor, slot: 0 })
+  geom.clearGroups()
+  for (const g of patched) geom.addGroup(g.start, g.count, g.slot)
+  return geom
+}
+
 function _concat(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
   if (parts.length === 0) return null
-  if (parts.length === 1) return parts[0]!
+  if (parts.length === 1) return ensureGroupCoverage(parts[0]!)
   const positions: number[] = []
   const normals: number[] = []
   const indices: number[] = []
@@ -674,12 +718,17 @@ function _concat(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
       if (nrm) normals.push(nrm.getX(i), nrm.getY(i), nrm.getZ(i))
     }
     for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + base)
-    for (const g of p.groups)
-      groups.push({
-        start: g.start + indexBase,
-        count: g.count,
-        slot: g.materialIndex ?? 0,
-      })
+    if (p.groups && p.groups.length > 0) {
+      for (const g of p.groups) {
+        groups.push({
+          start: g.start + indexBase,
+          count: g.count,
+          slot: Math.min(MAX_SLOT, Math.max(0, g.materialIndex ?? 0)),
+        })
+      }
+    } else {
+      groups.push({ start: indexBase, count: idx.count, slot: 0 })
+    }
     base += pos.count
     indexBase += idx.count
   }
@@ -689,5 +738,5 @@ function _concat(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
     geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
   geom.setIndex(indices)
   for (const g of groups) geom.addGroup(g.start, g.count, g.slot)
-  return geom
+  return ensureGroupCoverage(geom)
 }
