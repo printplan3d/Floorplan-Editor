@@ -7,6 +7,7 @@ import { sceneRegistry } from '../../hooks/scene-registry/scene-registry'
 import type { AnyNode, AnyNodeId, RoofNode, RoofSegmentNode } from '../../schema'
 import type { RoofType } from '../../schema/nodes/roof-segment'
 import useScene from '../../store/use-scene'
+import { generateShellSegmentGeometry } from './shell-preview'
 
 const csgEvaluator = new Evaluator()
 csgEvaluator.useGroups = true
@@ -18,6 +19,46 @@ const _position = new THREE.Vector3()
 const _quaternion = new THREE.Quaternion()
 const _scale = new THREE.Vector3(1, 1, 1)
 const _yAxis = new THREE.Vector3(0, 1, 0)
+// Second pool for the shell path so its transform work doesn't race
+// with the legacy CSG path when both live in one loop iteration.
+const _tmpMatrix = new THREE.Matrix4()
+const _tmpPosition = new THREE.Vector3()
+const _tmpQuaternion = new THREE.Quaternion()
+
+function _mergeGeometries(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const positions: number[] = []
+  const normals: number[] = []
+  const indices: number[] = []
+  const groups: { start: number; count: number; slot: number }[] = []
+  let base = 0
+  let indexBase = 0
+  for (const p of parts) {
+    const pos = p.getAttribute('position')
+    const nrm = p.getAttribute('normal')
+    const idx = p.getIndex()
+    if (!(pos && idx)) continue
+    for (let i = 0; i < pos.count; i++) {
+      positions.push(pos.getX(i), pos.getY(i), pos.getZ(i))
+      if (nrm) normals.push(nrm.getX(i), nrm.getY(i), nrm.getZ(i))
+    }
+    for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + base)
+    for (const g of p.groups)
+      groups.push({
+        start: g.start + indexBase,
+        count: g.count,
+        slot: g.materialIndex ?? 0,
+      })
+    base += pos.count
+    indexBase += idx.count
+  }
+  const geom = new THREE.BufferGeometry()
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  if (normals.length === positions.length)
+    geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
+  geom.setIndex(indices)
+  for (const g of groups) geom.addGroup(g.start, g.count, g.slot)
+  return geom
+}
 
 // Pending merged-roof updates carried across frames (for throttling)
 const pendingRoofUpdates = new Set<AnyNodeId>()
@@ -149,6 +190,41 @@ function updateMergedRoofGeometry(
     mergedMesh.geometry = new THREE.BoxGeometry(0, 0, 0)
     return
   }
+
+  // Shell path — if EVERY child segment can be rendered by the shell
+  // engine, skip CSG entirely and just concat the per-segment
+  // BufferGeometries (each already carries its own transform via the
+  // segment's position + rotation). Much faster than CSG-unioning
+  // brushes for the simple hip/gable case, and matches the backend
+  // one-mass-per-segment output. Any segment the shell can't handle
+  // (gambrel/dutch/mansard) falls back to the legacy CSG path below.
+  const shellGeoms: THREE.BufferGeometry[] = []
+  let allShell = true
+  for (const child of children) {
+    const g = generateShellSegmentGeometry(child)
+    if (!g) {
+      allShell = false
+      break
+    }
+    // Bake the segment's local transform into the geometry so the
+    // merged mesh's world position stays at the roof group origin.
+    _tmpMatrix.compose(
+      _tmpPosition.set(child.position[0], child.position[1], child.position[2]),
+      _tmpQuaternion.setFromAxisAngle(_yAxis, child.rotation),
+      _scale,
+    )
+    g.applyMatrix4(_tmpMatrix)
+    shellGeoms.push(g)
+  }
+  if (allShell && shellGeoms.length > 0) {
+    mergedMesh.geometry.dispose()
+    const merged = _mergeGeometries(shellGeoms)
+    for (const g of shellGeoms) g.dispose()
+    merged.computeVertexNormals()
+    mergedMesh.geometry = merged
+    return
+  }
+  for (const g of shellGeoms) g.dispose()
 
   let totalShinSlab: Brush | null = null
   let totalDeckSlab: Brush | null = null
@@ -575,6 +651,15 @@ export function getRoofSegmentBrushes(
 }
 
 export function generateRoofSegmentGeometry(node: RoofSegmentNode): THREE.BufferGeometry {
+  // Shell-parity preview — mirrors the backend blender_pipeline_dev/roof/shell
+  // for hip + gable rectangles with variable pitch and gable/shed/hip
+  // dormers. Returns null for unhandled shapes (gambrel/dutch/mansard or
+  // non-rectangular polygons); in those cases we fall through to the
+  // legacy face-generator so the operator still sees SOMETHING while
+  // Phase 5 lands the general-polygon skeleton.
+  const shellGeom = generateShellSegmentGeometry(node)
+  if (shellGeom) return shellGeom
+
   const brushes = getRoofSegmentBrushes(node)
   if (!brushes) {
     // Fallback: simple box
