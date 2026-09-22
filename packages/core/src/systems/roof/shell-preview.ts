@@ -75,16 +75,38 @@ export function generateShellSegmentGeometry(
 ): THREE.BufferGeometry | null {
   const kind = node.roofType
   if (kind === 'gambrel' || kind === 'dutch' || kind === 'mansard') {
+    console.log('[shell-preview]', node.id, 'kind', kind, '→ null (legacy path)')
     return null // backend can't render these either — legacy path handles preview
   }
 
   const polygon = _resolvePolygon(node)
-  if (polygon.length !== 4) return null // Phase 1 covers rectangles only
+  if (polygon.length !== 4) {
+    console.log('[shell-preview]', node.id, 'polygon len', polygon.length, '→ null')
+    return null
+  }
 
   const edgeStyles = _resolveEdgeStyles(node, polygon)
   const edgeTans = _resolveEdgeTans(node, edgeStyles)
 
   const baseZ = Math.max(0, node.wallHeight ?? 0) // parapet — z=0 is storey wall top
+  console.log(
+    '[shell-preview]',
+    node.id,
+    'kind',
+    kind,
+    'w',
+    node.width,
+    'd',
+    node.depth,
+    'baseZ',
+    baseZ,
+    'roofH',
+    node.roofHeight,
+    'styles',
+    edgeStyles,
+    'tans',
+    edgeTans,
+  )
   const parts: THREE.BufferGeometry[] = []
 
   // Base solid — walls (below eave), roof slopes, gable triangles.
@@ -92,7 +114,22 @@ export function generateShellSegmentGeometry(
   if (shell) parts.push(shell)
 
   const geom = _concat(parts)
-  if (!geom) return new THREE.BufferGeometry()
+  if (!geom) {
+    console.log('[shell-preview]', node.id, '→ empty geometry (no parts)')
+    return new THREE.BufferGeometry()
+  }
+  const posAttr = geom.getAttribute('position')
+  console.log(
+    '[shell-preview]',
+    node.id,
+    '→ geom with',
+    posAttr?.count ?? 0,
+    'verts',
+    geom.getIndex()?.count ?? 0,
+    'indices',
+    geom.groups.length,
+    'groups',
+  )
 
   // Dormers — union each into the merged shell via CSG so the ridge
   // and window openings integrate cleanly.
