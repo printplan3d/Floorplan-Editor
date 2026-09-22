@@ -5,7 +5,6 @@ import { initSpaceDetectionSync, initSpatialGridSync, useScene } from '@ritn3d/c
 import { InteractiveSystem, useViewer, Viewer } from '@ritn3d/viewer'
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { PreviewButton } from '../../components/preview-button'
-import { ViewerOverlay } from '../../components/viewer-overlay'
 import { ViewerZoneSystem } from '../../components/viewer-zone-system'
 import { type PresetsAdapter, PresetsProvider } from '../../contexts/presets-context'
 import { type SaveStatus, useAutoSave } from '../../hooks/use-auto-save'
@@ -439,56 +438,49 @@ export default function Editor({
 
         {/* Ritn3D: camera controls hint hidden — 2D mode */}
 
-        {!isLoading && isPreviewMode ? (
-          <ViewerOverlay onBack={() => useEditor.getState().setPreviewMode(false)} />
-        ) : (
-          <>
-            {/* Ritn3D 2026-06-18: FloorplanPanel is now the primary editor
-                surface. It hides itself when the 3D canvas is up for
-                roof/ceiling editing so the user sees the 3D scene cleanly. */}
-            <PanelManager />
-            {!needs3D && <FloorplanPanel />}
-            {needs3D && <ActionMenu />}
-            {/* Ritn3D 2026-07-04: Generate 3D — top-right floating button.
-                Only rendered when the host wired onGenerate3D (webapp does;
-                standalone dev app doesn't). Sits above FloorplanPanel via
-                fixed positioning + z-40 so it stays reachable regardless of
-                the sidebar / panel state. */}
-            {onGenerate3D && !needs3D && (
-              <Generate3DButton
-                onClick={async () => {
-                  const drawing = exportFloorPlanJSON()
-                  await onGenerate3D(drawing)
-                }}
-              />
-            )}
-            {/* Ritn3D 2026-09-23: 3D preview toggle. Flips isPreviewMode →
-                mounts the full <Viewer> scene (walls / doors / windows /
-                roofs) with live geometry from the client-side systems.
-                Positioned bottom-right at z-[10000] to sit ABOVE the
-                webapp shell's Export/Generate 3D cards (which use
-                z-[9999] at top-4/top-16). Top-right can't be used
-                without a collision. Hidden while already in 3D mode;
-                ViewerOverlay's Back button returns to 2D. */}
-            {!needs3D && (
-              <div className="pointer-events-none fixed bottom-6 right-6 z-[10000] flex flex-col items-end">
-                <div className="pointer-events-auto">
-                  <PreviewButton />
-                </div>
-              </div>
-            )}
-            <HelperManager />
-
-            <SidebarProvider className="fixed z-20">
-              <AppSidebar
-                appMenuButton={appMenuButton}
-                settingsPanelProps={settingsPanelProps}
-                sidebarTop={sidebarTop}
-                sitePanelProps={sitePanelProps}
-              />
-            </SidebarProvider>
-          </>
+        {/* Ritn3D 2026-09-23: PanelManager + AppSidebar render in BOTH 2D
+            and preview modes so the operator can keep editing while the
+            3D scene shows the live result. FloorplanPanel (2D SVG
+            canvas) hides itself when needs3D is true; the 3D <Viewer>
+            further down mounts in its place. Old ViewerOverlay swap
+            (which took over the full screen in preview) removed —
+            PreviewButton is now a toggle that flips isPreviewMode both
+            ways, so we don't need a separate presentation UI. */}
+        <PanelManager />
+        {!needs3D && <FloorplanPanel />}
+        {needs3D && !isPreviewMode && <ActionMenu />}
+        {/* Ritn3D 2026-07-04: Generate 3D — top-right floating button.
+            Only rendered when the host wired onGenerate3D (webapp does;
+            standalone dev app doesn't). Hidden in preview so the
+            floating card doesn't crowd the 3D viewport. */}
+        {onGenerate3D && !needs3D && (
+          <Generate3DButton
+            onClick={async () => {
+              const drawing = exportFloorPlanJSON()
+              await onGenerate3D(drawing)
+            }}
+          />
         )}
+        {/* 3D preview toggle. Bottom-right at z-[10000] to clear the
+            webapp shell's Export/Generate 3D cards (z-[9999] at
+            top-4/top-16). The button itself flips its label between
+            "Preview" and "Back to 2D" based on isPreviewMode, so
+            this is the single entry AND exit point for 3D mode. */}
+        <div className="pointer-events-none fixed right-6 bottom-6 z-[10000] flex flex-col items-end">
+          <div className="pointer-events-auto">
+            <PreviewButton />
+          </div>
+        </div>
+        <HelperManager />
+
+        <SidebarProvider className="fixed z-20">
+          <AppSidebar
+            appMenuButton={appMenuButton}
+            settingsPanelProps={settingsPanelProps}
+            sidebarTop={sidebarTop}
+            sitePanelProps={sitePanelProps}
+          />
+        </SidebarProvider>
 
         <ErrorBoundary fallback={<EditorSceneCrashFallback />}>
           {/* Ritn3D 2026-06-18: 3D canvas mounted ONLY for roof/ceiling tools
