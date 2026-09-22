@@ -183,12 +183,21 @@ function _resolveEdgeTans(node: RoofSegmentNode, styles: EdgeStyle[]): number[] 
 }
 
 function _uniformTanFromRoofHeight(node: RoofSegmentNode): number {
-  // Pipeline heuristic: pitch derived from roof_height / half_span,
-  // half_span = min(w,d)/2 for hip, depth/2 for gable rectangles.
+  // Backend heuristic (editor_scene_translator_dev.py comment):
+  //   ridge N-S → slopes fall E-W → run = width / 2
+  //   ridge E-W → slopes fall N-S → run = depth / 2
+  //   hip       → run = min(w, d) / 2
+  // Match it here so uniform-pitch previews land on the same rise the
+  // backend picks.
   const rh = Math.max(0.01, node.roofHeight ?? 2.5)
   let run: number
-  if (node.roofType === 'gable') run = Math.max(0.1, node.depth / 2)
-  else run = Math.max(0.1, Math.min(node.width, node.depth) / 2)
+  if (node.roofType === 'gable') {
+    const axis = node.ridgeAxis
+    const ns = axis === 'north-south' || (axis !== 'east-west' && node.width < node.depth)
+    run = Math.max(0.1, ns ? node.width / 2 : node.depth / 2)
+  } else {
+    run = Math.max(0.1, Math.min(node.width, node.depth) / 2)
+  }
   return rh / run
 }
 
@@ -571,19 +580,28 @@ function _facesToGeometry(
   let vertCount = 0
   for (const face of faces) {
     if (face.verts.length < 3) continue
-    const p0 = new THREE.Vector3(...face.verts[0]!)
-    const p1 = new THREE.Vector3(...face.verts[1]!)
-    const p2 = new THREE.Vector3(...face.verts[2]!)
+    // Reverse winding once here so every face defined above lists
+    // its vertices in an intuitive "walk around the face" order,
+    // and the resulting normals still point OUTWARD (three.js
+    // back-face culling would otherwise hide the whole mesh). The
+    // face-declarations upstream were traced in the visually
+    // natural direction; without this flip the cross product came
+    // out pointing inward — verified against the soffit (naturally
+    // written FL→BL→BR→FR, cross was +Y instead of the wanted -Y).
+    const verts = [...face.verts].reverse()
+    const p0 = new THREE.Vector3(...verts[0]!)
+    const p1 = new THREE.Vector3(...verts[1]!)
+    const p2 = new THREE.Vector3(...verts[2]!)
     const n = new THREE.Vector3()
       .subVectors(p1, p0)
       .cross(new THREE.Vector3().subVectors(p2, p0))
       .normalize()
     const start = vertCount
     let count = 0
-    for (let i = 1; i < face.verts.length - 1; i++) {
-      const a = face.verts[0]!
-      const b = face.verts[i]!
-      const c = face.verts[i + 1]!
+    for (let i = 1; i < verts.length - 1; i++) {
+      const a = verts[0]!
+      const b = verts[i]!
+      const c = verts[i + 1]!
       positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2])
       normals.push(n.x, n.y, n.z, n.x, n.y, n.z, n.x, n.y, n.z)
       indices.push(vertCount, vertCount + 1, vertCount + 2)
