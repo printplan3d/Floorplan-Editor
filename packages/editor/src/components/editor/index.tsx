@@ -449,10 +449,6 @@ export default function Editor({
         <PanelManager />
         {!needs3D && <FloorplanPanel />}
         {needs3D && !isPreviewMode && <ActionMenu />}
-        {/* AppSidebar's IconRail is the 2D drawing toolbar
-            (Wall/Door/Window/Floor/etc). Not useful in the 3D
-            preview and takes real estate away from the scene.
-            Toggle back to 2D to draw. */}
         {/* Ritn3D 2026-07-04: Generate 3D — top-right floating button.
             Only rendered when the host wired onGenerate3D (webapp does;
             standalone dev app doesn't). Hidden in preview so the
@@ -477,16 +473,19 @@ export default function Editor({
         </div>
         <HelperManager />
 
-        {!isPreviewMode && (
-          <SidebarProvider className="fixed z-20">
-            <AppSidebar
-              appMenuButton={appMenuButton}
-              settingsPanelProps={settingsPanelProps}
-              sidebarTop={sidebarTop}
-              sitePanelProps={sitePanelProps}
-            />
-          </SidebarProvider>
-        )}
+        {/* Stays mounted in preview too. This IS the editor toolbar
+            the operator wants while working in 3D; hiding it in
+            preview (2026-09-23, reverted same day) exposed the
+            webapp's own dashboard nav behind the editor, which read
+            as "the dashboard menu is creeping in". */}
+        <SidebarProvider className="fixed z-20">
+          <AppSidebar
+            appMenuButton={appMenuButton}
+            settingsPanelProps={settingsPanelProps}
+            sidebarTop={sidebarTop}
+            sitePanelProps={sitePanelProps}
+          />
+        </SidebarProvider>
 
         <ErrorBoundary fallback={<EditorSceneCrashFallback />}>
           {/* Ritn3D 2026-06-18: 3D canvas mounted ONLY for roof/ceiling tools
