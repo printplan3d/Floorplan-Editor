@@ -288,7 +288,38 @@ const PostProcessingPasses = () => {
     bgCurrent.current.lerp(bgTarget.current, Math.min(delta, 0.1) * 4)
     bgUniform.current.value.copy(bgCurrent.current)
 
+    // No post-FX pipeline available (still initialising, failed to build,
+    // or retries exhausted) — render the scene plainly instead of drawing
+    // NOTHING.
+    //
+    // This useFrame runs at priority 1, which switches R3F's render loop to
+    // manual: R3F stops calling gl.render itself and this callback becomes
+    // the ONLY thing that draws. The previous bare `return` therefore meant
+    // that whenever the pipeline was missing, not a single frame was ever
+    // rendered — verified on editor-dev 2026-09-24 by hooking the WebGPU
+    // API across a full viewer remount:
+    //
+    //   requestAdapter: 1   requestDevice: 1     (renderer did start init)
+    //   configure:      0   queue.submit:  0     (nothing EVER drawn)
+    //
+    // The canvas stayed fully transparent (single pixel value rgba(0,0,0,0)
+    // across the whole surface) and its WebGPU context was never configured,
+    // so `getCurrentTexture()` threw "context is not configured". Only the
+    // drei <Html> labels showed, because those are DOM and live outside the
+    // WebGL loop — which is what "no 3D, only room annotations" looked like.
+    //
+    // The retry-exhausted branch below already tells the user we are
+    // "Rendering without post FX for this session"; this is the code that
+    // makes that true.
     if (hasPipelineErrorRef.current || !renderPipelineRef.current) {
+      try {
+        ;(renderer as any).setClearAlpha?.(1)
+        renderer.render(scene, camera)
+      } catch {
+        // A plain render failing too means the renderer itself is not
+        // usable yet (e.g. init still pending on first frames). Skip this
+        // frame quietly rather than spamming the console every frame.
+      }
       return
     }
 
