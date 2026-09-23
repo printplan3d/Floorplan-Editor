@@ -210,11 +210,22 @@ const Viewer: React.FC<ViewerProps> = ({
       camera={{ position: [50, 50, 50], fov: 50 }}
       className={`transition-colors duration-700 ${theme === 'dark' ? 'bg-[#1f2433]' : 'bg-[#fafafa]'}`}
       dpr={[1, 1.5]}
-      gl={(props) => {
+      gl={async (props) => {
         const renderer = new THREE.WebGPURenderer(props as any)
         renderer.toneMapping = THREE.ACESFilmicToneMapping
         renderer.toneMappingExposure = 0.9
-        // renderer.init() // Only use when using <DebugRenderer />
+        // MUST await. three r183's Renderer.render() opens with
+        //   if (this._initialized === false) throw new Error(...)
+        // and @react-three/fiber 9.6.1 never calls init() for you --
+        // it only awaits whatever this callback returns:
+        //   const customRenderer = typeof glConfig === 'function'
+        //     ? await glConfig(defaultProps) : glConfig
+        // Without this the very first gl.render() throws INSIDE R3F's
+        // rAF loop, before the loop re-schedules itself, so the chain
+        // breaks while the module's `running` flag stays true -- which
+        // means invalidate() can never restart it either. One throw
+        // kills rendering for the whole page, permanently.
+        await renderer.init()
         return renderer
       }}
       resize={{
