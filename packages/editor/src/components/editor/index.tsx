@@ -513,7 +513,18 @@ export default function Editor({
                   (InteractiveSystem + ViewerZoneSystem + default
                   selection) turned it into a tap-to-walk-into-room
                   presentation, which is the wrong mode for editing. */}
-              <Viewer selectionManager="custom">
+              {/* postProcessing={false}: the TSL post-FX pipeline
+                  composites alpha=0 across the whole surface on this
+                  scene, so nothing is visible even though geometry,
+                  camera and the render loop are all healthy (measured
+                  2026-09-24 on editor-dev: context configured, 48 GPU
+                  submits, canvas reads back as a single rgba(0,0,0,0)).
+                  It also owns the render loop via useFrame priority 1,
+                  so opting out hands rendering back to R3F and the
+                  scene draws plainly. The editor needs a working
+                  workflow, not the full look; share links and the
+                  public viewer keep post-FX on. */}
+              <Viewer postProcessing={false} selectionManager="custom">
                 <SelectionManager />
                 <FloatingActionMenu />
                 <WallMeasurementLabel />

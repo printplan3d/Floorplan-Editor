@@ -107,12 +107,36 @@ interface ViewerProps {
   children?: React.ReactNode
   selectionManager?: 'default' | 'custom'
   perf?: boolean
+  /**
+   * Mount the TSL post-processing pipeline. Default true — share links
+   * and the public viewer keep the full look.
+   *
+   * Pass false to render plainly. This is not just a visual toggle:
+   * PostProcessing's `useFrame(..., 1)` runs at priority 1, which
+   * switches R3F's render loop to MANUAL — R3F stops calling gl.render
+   * itself and that callback becomes the only thing that draws. Not
+   * mounting it hands rendering back to R3F.
+   *
+   * The editor preview passes false (2026-09-24). Measured on
+   * editor-dev: with post-FX on, the pipeline initialises, configures
+   * the WebGPU context and submits GPU work (48 submits observed) but
+   * composites alpha=0 across the whole surface, so the canvas reads
+   * back as a single rgba(0,0,0,0) value and only the drei <Html>
+   * labels are visible. Its own design note says it clears with
+   * setClearAlpha(0) and treats scenePassColor.a as a geometry mask
+   * where "geometry pixels write a=1 via output node" — that a=1 isn't
+   * landing. Geometry, camera and scene graph are all fine; this is a
+   * TSL/WebGPU composite bug. The editor only needs a working
+   * workflow, so it opts out rather than waiting on that fix.
+   */
+  postProcessing?: boolean
 }
 
 const Viewer: React.FC<ViewerProps> = ({
   children,
   selectionManager = 'default',
   perf = false,
+  postProcessing = true,
 }) => {
   const theme = useViewer((state) => state.theme)
 
@@ -165,7 +189,7 @@ const Viewer: React.FC<ViewerProps> = ({
       <WallSystem />
       <WindowSystem />
       <ZoneSystem />
-      <PostProcessing />
+      {postProcessing && <PostProcessing />}
       {/* <DebugRenderer /> */}
       <GPUDeviceWatcher />
 
