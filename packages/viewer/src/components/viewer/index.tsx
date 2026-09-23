@@ -10,7 +10,14 @@ import {
   WindowSystem,
 } from '@ritn3d/core'
 import { Bvh } from '@react-three/drei'
-import { Canvas, extend, type ThreeToJSXElements, useFrame, useThree } from '@react-three/fiber'
+import {
+  Canvas,
+  extend,
+  type ThreeToJSXElements,
+  useFrame,
+  useStore,
+  useThree,
+} from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three/webgpu'
 import { useRaycastGuard } from '../../lib/raycast-guard'
@@ -99,6 +106,64 @@ function GPUDeviceWatcher() {
       )
     })
   }, [gl])
+
+  return null
+}
+
+/**
+ * Dev-only introspection bridge, enabled with ?debug3d=1 on the URL.
+ *
+ * Added 2026-09-24 after several rounds of debugging the blank editor
+ * preview against MINIFIED runtime code, which produced two wrong
+ * conclusions: a WebGPU-API probe that missed a WebGL2 fallback, and a
+ * getContext('webgl2') check that CREATED the context it was testing
+ * for. Guessing at internals from the console is how that happened, so
+ * the package now hands the real store out instead.
+ *
+ * Exposes:
+ *   window.__ritn3d        the R3F store (.getState() => gl/scene/camera/...)
+ *   window.__ritn3dFrames  useFrame tick count — the single fastest way
+ *                          to tell "loop never started" from "loop runs
+ *                          but draws nothing"
+ *
+ * Off unless the query param is present, so share links and the public
+ * viewer are unaffected. The useFrame runs at default priority 0, which
+ * does NOT switch R3F to a manual render loop.
+ */
+function DebugBridge() {
+  const store = useStore()
+  const enabled = useMemo(
+    () =>
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).has('debug3d'),
+    [],
+  )
+
+  useFrame(() => {
+    if (!enabled) return
+    const w = window as any
+    w.__ritn3dFrames = (w.__ritn3dFrames || 0) + 1
+  })
+
+  useEffect(() => {
+    if (!enabled) return
+    const w = window as any
+    w.__ritn3d = store
+    w.__ritn3dFrames = 0
+    const s: any = store.getState()
+    const gl: any = s.gl
+    console.log('[debug3d] canvas mounted', {
+      renderer: gl?.constructor?.name,
+      isWebGPURenderer: !!gl?.isWebGPURenderer,
+      backend: gl?.backend?.constructor?.name,
+      hasGPUDevice: !!gl?.backend?.device,
+      canvasInDom: !!gl?.domElement?.isConnected,
+      frameloop: s.frameloop,
+      sceneChildren: s.scene?.children?.length,
+      camera: s.camera?.position?.toArray?.(),
+      size: s.size,
+    })
+  }, [enabled, store])
 
   return null
 }
@@ -192,6 +257,7 @@ const Viewer: React.FC<ViewerProps> = ({
       {postProcessing && <PostProcessing />}
       {/* <DebugRenderer /> */}
       <GPUDeviceWatcher />
+      <DebugBridge />
 
       <ItemLightSystem />
       {selectionManager === 'default' && <SelectionManager />}
