@@ -494,7 +494,15 @@ export default function Editor({
               and project state for the 2D path; it doesn't require a mounted
               <Viewer>. */}
           {needs3D && (
-            <div className="h-full w-full">
+            /* `fixed inset-0 z-10 bg-background` mirrors FloorplanPanel's
+               root exactly. The 3D canvas REPLACES that panel, so it has
+               to cover the same area — including the webapp's own
+               dashboard nav sitting behind the editor. Without the
+               opaque full-viewport backdrop the nav shows through in
+               preview but not in 2D, which is what "home screen menu is
+               still there" was. z-10 keeps it under AppSidebar (z-20)
+               and the PreviewButton (z-[10000]). */
+            <div className="fixed inset-0 z-10 h-full w-full bg-background">
               <SelectionPersistenceManager enabled={hasLoadedInitialScene && !showLoader} />
               {/* Ritn3D 2026-09-23: preview mode is now the 3D EDIT
                   experience, not presentation. Same children as
