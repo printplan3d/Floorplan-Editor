@@ -1,3 +1,4 @@
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import * as THREE_WEBGPU from 'three/webgpu'
 
@@ -36,24 +37,41 @@ import * as THREE_WEBGPU from 'three/webgpu'
 // imports plain `three`. Depending on how the bundler dedupes, those
 // can resolve to SEPARATE module instances with distinct Mesh
 // classes — patching one would then miss the meshes actually being
-// raycast. Patch every distinct prototype we can reach, guarding
-// against double-wrapping when they turn out to be the same object.
-const patchedPrototypes = new WeakSet<object>()
+// raycast. Patch every distinct prototype we can reach.
 const reported = new Set<string>()
 
+// Marker so we can tell OUR wrapper from whatever else is on the
+// prototype. Needed because drei's <Bvh> assigns
+// three-mesh-bvh's acceleratedRaycast onto Mesh.prototype in a
+// layout effect — i.e. AFTER module scope — which silently replaced
+// an install-once wrapper before a single raycast ever ran. So this
+// is re-checked rather than installed once.
+const GUARD_FLAG = '__ritn3dRaycastGuard'
+
+type Guardable = THREE.Mesh & {
+  raycast: THREE.Mesh['raycast'] & { [GUARD_FLAG]?: true }
+}
+
+/**
+ * Wrap whatever raycast implementation is CURRENTLY on the Mesh
+ * prototypes. Safe to call repeatedly: it no-ops when our wrapper is
+ * already in place, and re-wraps when something (Bvh) has replaced
+ * it. Wrapping the current implementation rather than a captured
+ * original means the BVH-accelerated path stays in effect.
+ */
 export function installRaycastGuard(): void {
   for (const Ctor of [THREE.Mesh, (THREE_WEBGPU as unknown as typeof THREE).Mesh]) {
-    const proto = Ctor?.prototype as (THREE.Mesh & { raycast: THREE.Mesh['raycast'] }) | undefined
-    if (!proto || patchedPrototypes.has(proto)) continue
-    patchedPrototypes.add(proto)
+    const proto = Ctor?.prototype as Guardable | undefined
+    if (!proto?.raycast) continue
+    if (proto.raycast[GUARD_FLAG]) continue
     patchPrototype(proto)
   }
 }
 
-function patchPrototype(proto: THREE.Mesh): void {
+function patchPrototype(proto: Guardable): void {
   const original = proto.raycast
 
-  proto.raycast = function patchedRaycast(
+  const wrapped = function patchedRaycast(
     this: THREE.Mesh,
     raycaster: THREE.Raycaster,
     intersects: THREE.Intersection[],
@@ -99,5 +117,24 @@ function patchPrototype(proto: THREE.Mesh): void {
         error: String(err),
       })
     }
-  }
+  } as Guardable['raycast']
+
+  wrapped[GUARD_FLAG] = true
+  proto.raycast = wrapped
+}
+
+/**
+ * Keeps the guard installed for the lifetime of the Canvas.
+ *
+ * Re-checks every frame because anything can reassign
+ * Mesh.prototype.raycast at any point — drei's <Bvh> does it in a
+ * layout effect, and a remount would do it again. The check is a
+ * single property read on two prototypes, so the per-frame cost is
+ * nil; the re-wrap only runs when something actually clobbered us.
+ */
+export function useRaycastGuard(): void {
+  installRaycastGuard()
+  useFrame(() => {
+    installRaycastGuard()
+  })
 }
