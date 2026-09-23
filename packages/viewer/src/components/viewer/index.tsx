@@ -168,6 +168,42 @@ function DebugBridge() {
   return null
 }
 
+/**
+ * Priority for the plain (no post-FX) render pass.
+ *
+ * Must be higher than every system's useFrame priority so the draw
+ * happens after they have all updated their meshes for this frame.
+ * Highest today is 5 (roof-system, level-system); 1000 leaves room.
+ */
+const PLAIN_RENDER_PRIORITY = 1000
+
+/**
+ * Draws the scene when <PostProcessing /> is not mounted.
+ *
+ * This is REQUIRED, not a nicety. R3F only calls gl.render itself
+ * while `internal.priority` is 0:
+ *
+ *     if (!state.internal.priority && state.gl.render)
+ *       state.gl.render(state.scene, state.camera)
+ *
+ * and this app permanently mounts seven systems with a useFrame
+ * priority above 0 — roof 5, level 5, wall 4, door 3, window 3,
+ * item 2, slab 1. So internal.priority is never 0, R3F never draws,
+ * and whichever priority>0 subscriber calls render IS the renderer.
+ *
+ * That subscriber used to be PostProcessing alone. Passing
+ * postProcessing={false} therefore didn't just drop the effects, it
+ * removed the only draw call in the app and left a blank canvas.
+ * Measured on editor-dev: internal.priority 7, and 0 gl.render calls
+ * across 4 advance() ticks.
+ */
+function PlainRenderer() {
+  useFrame(({ gl, scene, camera }) => {
+    gl.render(scene, camera)
+  }, PLAIN_RENDER_PRIORITY)
+  return null
+}
+
 interface ViewerProps {
   children?: React.ReactNode
   selectionManager?: 'default' | 'custom'
@@ -176,23 +212,20 @@ interface ViewerProps {
    * Mount the TSL post-processing pipeline. Default true — share links
    * and the public viewer keep the full look.
    *
-   * Pass false to render plainly. This is not just a visual toggle:
-   * PostProcessing's `useFrame(..., 1)` runs at priority 1, which
-   * switches R3F's render loop to MANUAL — R3F stops calling gl.render
-   * itself and that callback becomes the only thing that draws. Not
-   * mounting it hands rendering back to R3F.
+   * Pass false to render plainly; <PlainRenderer /> is mounted in its
+   * place and does the draw. An earlier version of this comment said
+   * not mounting PostProcessing "hands rendering back to R3F". That is
+   * WRONG — see PlainRenderer above. R3F only draws while
+   * internal.priority is 0, and seven systems here keep it at 7, so
+   * without one of the two renderers nothing draws at all.
    *
-   * The editor preview passes false (2026-09-24). Measured on
-   * editor-dev: with post-FX on, the pipeline initialises, configures
-   * the WebGPU context and submits GPU work (48 submits observed) but
-   * composites alpha=0 across the whole surface, so the canvas reads
-   * back as a single rgba(0,0,0,0) value and only the drei <Html>
-   * labels are visible. Its own design note says it clears with
-   * setClearAlpha(0) and treats scenePassColor.a as a geometry mask
-   * where "geometry pixels write a=1 via output node" — that a=1 isn't
-   * landing. Geometry, camera and scene graph are all fine; this is a
-   * TSL/WebGPU composite bug. The editor only needs a working
-   * workflow, so it opts out rather than waiting on that fix.
+   * The editor preview passes false (2026-09-24) because the post-FX
+   * path composites alpha=0 across the whole surface on this scene —
+   * the canvas reads back as a single rgba(0,0,0,0). Its own design
+   * note says geometry pixels should write a=1 via the output node;
+   * that isn't landing. Worth revisiting now that the renderer is
+   * initialised properly (see the gl callback), since the pipeline was
+   * previously driving an uninitialised backend.
    */
   postProcessing?: boolean
 }
@@ -265,7 +298,7 @@ const Viewer: React.FC<ViewerProps> = ({
       <WallSystem />
       <WindowSystem />
       <ZoneSystem />
-      {postProcessing && <PostProcessing />}
+      {postProcessing ? <PostProcessing /> : <PlainRenderer />}
       {/* <DebugRenderer /> */}
       <GPUDeviceWatcher />
       <DebugBridge />
