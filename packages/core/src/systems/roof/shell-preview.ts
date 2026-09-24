@@ -485,7 +485,6 @@ function _buildDormerGeometry(
   const uMid = 0.5 * (spec.footOnParent[0][0] + spec.footOnParent[1][0])
   const vMid = 0.5 * (spec.footOnParent[0][1] + spec.footOnParent[1][1])
   const halfW = spec.cheekWidth / 2
-  const cheekD = spec.ridgeHeight * 1.5
 
   // V runs eave -> ridge, so its run is the frame's halfSpan.
   //
@@ -497,37 +496,41 @@ function _buildDormerGeometry(
   // where halfSpan happened to equal 4. Overshooting the ridge is
   // what "it goes away from the house" looked like.
   //
-  // How far up the slope the dormer may sit.
+  // A dormer EMERGES from the slope. It is modelled as a gable prism
+  // that starts below the roof plane and runs inward until the roof
+  // swallows it, then CSG-unioned so the slope cuts it to shape.
   //
-  // Two limits, not one. Its whole DEPTH has to stay on the slope
-  // (halfSpan - cheekD), and its own RIDGE has to stay at or below the
-  // main ridge, which costs a further ridgeHeight/tan of run:
-  //
-  //     eave + tan*(inward + cheekD) + ridgeHeight <= eave + tan*halfSpan
-  //
-  // Without the second term a dormer pushed near the top pokes out
-  // through the main ridge, which is what a big dormer did here: 1.5 m
-  // ridge and 2.25 m deep on a roof with only 3.7 m of rise came out
-  // 1.5 m ABOVE the ridge.
-  //
-  // V then maps linearly across whatever run is actually available,
-  // rather than across halfSpan and clamping. Clamping made the slider
-  // saturate part-way — on the operator's roof it stopped moving at
-  // V=0.44 — and dead travel reads as a broken control. Now V=0 is the
-  // eave and V=1 is as far as the dormer can legally go.
-  //
-  // maxInward can be 0 or less when the dormer simply doesn't fit; it
-  // then sits at the eave and the operator needs a smaller one.
-  const tanParentRun = Math.max(MIN_EDGE_WEIGHT, tans[idx]!)
-  const maxInward = Math.max(
-    0,
-    frame.halfSpan - cheekD - spec.ridgeHeight / tanParentRun,
-  )
+  // It used to be a flat-bottomed box sitting ON the slope with its
+  // apex inset at 0.25 * cheekD, so the "gable" was a sloped wedge and
+  // nothing penetrated the roof. That reads as a chimney, which is
+  // exactly what the operator called it.
+  const tanParent = Math.max(MIN_EDGE_WEIGHT, tans[idx]!)
+  const eaveParent = frame.eaveOf[idx]!
+  const zAt = (dist: number) => eaveParent + tanParent * Math.max(0, dist)
+
+  // Its ridge must stay at or below the main ridge. The front face
+  // rises ridgeHeight above the roof, and the roof climbs back to that
+  // height over ridgeHeight/tan of run, so that run is the limit.
+  const runToBury = spec.ridgeHeight / tanParent
+  const maxInward = Math.max(0, frame.halfSpan - runToBury)
+  // V maps across the run that is actually usable — mapping across
+  // halfSpan and clamping left the slider dead past a point.
   const inward = Math.min(Math.max(vMid, 0), 1) * maxInward
+
   const anchor = new THREE.Vector2(
     p0[0] + uMid * eave.x + inwardUnit.x * inward,
     p0[1] + uMid * eave.y + inwardUnit.y * inward,
   )
+
+  const zFront = zAt(inward)
+  const rZ = zFront + spec.ridgeHeight
+  // Run inward until the roof surface reaches the dormer ridge, plus a
+  // little, so the rear is fully inside the roof and the union leaves
+  // no back wall poking out.
+  const cheekD = runToBury + 0.15
+  // Start below the slope so the front face is cut by the roof rather
+  // than floating on it.
+  const zBase = zFront - Math.max(0.6, spec.ridgeHeight)
 
   const corner = (offW: number, offD: number): [number, number] => [
     anchor.x + offW * eaveUnit.x + offD * inwardUnit.x,
@@ -538,39 +541,21 @@ function _buildDormerGeometry(
   const c1 = corner(halfW, 0)
   const c2 = corner(halfW, cheekD)
   const c3 = corner(-halfW, cheekD)
-
-  // Sit ON the slope, not on the eave plane.
-  //
-  // bZ used to be baseZ flat, so the dormer stayed at eave height
-  // wherever V put it while the roof climbed away above it. On the
-  // operator's roof (eave 2.70, ridge 6.40) its ridge was already
-  // under the roof surface by V=0.25 and 2.53m buried by V=0.9 — and
-  // at V=0.05 it floated 0.61m clear of the eave. Both read as the
-  // dormer wandering off the house.
-  const tanParent = Math.max(MIN_EDGE_WEIGHT, tans[idx]!)
-  const eaveParent = frame.eaveOf[idx]!
-  const zAt = (dist: number) => eaveParent + tanParent * Math.max(0, dist)
-  const zFront = zAt(inward)
-  const zBack = zAt(inward + cheekD)
-  // Ridge measured above the REAR, where the dormer meets the roof, so
-  // it always emerges instead of sinking in on a steep pitch.
-  const rZ = zBack + spec.ridgeHeight
+  // Apexes sit on the SAME planes as the base corners, on the centre
+  // line — that is what makes the gable face vertical and square to
+  // the eave. Insetting them was what gave the wedge/chimney look.
+  const apexFront = corner(0, 0)
+  const apexBack = corner(0, cheekD)
 
   if (spec.type === 'gable') {
     // 6 verts: 4 base + 2 ridge apex points.
-    const rf: [number, number] = [
-      anchor.x + 0.25 * cheekD * inwardUnit.x,
-      anchor.y + 0.25 * cheekD * inwardUnit.y,
-    ]
-    const rb: [number, number] = [
-      anchor.x + 0.75 * cheekD * inwardUnit.x,
-      anchor.y + 0.75 * cheekD * inwardUnit.y,
-    ]
+    const rf = apexFront
+    const rb = apexBack
     const verts: [number, number, number][] = [
-      [c0[0], zFront, c0[1]],
-      [c1[0], zFront, c1[1]],
-      [c2[0], zBack, c2[1]],
-      [c3[0], zBack, c3[1]],
+      [c0[0], zBase, c0[1]],
+      [c1[0], zBase, c1[1]],
+      [c2[0], zBase, c2[1]],
+      [c3[0], zBase, c3[1]],
       [rf[0], rZ, rf[1]],
       [rb[0], rZ, rb[1]],
     ]
@@ -585,10 +570,10 @@ function _buildDormerGeometry(
 
   if (spec.type === 'shed') {
     const verts: [number, number, number][] = [
-      [c0[0], zFront, c0[1]],
-      [c1[0], zFront, c1[1]],
-      [c2[0], zBack, c2[1]],
-      [c3[0], zBack, c3[1]],
+      [c0[0], zBase, c0[1]],
+      [c1[0], zBase, c1[1]],
+      [c2[0], zBase, c2[1]],
+      [c3[0], zBase, c3[1]],
       [c0[0], rZ, c0[1]],
       [c1[0], rZ, c1[1]],
     ]
@@ -607,10 +592,10 @@ function _buildDormerGeometry(
       anchor.y + (cheekD / 2) * inwardUnit.y,
     ]
     const verts: [number, number, number][] = [
-      [c0[0], zFront, c0[1]],
-      [c1[0], zFront, c1[1]],
-      [c2[0], zBack, c2[1]],
-      [c3[0], zBack, c3[1]],
+      [c0[0], zBase, c0[1]],
+      [c1[0], zBase, c1[1]],
+      [c2[0], zBase, c2[1]],
+      [c3[0], zBase, c3[1]],
       [centre[0], rZ, centre[1]],
     ]
     return _facesToGeometry([
