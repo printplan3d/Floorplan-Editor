@@ -57,6 +57,11 @@ _csg.attributes = ['position', 'normal']
 const SLOT_WALL_EXTERIOR = 0
 const SLOT_SLATE_TOP = 1
 const SLOT_SOFFIT = 2
+const SLOT_FASCIA = 3
+
+/** Depth of the fascia board, matching the backend's
+ *  DEFAULT_FASCIA_THICKNESS_M in blender_pipeline_dev/roof/shell/shell.py. */
+const FASCIA_M = 0.18
 // SLOT 3 kept spare; matches roof-system.tsx layout.
 
 // ─── Public entry ──────────────────────────────────────────────────
@@ -111,7 +116,8 @@ export function generateShellSegmentGeometry(
 
   // Base solid — walls (below eave), roof slopes, gable triangles.
   const targetRidgeRise = Math.max(0.01, node.roofHeight ?? 2.5)
-  const frame = _roofFrame(polygon, edgeStyles, edgeTans, baseZ, targetRidgeRise)
+  const overhang = Math.max(0, Number((node as { overhang?: number }).overhang ?? 0.3))
+  const frame = _roofFrame(polygon, edgeStyles, edgeTans, baseZ, targetRidgeRise, overhang)
   if (!frame) return null
   const shell = _buildRectangleShell(polygon, edgeStyles, frame)
   if (shell) parts.push(shell)
@@ -267,6 +273,10 @@ type RoofFrame = {
   cornerY: number[]
   ridgeLow: [number, number, number]
   ridgeHigh: [number, number, number]
+  /** Eave overhang in metres, projected beyond the wall line. */
+  overhang: number
+  /** tan(pitch) of the SIDE edge each polygon corner belongs to. */
+  cornerTan: number[]
 }
 
 function _roofFrame(
@@ -275,6 +285,7 @@ function _roofFrame(
   tans: number[],
   baseZ: number,
   targetRidgeRise: number,
+  overhang: number,
 ): RoofFrame | null {
   if (polygon.length !== 4) return null
   const xs = polygon.map((p) => p[0])
@@ -321,6 +332,9 @@ function _roofFrame(
   const cornerY = ridgeAlongX
     ? [eaveA, eaveA, eaveB, eaveB]
     : [eaveB, eaveA, eaveA, eaveB]
+  const tA = Math.max(MIN_EDGE_WEIGHT, tans[sideA]!)
+  const tB = Math.max(MIN_EDGE_WEIGHT, tans[sideB]!)
+  const cornerTan = ridgeAlongX ? [tA, tA, tB, tB] : [tB, tA, tA, tB]
 
   // A gable end runs the ridge out to the wall; a hip end pulls it
   // back by however far its own pitch needs to climb.
@@ -340,6 +354,8 @@ function _roofFrame(
     ridgeZ,
     eaveOf,
     cornerY,
+    overhang: Math.max(0, overhang),
+    cornerTan,
     ridgeLow: ridgeAlongX
       ? [xMin + insetLow, ridgeZ, mid]
       : [mid, ridgeZ, zMin + insetLow],
@@ -354,10 +370,34 @@ function _buildRectangleShell(
   styles: EdgeStyle[],
   frame: RoofFrame,
 ): THREE.BufferGeometry | null {
-  const { ridgeAlongX, cornerY, ridgeLow, ridgeHigh } = frame
-  const c = polygon.map(
+  const { ridgeAlongX, cornerY, cornerTan, overhang, ridgeLow, ridgeHigh } = frame
+
+  // Wall-line corners: where the roof meets the storey wall.
+  const wall = polygon.map(
     ([x, z], i) => [x, cornerY[i]!, z] as [number, number, number],
   )
+
+  // Eave corners: the wall line pushed OUT by the overhang, dropping
+  // along the slope as it goes.
+  //
+  // Phase 1 skipped this — "eave sits AT the polygon edge (no overhang
+  // ... comes back in Phase 5)" — which left the preview with no eave
+  // detail at all while the backend had been projecting
+  // eave_overhang_cm (default 30) and a fascia board the whole time.
+  // Rectangles here are axis-aligned, so outward is simply away from
+  // the centre on each axis.
+  const cx = polygon.reduce((a, p) => a + p[0], 0) / polygon.length
+  const cz = polygon.reduce((a, p) => a + p[1], 0) / polygon.length
+  const c = polygon.map(([x, z], i) => {
+    const ox = x + Math.sign(x - cx) * overhang
+    const oz = z + Math.sign(z - cz) * overhang
+    // Drop along the slope of the side edge this corner belongs to.
+    return [ox, cornerY[i]! - cornerTan[i]! * overhang, oz] as [
+      number,
+      number,
+      number,
+    ]
+  })
 
   const faces: { verts: [number, number, number][]; slot: number }[] = []
   const slotFor = (i: number) =>
@@ -375,16 +415,38 @@ function _buildRectangleShell(
     faces.push({ verts: [c[2]!, c[3]!, ridgeHigh], slot: slotFor(2) })
   }
 
+  // Fascia board — the vertical strip hanging off the eave edge, and
+  // the soffit closing the underside back to the wall.
+  if (overhang > 1e-3) {
+    const drop = (p: [number, number, number]): [number, number, number] => [
+      p[0],
+      p[1] - FASCIA_M,
+      p[2],
+    ]
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4
+      faces.push({
+        verts: [drop(c[i]!), drop(c[j]!), c[j]!, c[i]!],
+        slot: SLOT_FASCIA,
+      })
+      // Soffit: horizontal underside from the fascia bottom back in to
+      // the wall, at the fascia-bottom height so it reads flat.
+      const wi: [number, number, number] = [wall[i]![0], c[i]![1] - FASCIA_M, wall[i]![2]]
+      const wj: [number, number, number] = [wall[j]![0], c[j]![1] - FASCIA_M, wall[j]![2]]
+      faces.push({ verts: [wi, wj, drop(c[j]!), drop(c[i]!)], slot: SLOT_SOFFIT })
+    }
+  }
+
   // Wall band — storey wall top (z=0) up to this corner's eave. THIS
   // is the parapet: it grows on the side whose pitch was shallowed and
-  // nowhere else. Skipped where the eave is at or below the wall top,
-  // since there the wall pokes through and wants clipping, not filling.
+  // nowhere else. Measured at the WALL line, not the eave line, so the
+  // overhang doesn't stretch it.
   for (let i = 0; i < 4; i++) {
     const j = (i + 1) % 4
-    if (c[i]![1] <= 1e-3 && c[j]![1] <= 1e-3) continue
-    const lo_i: [number, number, number] = [c[i]![0], 0, c[i]![2]]
-    const lo_j: [number, number, number] = [c[j]![0], 0, c[j]![2]]
-    faces.push({ verts: [lo_i, lo_j, c[j]!, c[i]!], slot: SLOT_WALL_EXTERIOR })
+    if (wall[i]![1] <= 1e-3 && wall[j]![1] <= 1e-3) continue
+    const lo_i: [number, number, number] = [wall[i]![0], 0, wall[i]![2]]
+    const lo_j: [number, number, number] = [wall[j]![0], 0, wall[j]![2]]
+    faces.push({ verts: [lo_i, lo_j, wall[j]!, wall[i]!], slot: SLOT_WALL_EXTERIOR })
   }
 
   // Soffit — flat cap under the roof so walk-mode doesn't see sky from

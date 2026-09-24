@@ -376,12 +376,22 @@ export const CustomCameraControls = () => {
 
   return (
     <CameraControls
-      /* Zoom toward the pointer rather than screen centre, and step
-         faster. Zooming used to crawl and always pulled toward the
-         middle of the screen, so getting close to one corner of the
-         house meant zoom-pan-zoom-pan. */
-      dollySpeed={2}
-      dollyToCursor
+      /* dollySpeed 5, and dollyToCursor deliberately OFF.
+         
+         dollyToCursor MOVES THE ORBIT TARGET toward whatever you
+         zoomed at. That is the whole point of it, and it is also why
+         rotation stopped feeling right the moment the preview went
+         perspective: after a couple of zooms the pivot had drifted to
+         some arbitrary point and left-drag swung the camera around
+         that instead of around the house. Orthographic hid it, since
+         ortho ZOOM only scales and never dollies. Off means the target
+         stays where it is and orbit stays predictable.
+
+         Speed raised 2 -> 5 because a trackpad pinch emits very small
+         deltaY values and perspective DOLLY scales its step by those,
+         so each pinch barely moved — four or five pinches to cross the
+         zoom range. Pure feel, easy to retune. */
+      dollySpeed={5}
       makeDefault
       maxDistance={500}
       maxPolarAngle={maxPolarAngle}
