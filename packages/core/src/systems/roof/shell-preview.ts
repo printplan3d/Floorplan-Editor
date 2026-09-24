@@ -311,6 +311,8 @@ type RoofFrame = {
   overhang: number
   /** tan(pitch) of the SIDE edge each polygon corner belongs to. */
   cornerTan: number[]
+  /** Clamped tan(pitch) per EDGE index. */
+  tanOf: number[]
 }
 
 function _roofFrame(
@@ -390,6 +392,7 @@ function _roofFrame(
     cornerY,
     overhang: Math.max(0, overhang),
     cornerTan,
+    tanOf: tans.map((t) => Math.max(MIN_EDGE_WEIGHT, t)),
     ridgeLow: ridgeAlongX
       ? [xMin + insetLow, ridgeZ, mid]
       : [mid, ridgeZ, zMin + insetLow],
@@ -399,99 +402,146 @@ function _roofFrame(
   }
 }
 
+type V3 = [number, number, number]
+
 function _buildRectangleShell(
   polygon: [number, number][],
   styles: EdgeStyle[],
   frame: RoofFrame,
 ): THREE.BufferGeometry | null {
-  const { ridgeAlongX, cornerY, cornerTan, overhang, ridgeLow, ridgeHigh } = frame
+  const { ridgeAlongX, overhang: oh, ridgeZ, eaveOf, tanOf, cornerY } = frame
 
-  // Wall-line corners: where the roof meets the storey wall.
-  const wall = polygon.map(
-    ([x, z], i) => [x, cornerY[i]!, z] as [number, number, number],
-  )
+  const xs = polygon.map((p) => p[0])
+  const zs = polygon.map((p) => p[1])
+  const xMin = Math.min(...xs)
+  const xMax = Math.max(...xs)
+  const zMin = Math.min(...zs)
+  const zMax = Math.max(...zs)
 
-  // Eave corners: the wall line pushed OUT by the overhang, dropping
-  // along the slope as it goes.
-  //
-  // Phase 1 skipped this — "eave sits AT the polygon edge (no overhang
-  // ... comes back in Phase 5)" — which left the preview with no eave
-  // detail at all while the backend had been projecting
-  // eave_overhang_cm (default 30) and a fascia board the whole time.
-  // Rectangles here are axis-aligned, so outward is simply away from
-  // the centre on each axis.
-  const cx = polygon.reduce((a, p) => a + p[0], 0) / polygon.length
-  const cz = polygon.reduce((a, p) => a + p[1], 0) / polygon.length
-  const c = polygon.map(([x, z], i) => {
-    const ox = x + Math.sign(x - cx) * overhang
-    const oz = z + Math.sign(z - cz) * overhang
-    // Drop along the slope of the side edge this corner belongs to.
-    return [ox, cornerY[i]! - cornerTan[i]! * overhang, oz] as [
-      number,
-      number,
-      number,
-    ]
-  })
+  // Work in (u, v): u runs ALONG the ridge, v across it. Faces are
+  // written once in the ridge-along-X orientation; the other
+  // orientation is a mirror (x <-> z swap), so its faces are reversed
+  // to keep every normal pointing outward.
+  const uMin = ridgeAlongX ? xMin : zMin
+  const uMax = ridgeAlongX ? xMax : zMax
+  const vMin = ridgeAlongX ? zMin : xMin
+  const vMax = ridgeAlongX ? zMax : xMax
+  const vMid = (vMin + vMax) / 2
+  const P = (u: number, y: number, v: number): V3 => (ridgeAlongX ? [u, y, v] : [v, y, u])
 
-  const faces: { verts: [number, number, number][]; slot: number }[] = []
-  const slotFor = (i: number) =>
-    styles[i] === 'gable' ? SLOT_WALL_EXTERIOR : SLOT_SLATE_TOP
+  // Edge indices in the fixed corner order of _resolveEdgeStyles.
+  const eSideLo = ridgeAlongX ? 0 : 3 // v = vMin
+  const eSideHi = ridgeAlongX ? 2 : 1 // v = vMax
+  const eEndLo = ridgeAlongX ? 3 : 0 // u = uMin
+  const eEndHi = ridgeAlongX ? 1 : 2 // u = uMax
+  const gableLo = styles[eEndLo] === 'gable'
+  const gableHi = styles[eEndHi] === 'gable'
 
-  if (ridgeAlongX) {
-    faces.push({ verts: [c[0]!, c[1]!, ridgeHigh, ridgeLow], slot: slotFor(0) })
-    faces.push({ verts: [c[2]!, c[3]!, ridgeLow, ridgeHigh], slot: slotFor(2) })
-    faces.push({ verts: [c[1]!, c[2]!, ridgeHigh], slot: slotFor(1) })
-    faces.push({ verts: [c[3]!, c[0]!, ridgeLow], slot: slotFor(3) })
-  } else {
-    faces.push({ verts: [c[1]!, c[2]!, ridgeHigh, ridgeLow], slot: slotFor(1) })
-    faces.push({ verts: [c[3]!, c[0]!, ridgeLow, ridgeHigh], slot: slotFor(3) })
-    faces.push({ verts: [c[0]!, c[1]!, ridgeLow], slot: slotFor(0) })
-    faces.push({ verts: [c[2]!, c[3]!, ridgeHigh], slot: slotFor(2) })
+  // Eave heights at the WALL line, then out at the eave line, each
+  // dropping along its own slope.
+  const eLo = eaveOf[eSideLo]!
+  const eHi = eaveOf[eSideHi]!
+  const eLoO = eLo - tanOf[eSideLo]! * oh
+  const eHiO = eHi - tanOf[eSideHi]! * oh
+  const F = oh > 1e-3 ? FASCIA_M : 0
+
+  // THE RAKE OVERHANG. A gable end is a vertical wall with the roof
+  // running on past it, so the ridge is extended by the overhang at
+  // each GABLE end. The previous version outset the gable triangle's
+  // base corners but left its apex on the wall line, which tilted the
+  // whole gable end outward instead of overhanging it. A hip end keeps
+  // the ridge where its own pitch puts it.
+  const rLoU = (ridgeAlongX ? frame.ridgeLow[0] : frame.ridgeLow[2]) - (gableLo ? oh : 0)
+  const rHiU = (ridgeAlongX ? frame.ridgeHigh[0] : frame.ridgeHigh[2]) + (gableHi ? oh : 0)
+  const R_lo = P(rLoU, ridgeZ, vMid)
+  const R_hi = P(rHiU, ridgeZ, vMid)
+
+  // Eave-line corners — outset on every side.
+  const uLoO = uMin - oh
+  const uHiO = uMax + oh
+  const vLoO = vMin - oh
+  const vHiO = vMax + oh
+  const E_ll = P(uLoO, eLoO, vLoO)
+  const E_hl = P(uHiO, eLoO, vLoO)
+  const E_hh = P(uHiO, eHiO, vHiO)
+  const E_lh = P(uLoO, eHiO, vHiO)
+  const down = (p: V3): V3 => [p[0], p[1] - F, p[2]]
+
+  const faces: { verts: V3[]; slot: number }[] = []
+  const add = (verts: V3[], slot: number) => faces.push({ verts, slot })
+
+  // ── Slopes (the tiled surface) ─────────────────────────────────
+  add([E_ll, E_hl, R_hi, R_lo], SLOT_SLATE_TOP)
+  add([E_hh, E_lh, R_lo, R_hi], SLOT_SLATE_TOP)
+
+  // ── Eave fascia + boxed soffit, both long sides ───────────────
+  if (F > 0) {
+    add([down(E_ll), down(E_hl), E_hl, E_ll], SLOT_FASCIA)
+    add([down(E_hh), down(E_lh), E_lh, E_hh], SLOT_FASCIA)
+    // Flat soffit from the fascia bottom back to the wall line — the
+    // box under the eave in the operator's reference.
+    add([P(uLoO, eLoO - F, vMin), P(uHiO, eLoO - F, vMin), down(E_hl), down(E_ll)], SLOT_SOFFIT)
+    add([P(uHiO, eHiO - F, vMax), P(uLoO, eHiO - F, vMax), down(E_lh), down(E_hh)], SLOT_SOFFIT)
   }
 
-  // Fascia board — the vertical strip hanging off the eave edge, and
-  // the soffit closing the underside back to the wall.
-  if (overhang > 1e-3) {
-    const drop = (p: [number, number, number]): [number, number, number] => [
-      p[0],
-      p[1] - FASCIA_M,
-      p[2],
-    ]
-    for (let i = 0; i < 4; i++) {
-      const j = (i + 1) % 4
-      faces.push({
-        verts: [drop(c[i]!), drop(c[j]!), c[j]!, c[i]!],
-        slot: SLOT_FASCIA,
-      })
-      // Soffit: horizontal underside from the fascia bottom back in to
-      // the wall, at the fascia-bottom height so it reads flat.
-      const wi: [number, number, number] = [wall[i]![0], c[i]![1] - FASCIA_M, wall[i]![2]]
-      const wj: [number, number, number] = [wall[j]![0], c[j]![1] - FASCIA_M, wall[j]![2]]
-      faces.push({ verts: [wi, wj, drop(c[j]!), drop(c[i]!)], slot: SLOT_SOFFIT })
+  // ── Ends ───────────────────────────────────────────────────────
+  const end = (atHi: boolean) => {
+    const gable = atHi ? gableHi : gableLo
+    const uWall = atHi ? uMax : uMin
+    const uOut = atHi ? uHiO : uLoO
+    const R = atHi ? R_hi : R_lo
+    // Faces are written for the +u (high) end; the low end faces the
+    // other way, so its vertex order is reversed.
+    const orient = (vs: V3[]) => (atHi ? vs : [...vs].reverse())
+
+    if (gable) {
+      // Vertical gable wall, ON the wall line, under the roof.
+      add(orient([P(uWall, eLo, vMin), P(uWall, eHi, vMax), P(uWall, ridgeZ, vMid)]), SLOT_WALL_EXTERIOR)
+      if (F > 0) {
+        const A = P(uOut, eLoO, vLoO)
+        const B = P(uOut, ridgeZ, vMid)
+        const C = P(uOut, eHiO, vHiO)
+        // Barge boards up both rakes.
+        add(orient([down(A), down(B), B, A]), SLOT_FASCIA)
+        add(orient([down(B), down(C), C, B]), SLOT_FASCIA)
+        // Rake soffits: the underside of the overhanging slope strip
+        // between the gable wall and the barge board, at the board's
+        // bottom edge so the two meet.
+        add(orient([P(uWall, eLoO - F, vLoO), P(uWall, ridgeZ - F, vMid), down(B), down(A)]), SLOT_SOFFIT)
+        add(orient([P(uWall, ridgeZ - F, vMid), P(uWall, eHiO - F, vHiO), down(C), down(B)]), SLOT_SOFFIT)
+      }
+    } else {
+      // Hip end: a sloped face down to its own eave, which overhangs
+      // like the sides do.
+      const EL = P(uOut, eLoO, vLoO)
+      const EH = P(uOut, eHiO, vHiO)
+      add(orient([EL, EH, R]), SLOT_SLATE_TOP)
+      if (F > 0) {
+        add(orient([down(EL), down(EH), EH, EL]), SLOT_FASCIA)
+        add(orient([P(uWall, eLoO - F, vLoO), P(uWall, eHiO - F, vHiO), down(EH), down(EL)]), SLOT_SOFFIT)
+      }
     }
   }
+  end(true)
+  end(false)
 
-  // Wall band — storey wall top (z=0) up to this corner's eave. THIS
-  // is the parapet: it grows on the side whose pitch was shallowed and
-  // nowhere else. Measured at the WALL line, not the eave line, so the
-  // overhang doesn't stretch it.
+  // Mirror correction for the ridge-along-Z orientation.
+  if (!ridgeAlongX) for (const f of faces) f.verts.reverse()
+
+  // ── Wall band (parapet) — at the WALL line, unaffected by overhang ─
+  const wall = polygon.map(([x, z], i) => [x, cornerY[i]!, z] as V3)
   for (let i = 0; i < 4; i++) {
     const j = (i + 1) % 4
     if (wall[i]![1] <= 1e-3 && wall[j]![1] <= 1e-3) continue
-    const lo_i: [number, number, number] = [wall[i]![0], 0, wall[i]![2]]
-    const lo_j: [number, number, number] = [wall[j]![0], 0, wall[j]![2]]
-    faces.push({ verts: [lo_i, lo_j, wall[j]!, wall[i]!], slot: SLOT_WALL_EXTERIOR })
+    faces.push({
+      verts: [[wall[i]![0], 0, wall[i]![2]], [wall[j]![0], 0, wall[j]![2]], wall[j]!, wall[i]!],
+      slot: SLOT_WALL_EXTERIOR,
+    })
   }
 
-  // Soffit — flat cap under the roof so walk-mode doesn't see sky from
-  // below. Sits at the lowest eave so it never pokes through a slope.
-  const soffitY = Math.min(...cornerY)
-  faces.push({
-    verts: polygon.map(
-      ([x, z]) => [x, soffitY, z] as [number, number, number],
-    ),
-    slot: SLOT_SOFFIT,
-  })
+  // Interior cap so walk-mode doesn't see sky from below.
+  const capY = Math.min(...cornerY)
+  faces.push({ verts: polygon.map(([x, z]) => [x, capY, z] as V3), slot: SLOT_SOFFIT })
 
   return _facesToGeometry(faces)
 }
