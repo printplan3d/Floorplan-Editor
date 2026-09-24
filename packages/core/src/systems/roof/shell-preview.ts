@@ -645,23 +645,45 @@ function _buildDormerGeometry(
   const apexBack = corner(0, cheekD)
 
   if (spec.type === 'gable') {
-    // 6 verts: 4 base + 2 ridge apex points.
-    const rf = apexFront
-    const rb = apexBack
-    const verts: [number, number, number][] = [
-      [c0[0], zBase, c0[1]],
-      [c1[0], zBase, c1[1]],
-      [c2[0], zBase, c2[1]],
-      [c3[0], zBase, c3[1]],
-      [rf[0], rZ, rf[1]],
-      [rb[0], rZ, rb[1]],
-    ]
+    // HOUSE-SHAPED (pentagon) profile, extruded up the slope:
+    //
+    //            AP              apex / dormer ridge   (rZ)
+    //          /        //        TL      TR          dormer eave           (zEaveD)
+    //        |        |          <- vertical CHEEK walls
+    //        BL------BR          below the main slope  (zBase)
+    //
+    // A triangle-only profile (what this was) has no cheeks: its
+    // sloped sides run all the way down into the roof, so the main
+    // slope swallows everything except the tip and the dormer reads as
+    // a small wedge. Real dormers stand on vertical cheeks with the
+    // gable on top, and the cheeks are what make it recognisable.
+    //
+    // Split: the gable rise uses the MAIN roof's pitch (the usual way
+    // a dormer is detailed), capped at half the dormer's height so
+    // there is always some cheek left; the remainder is cheek.
+    const gableRise = Math.min(spec.ridgeHeight * 0.5, halfW * tanParent)
+    const zEaveD = rZ - gableRise
+    const at = (p: [number, number], y: number): [number, number, number] => [p[0], y, p[1]]
+    const BLf = at(c0, zBase)
+    const BRf = at(c1, zBase)
+    const TRf = at(c1, zEaveD)
+    const APf = at(apexFront, rZ)
+    const TLf = at(c0, zEaveD)
+    const BLb = at(c3, zBase)
+    const BRb = at(c2, zBase)
+    const TRb = at(c2, zEaveD)
+    const APb = at(apexBack, rZ)
+    const TLb = at(c3, zEaveD)
+    // Winding follows the triangle version that CSG already accepted:
+    // front walks left -> right -> apex, back is its mirror.
     return _facesToGeometry([
-      { verts: [verts[0]!, verts[1]!, verts[4]!], slot: SLOT_WALL_EXTERIOR }, // front gable
-      { verts: [verts[3]!, verts[5]!, verts[2]!], slot: SLOT_WALL_EXTERIOR }, // back gable
-      { verts: [verts[0]!, verts[4]!, verts[5]!, verts[3]!], slot: SLOT_SLATE_TOP },
-      { verts: [verts[1]!, verts[2]!, verts[5]!, verts[4]!], slot: SLOT_SLATE_TOP },
-      { verts: [verts[0]!, verts[3]!, verts[2]!, verts[1]!], slot: SLOT_SOFFIT },
+      { verts: [BLf, BRf, TRf, APf, TLf], slot: SLOT_WALL_EXTERIOR }, // front gable + cheeks
+      { verts: [BLb, TLb, APb, TRb, BRb], slot: SLOT_WALL_EXTERIOR }, // back (inside roof)
+      { verts: [BLf, TLf, TLb, BLb], slot: SLOT_WALL_EXTERIOR }, // left cheek
+      { verts: [BRf, BRb, TRb, TRf], slot: SLOT_WALL_EXTERIOR }, // right cheek
+      { verts: [TLf, APf, APb, TLb], slot: SLOT_SLATE_TOP }, // left roof
+      { verts: [TRf, TRb, APb, APf], slot: SLOT_SLATE_TOP }, // right roof
+      { verts: [BLf, BLb, BRb, BRf], slot: SLOT_SOFFIT }, // bottom
     ])
   }
 
