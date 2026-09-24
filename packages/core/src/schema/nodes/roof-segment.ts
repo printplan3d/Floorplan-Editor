@@ -125,9 +125,21 @@ export const RoofSegmentNode = BaseNode.extend({
           .optional(),
         materialCheek: z.string().optional(),
         materialRoof: z.string().optional(),
+        // Window this dormer FOLLOWS (2026-09-25). When set, the dormer's
+        // position and size come from the window: its front sits on the
+        // window's wall, centred on it, wide and tall enough to clear it.
+        // Move or resize the window and the dormer follows. footOnParent,
+        // cheekWidth and ridgeHeight are ignored while this is set.
+        windowId: z.string().optional(),
       }),
     )
     .optional(),
+  // How this segment's ridge relates to a roof it runs into (an L/T wing, a
+  // bay, or a continuation of the same ridge). Unset = automatic: LEVEL for a
+  // wing of comparable width (ridges line up, the narrower wing is steeper),
+  // INDEPENDENT for a small wing (keeps its own pitch; its ridge dies into
+  // the main slope). 'pitch' = same pitch as the main roof, dropped ridge.
+  ridgeMatch: z.enum(['level', 'pitch', 'independent']).optional(),
   // Escape hatch: path to a manually-authored OBJ that replaces the
   // pipeline-generated shell for this segment. Validation still runs
   // on the loaded mesh. Rare; used for eyebrow dormers / bay windows /
