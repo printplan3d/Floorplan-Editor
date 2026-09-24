@@ -145,10 +145,19 @@ export const CustomCameraControls = () => {
   // into a dolly proportional to the current distance. Listening on
   // window in the CAPTURE phase guarantees we run before the library's
   // own listener on the canvas.
+  //
+  // Keyed on the CAMERA OBJECT, not just cameraMode. Switching to
+  // perspective swaps the camera one render later, and drei builds a
+  // brand-new CameraControls instance for it. An effect keyed only on
+  // cameraMode ran against the outgoing instance, so the zoom lock was
+  // lost and the pinch listener was bound to a disposed controller —
+  // measured live: minZoom 0.01 / maxZoom Infinity on the real one.
+  // The handler also reads controls.current at event time for the same
+  // reason.
   useEffect(() => {
     const c = controls.current
     if (!c) return
-    const perspective = cameraMode === 'perspective'
+    const perspective = (camera as { isPerspectiveCamera?: boolean }).isPerspectiveCamera === true
     if (!perspective) {
       c.minZoom = 0.01
       c.maxZoom = Number.POSITIVE_INFINITY
@@ -158,18 +167,20 @@ export const CustomCameraControls = () => {
     c.maxZoom = 1
     c.zoomTo(1, false)
 
-    const el = (c as unknown as { _domElement?: HTMLElement })._domElement
     const PINCH_DOLLY = 0.012 // fraction of current distance per wheel unit
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return
+      const live = controls.current
+      if (!live) return
+      const el = (live as unknown as { _domElement?: HTMLElement })._domElement
       if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return
       e.preventDefault()
       e.stopPropagation()
-      c.dolly(-e.deltaY * PINCH_DOLLY * c.distance, true)
+      live.dolly(-e.deltaY * PINCH_DOLLY * live.distance, true)
     }
     window.addEventListener('wheel', onWheel, { capture: true, passive: false })
     return () => window.removeEventListener('wheel', onWheel, { capture: true })
-  }, [cameraMode, isPreviewMode])
+  }, [camera, cameraMode, isPreviewMode])
 
   useEffect(() => {
     const keyState = {
