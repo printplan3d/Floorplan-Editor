@@ -372,6 +372,16 @@ export default function Editor({
     useViewer.getState().forceCameraMode(isPreviewMode ? 'perspective' : 'orthographic')
     return () => useViewer.getState().forceCameraMode('orthographic')
   }, [isPreviewMode])
+
+  // Preview shows SOLID walls. The 2D plan pins wallMode to 'down',
+  // which WallCutout renders as a faint dot-grid ghost on every wall —
+  // fine under a plan, but in 3D it made the whole house see-through
+  // and left the roof hanging in the air. Restored on exit because
+  // wallMode is persisted.
+  useEffect(() => {
+    useViewer.getState().forceWallMode(isPreviewMode ? 'up' : 'down')
+    return () => useViewer.getState().forceWallMode('down')
+  }, [isPreviewMode])
   const tool = useEditor((s) => s.tool)
   // Ritn3D 2026-06-18: 3D canvas is mounted ONLY for roof and ceiling editing —
   // every other tool (wall, door, window, item, slab, zone) has a complete 2D

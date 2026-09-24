@@ -55,6 +55,21 @@ type ViewerState = {
   wallMode: 'up' | 'cutaway' | 'down'
   setWallMode: (mode: 'up' | 'cutaway' | 'down') => void
 
+  /**
+   * Set the wall mode for real, bypassing the lock on setWallMode.
+   *
+   * setWallMode is pinned to 'down' for the 2D plan view, and 'down'
+   * makes WallCutout swap EVERY wall for its ghost material — a 10 cm
+   * dot grid at 0-24% opacity fading out over 2.5 m. In the 3D preview
+   * that made all walls near-invisible: it was the "grid dots on the
+   * house", the see-through walls, and the roof that looked like it
+   * was floating over nothing.
+   *
+   * Only the editor's preview toggle should call this, and it must put
+   * 'down' back on exit — wallMode is persisted.
+   */
+  forceWallMode: (mode: 'up' | 'cutaway' | 'down') => void
+
   showScans: boolean
   setShowScans: (show: boolean) => void
 
@@ -122,6 +137,7 @@ const useViewer = create<ViewerState>()(
 
       wallMode: 'down',
       setWallMode: (_mode) => set({ wallMode: 'down' }), // Ritn3D: 2D floor plan view
+      forceWallMode: (mode) => set({ wallMode: mode }),
 
       showScans: true,
       setShowScans: (show) =>
