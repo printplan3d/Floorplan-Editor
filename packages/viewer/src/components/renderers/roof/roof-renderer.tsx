@@ -1,8 +1,9 @@
-import { type RoofNode, useRegistry } from '@ritn3d/core'
+import { type RoofNode, useRegistry, useScene } from '@ritn3d/core'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useNodeEvents } from '../../../hooks/use-node-events'
 import useViewer from '../../../store/use-viewer'
+import { getLevelHeight } from '../../../systems/level/level-utils'
 import { NodeRenderer } from '../node-renderer'
 import { roofDebugMaterials, roofMaterials } from './roof-materials'
 
@@ -47,6 +48,39 @@ function makeEmptyRoofPlaceholder(): THREE.BufferGeometry {
 export const RoofRenderer = ({ node }: { node: RoofNode }) => {
   const ref = useRef<THREE.Group>(null!)
   const placeholder = useMemo(makeEmptyRoofPlaceholder, [])
+  const nodes = useScene((s) => s.nodes)
+
+  /**
+   * Lift the roof to the top of its storey's walls.
+   *
+   * The backend has always placed roofs at
+   *     base_z = storey_elev + storey_height + wall_h
+   * (see computeAutoRoofHeight's note, and
+   * api/editor_scene_translator_dev.py). The preview only ever had
+   * two of those three terms: LevelSystem contributes storey_elev by
+   * moving the LEVEL group, and the shell adds wall_h as baseZ. The
+   * storey_height term was simply missing.
+   *
+   * On a single-storey plan storey_elev is 0, so a roof authored with
+   * the correct wall_h of 0 rendered at Y=0 — sitting on the ground.
+   * That is the "why are some roofs on the floor" report; the data was
+   * right and the preview was wrong. Measured on the operator's plan:
+   * all three roof groups had world Y exactly 0.
+   *
+   * wall_h stays what its schema says it is — a PARAPET, stacked above
+   * the wall top, per the operator: "All roofs must sit on the lower
+   * level wall. If parapet is added, that will be above the walls."
+   *
+   * Multi-storey still works: a roof on L1 gets L0's height from
+   * LevelSystem plus L1's height from here, landing on L1's walls.
+   */
+  const storeyTop = useMemo(() => {
+    const levelId = (node as { parentId?: string }).parentId
+    if (!levelId) return 0
+    const level = nodes[levelId as keyof typeof nodes]
+    if (!level || (level as { type?: string }).type !== 'level') return 0
+    return getLevelHeight(levelId as never, nodes as never)
+  }, [node, nodes])
 
   useRegistry(node.id, 'roof', ref)
 
@@ -55,7 +89,7 @@ export const RoofRenderer = ({ node }: { node: RoofNode }) => {
 
   return (
     <group
-      position={node.position}
+      position={[node.position[0], node.position[1] + storeyTop, node.position[2]]}
       ref={ref}
       rotation-y={node.rotation}
       visible={node.visible}
