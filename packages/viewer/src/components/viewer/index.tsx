@@ -5,6 +5,7 @@ import {
   DoorSystem,
   ItemSystem,
   RoofSystem,
+  RoofWallClipSystem,
   SlabSystem,
   WallSystem,
   useScene,
@@ -278,6 +279,8 @@ const Viewer: React.FC<ViewerProps> = ({
       <DoorSystem />
       <ItemSystem />
       <RoofSystem />
+      {/* Trims walls to the roof and hides covered windows (priority 6). */}
+      <RoofWallClipSystem />
       <SlabSystem />
       <WallSystem />
       <WindowSystem />

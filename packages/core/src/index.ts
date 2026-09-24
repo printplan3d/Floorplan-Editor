@@ -69,6 +69,8 @@ export { CeilingSystem } from './systems/ceiling/ceiling-system'
 export { DoorSystem } from './systems/door/door-system'
 export { ItemSystem } from './systems/item/item-system'
 export { RoofSystem } from './systems/roof/roof-system'
+export { RoofWallClipSystem } from './systems/roof/roof-wall-clip-system'
+export { resolveRoofContext, type RidgeMatch, windowsUnderSegment } from './systems/roof/roof-scene'
 export { SlabSystem } from './systems/slab/slab-system'
 export {
   DEFAULT_WALL_HEIGHT,
