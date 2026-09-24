@@ -51,6 +51,40 @@ const dummyMats: [THREE.Material, THREE.Material, THREE.Material, THREE.Material
 const _csg = new Evaluator()
 _csg.useGroups = true
 _csg.attributes = ['position', 'normal']
+// consolidateGroups OFF, and the material remap done by hand after each
+// evaluate (see _remapToSlots). three-bvh-csg 0.0.18 has a bug in this
+// path: GeometryBuilder sizes groupIndices lazily, only up to the highest
+// group that received an output triangle, but consolidation SORTS the
+// group list by material first. A group whose triangles were all culled
+// can then land at a loop position its index doesn't exist at, and
+// buildGeometry throws "Cannot destructure property 'count' of
+// 'groupIndices[index]'". Without consolidation the list stays in index
+// order and the loop's min(groupOrder, groupIndices) bound is safe.
+//
+// Reproduced with the operator's own roof by running this module's
+// compiled output in node: overhang 0.3 -> union throws, dormer silently
+// dropped (72 verts with or without it); overhang 0 -> union succeeds.
+// Adding the eave fascia/soffit is what tipped it — more groups in the
+// base, some of them wholly culled under the dormer.
+// Present in Evaluator.js at runtime but missing from 0.0.18's .d.ts.
+;(_csg as unknown as { consolidateGroups: boolean }).consolidateGroups = false
+
+/**
+ * Point every group back at our fixed 4-slot material layout.
+ *
+ * With consolidation off, B's groups come back offset past A's
+ * materials (so a dormer's slate might read slot 5), and any unused
+ * materials may have been dropped from the list. Matching by material
+ * OBJECT identity against dummyMats is exact regardless of either.
+ */
+function _remapToSlots(brush: Brush): void {
+  const mats = (Array.isArray(brush.material) ? brush.material : [brush.material]) as THREE.Material[]
+  for (const g of brush.geometry.groups) {
+    const slot = dummyMats.indexOf(mats[g.materialIndex ?? 0] as THREE.MeshBasicMaterial)
+    g.materialIndex = slot >= 0 ? slot : 0
+  }
+  brush.material = dummyMats
+}
 
 // Material slot indices — must line up with roof-system.tsx's
 // existing 4-slot layout (rake / roof-deck / interior / shingle-top).
@@ -504,6 +538,7 @@ function _unionDormers(
     dbrush.updateMatrixWorld()
     try {
       const next = _csg.evaluate(acc, dbrush, ADDITION) as Brush
+      _remapToSlots(next)
       acc.geometry.dispose()
       dbrush.geometry.dispose()
       acc = next
