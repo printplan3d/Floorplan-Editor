@@ -354,6 +354,24 @@ export default function Editor({
     useViewer.getState().setShowZoneLabels(!isPreviewMode)
     return () => useViewer.getState().setShowZoneLabels(true)
   }, [isPreviewMode])
+
+  // Preview gets a PERSPECTIVE camera; the 2D editor stays flat.
+  //
+  // Orthographic has no depth, so the wheel only rescales the image
+  // instead of moving the camera through the scene — that is what
+  // "zoom is very tight" was. The range was never the problem (it
+  // runs 0.01..inf; measured 0.05 to 1000). Perspective also makes
+  // dollyToCursor and the 2m..500m clamps in CustomCameraControls
+  // mean something.
+  //
+  // forceCameraMode, not setCameraMode: the latter is pinned to
+  // orthographic on purpose. Restoring on exit matters because
+  // cameraMode is persisted and a leaked 'perspective' would come
+  // back on the next load straight into the 2D editor.
+  useEffect(() => {
+    useViewer.getState().forceCameraMode(isPreviewMode ? 'perspective' : 'orthographic')
+    return () => useViewer.getState().forceCameraMode('orthographic')
+  }, [isPreviewMode])
   const tool = useEditor((s) => s.tool)
   // Ritn3D 2026-06-18: 3D canvas is mounted ONLY for roof and ceiling editing —
   // every other tool (wall, door, window, item, slab, zone) has a complete 2D

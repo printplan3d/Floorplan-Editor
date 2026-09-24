@@ -26,6 +26,23 @@ type ViewerState = {
   cameraMode: 'perspective' | 'orthographic'
   setCameraMode: (mode: 'perspective' | 'orthographic') => void
 
+  /**
+   * Set the camera mode for real, bypassing the 2D lock that
+   * setCameraMode applies.
+   *
+   * setCameraMode is deliberately pinned to 'orthographic' so the 2D
+   * drawing surface can never be tipped into perspective by the view
+   * toggles. The 3D preview is the one place that legitimately wants
+   * perspective: orthographic has no depth, so "zooming" only scales
+   * the picture instead of moving you through the scene, which reads
+   * as zoom being tight no matter how wide the limits are.
+   *
+   * Only the editor's preview toggle should call this, and it must
+   * set 'orthographic' back on exit — cameraMode is persisted, so a
+   * stray 'perspective' would survive a reload into the 2D editor.
+   */
+  forceCameraMode: (mode: 'perspective' | 'orthographic') => void
+
   theme: 'light' | 'dark'
   setTheme: (theme: 'light' | 'dark') => void
 
@@ -92,6 +109,7 @@ const useViewer = create<ViewerState>()(
 
       cameraMode: 'orthographic',
       setCameraMode: (_mode) => set({ cameraMode: 'orthographic' }), // Ritn3D: locked to 2D top-down
+      forceCameraMode: (mode) => set({ cameraMode: mode }),
 
       theme: 'light',
       setTheme: (theme) => set({ theme }),

@@ -263,7 +263,9 @@ function _buildRectangleShell(
 ): THREE.BufferGeometry | null {
   if (polygon.length !== 4) return null
 
-  // AABB of the polygon in local XZ.
+  // AABB of the polygon in local XZ. Corner order is fixed by
+  // _resolveEdgeStyles: 0=(xMin,zMin) 1=(xMax,zMin) 2=(xMax,zMax)
+  // 3=(xMin,zMax), and edge i runs from corner i to corner i+1.
   const xs = polygon.map((p) => p[0])
   const zs = polygon.map((p) => p[1])
   const xMin = Math.min(...xs)
@@ -274,195 +276,121 @@ function _buildRectangleShell(
   const D = zMax - zMin
   if (W <= 0 || D <= 0) return null
 
-  // Inward speeds — c_i = 1/t_i, floored at MIN_EDGE_WEIGHT.
-  // Edge index → local axis direction (see _resolveEdgeStyles):
-  //   0 (bottom, +X): speed pushes +Z   → inward speed for the -Z edge
-  //   1 (right,  +Z): speed pushes -X
-  //   2 (top,    -X): speed pushes -Z
-  //   3 (left,   -Z): speed pushes +X
-  const c = tans.map((t) => Math.max(MIN_EDGE_WEIGHT, 1 / Math.max(MIN_EDGE_WEIGHT, t)))
+  // ── RIDGE IS CENTRED AND PINNED; EAVES ARE DERIVED PER EDGE ──────
+  //
+  // Operator's rule, 2026-09-25: "ridge stays in the middle", and
+  // "i decrease the pitch on one edge, parapet on both sides
+  // increases" — which it should NOT.
+  //
+  // The first attempt pinned the ridge HEIGHT but slid the whole roof
+  // vertically by one shared offset, so every eave moved together and
+  // a parapet appeared on all sides. And before that, the weighted
+  // straight skeleton let pitch drag the ridge sideways in plan.
+  //
+  // Both are gone. The ridge line now sits on the polygon centreline
+  // and at baseZ + roofHeight, full stop. Each edge drops from that
+  // ridge over the SAME horizontal run (halfSpan) at its OWN pitch,
+  // so its eave is its own business:
+  //
+  //     eave_i = ridgeZ - tan_i * halfSpan
+  //
+  // Change one edge's pitch and exactly one eave moves. Shallower
+  // lifts that eave above the wall top and the wall band under it
+  // grows into a parapet; steeper drops it below and that wall gets
+  // clipped.
+  //
+  // Still backward compatible. With no authored per-edge pitch every
+  // edge takes _uniformTanFromRoofHeight = roofHeight / run, and run
+  // IS halfSpan, so eave_i = baseZ + rh - rh = baseZ for all four —
+  // identical to the old output, and the hip inset below works out to
+  // halfSpan, the classic equal-pitch hip.
+  const gableOnXEnds = styles[1] === 'gable' || styles[3] === 'gable'
+  const gableOnZEnds = styles[0] === 'gable' || styles[2] === 'gable'
+  // A gable end caps the ridge, so the ridge runs perpendicular to it.
+  // With no gable at all (full hip) it follows the longer axis.
+  const ridgeAlongX = gableOnXEnds ? true : gableOnZEnds ? false : W >= D
 
-  // Time (= height above eave) at which opposing pairs would meet.
-  const tZ = D / (c[0]! + c[2]!) // top/bottom pair — ridge would run along X
-  const tX = W / (c[1]! + c[3]!) // left/right pair — ridge would run along Z
-
-  // Which pair collides first drives the ridge orientation.
-  const ridgeAlongZ = tX <= tZ // ridge line runs parallel to Z axis
-  const ridgeTime = Math.min(tX, tZ)
-
-  // RIDGE IS PINNED, EAVE FLOATS (operator's model, 2026-09-25).
-  //
-  // The skeleton gives ridgeTime — the rise the authored pitches
-  // WOULD produce measured up from the eave. Previously the eave was
-  // nailed to baseZ and the ridge went wherever that rise landed, so
-  // changing pitch moved the ridge and a shallow roof on a wide house
-  // shot up like a church spire.
-  //
-  // Now the ridge sits where the height slider says and the whole
-  // roof surface slides vertically to meet it. Pitch and ridge height
-  // are independent inputs; the EAVE is the derived value:
-  //
-  //   shift > 0  shallower than the default → eave lifts above the
-  //              wall top → the gap is filled with wall, which reads
-  //              as a parapet (or is where a dormer goes)
-  //   shift < 0  steeper → eave drops below the wall top → the storey
-  //              wall pokes through and gets clipped (visually, not
-  //              deleted — see blender_pipeline_dev/roof/wall_clip.py)
-  //
-  // Backward compatible: with no authored edgeWeights every edge gets
-  // _uniformTanFromRoofHeight, which is defined as roofHeight / run.
-  // That makes ridgeTime === roofHeight exactly, so shift === 0 and
-  // the eave stays on baseZ — existing plans are untouched. Only a
-  // segment with per-edge pitch authored against it moves.
-  const shift = targetRidgeRise - ridgeTime
+  const halfSpan = (ridgeAlongX ? D : W) / 2
   const ridgeZ = baseZ + targetRidgeRise
-  const eaveZ = baseZ + shift
 
-  // Corner vertices of the base rectangle at eave height. Eave sits
-  // AT the polygon edge (no overhang in Phase 1 — matches backend
-  // when eave_overhang_cm=0). Overhang comes back in Phase 5.
-  const baseVerts: [number, number, number][] = polygon.map(([x, z]) => [x, eaveZ, z])
+  // The two edges that actually slope down to an eave.
+  const sideA = ridgeAlongX ? 0 : 1
+  const sideB = ridgeAlongX ? 2 : 3
+  const eaveA = ridgeZ - Math.max(MIN_EDGE_WEIGHT, tans[sideA]!) * halfSpan
+  const eaveB = ridgeZ - Math.max(MIN_EDGE_WEIGHT, tans[sideB]!) * halfSpan
 
-  // Ridge endpoints — for the wavefront that collides FIRST, its two
-  // corners collapse at time = ridgeTime. Under weighted skeleton
-  // convention, at that time each of the OTHER two edges has moved
-  // inward by c_other * ridgeTime.
-  let ridgeEndA: [number, number, number]
-  let ridgeEndB: [number, number, number]
-  if (ridgeAlongZ) {
-    // Left (edge 3) and right (edge 1) collide. Ridge runs parallel
-    // to Z at X = xMin + c_3 * tX = xMax - c_1 * tX.
-    const xR = xMin + c[3]! * ridgeTime
-    // Top and bottom edges (0, 2) have swept inward by c_i * ridgeTime.
-    const zBot = zMin + c[0]! * ridgeTime
-    const zTop = zMax - c[2]! * ridgeTime
-    ridgeEndA = [xR, ridgeZ, zBot]
-    ridgeEndB = [xR, ridgeZ, zTop]
-  } else {
-    // Top (edge 2) and bottom (edge 0) collide. Ridge runs parallel
-    // to X at Z = zMin + c_0 * tZ = zMax - c_2 * tZ.
-    const zR = zMin + c[0]! * ridgeTime
-    const xLeft = xMin + c[3]! * ridgeTime
-    const xRight = xMax - c[1]! * ridgeTime
-    ridgeEndA = [xLeft, ridgeZ, zR]
-    ridgeEndB = [xRight, ridgeZ, zR]
+  // Corner heights. Each corner takes the eave of the SIDE edge it
+  // belongs to, which is what keeps the shell closed when the two
+  // pitches differ — the end face simply gets a sloping base.
+  const cornerY = ridgeAlongX
+    ? [eaveA, eaveA, eaveB, eaveB]
+    : [eaveB, eaveA, eaveA, eaveB]
+  const c = polygon.map(
+    ([x, z], i) => [x, cornerY[i]!, z] as [number, number, number],
+  )
+
+  // Ridge endpoints. A gable end runs the ridge all the way out to the
+  // wall (inset 0); a hip end pulls it back by however far that end's
+  // own pitch needs to climb from its eave to the ridge.
+  const axisLen = ridgeAlongX ? W : D
+  const endLowIdx = ridgeAlongX ? 3 : 0 // edge at the min end of the ridge axis
+  const endHighIdx = ridgeAlongX ? 1 : 2
+  const insetFor = (edgeIdx: number, meanEave: number): number => {
+    if (styles[edgeIdx] === 'gable') return 0
+    const t = Math.max(MIN_EDGE_WEIGHT, tans[edgeIdx]!)
+    return Math.min(Math.max((ridgeZ - meanEave) / t, 0), axisLen / 2)
   }
+  const meanEave = (eaveA + eaveB) / 2
+  const insetLow = insetFor(endLowIdx, meanEave)
+  const insetHigh = insetFor(endHighIdx, meanEave)
 
-  // Face list — an array of polygons in world-local coords, each
-  // with a material slot.
+  const mid = ridgeAlongX ? (zMin + zMax) / 2 : (xMin + xMax) / 2
+  const ridgeLow: [number, number, number] = ridgeAlongX
+    ? [xMin + insetLow, ridgeZ, mid]
+    : [mid, ridgeZ, zMin + insetLow]
+  const ridgeHigh: [number, number, number] = ridgeAlongX
+    ? [xMax - insetHigh, ridgeZ, mid]
+    : [mid, ridgeZ, zMax - insetHigh]
+
   const faces: { verts: [number, number, number][]; slot: number }[] = []
+  const slotFor = (i: number) =>
+    styles[i] === 'gable' ? SLOT_WALL_EXTERIOR : SLOT_SLATE_TOP
 
-  // Roof slope faces — one per polygon edge. When the edge is a
-  // "gable" style, the face is a vertical triangular gable wall.
-  // When it's a "hip" style, the face is a sloped trapezoid or
-  // triangle rising to the ridge.
-  const baseFrontLeft = baseVerts[0]! // (xMin, eaveZ, zMin)
-  const baseFrontRight = baseVerts[1]! // (xMax, eaveZ, zMin)
-  const baseBackRight = baseVerts[2]! // (xMax, eaveZ, zMax)
-  const baseBackLeft = baseVerts[3]! // (xMin, eaveZ, zMax)
-
-  if (ridgeAlongZ) {
-    // Ridge runs parallel to Z. Left/right edges are hip; top/bottom
-    // are either gable (vertical wall) or shallow hip.
-    // Left edge (edge 3): hip → sloped face from (xMin, zMin..zMax) up to ridge.
-    // Right edge (edge 1): hip → sloped face from (xMax, zMin..zMax) up to ridge.
-    if (styles[3] === 'hip') {
-      faces.push({
-        verts: [baseFrontLeft, ridgeEndA, ridgeEndB, baseBackLeft],
-        slot: SLOT_SLATE_TOP,
-      })
-    }
-    if (styles[1] === 'hip') {
-      faces.push({
-        verts: [baseFrontRight, baseBackRight, ridgeEndB, ridgeEndA],
-        slot: SLOT_SLATE_TOP,
-      })
-    }
-    // Top / bottom: if gable-styled, they're TRIANGULAR walls
-    // rising from the eave line to the ridge endpoint above.
-    if (styles[0] === 'gable') {
-      faces.push({
-        verts: [baseFrontLeft, baseFrontRight, ridgeEndA],
-        slot: SLOT_WALL_EXTERIOR,
-      })
-    } else {
-      // Hip end — quad rising to the ridge endpoint. Small tri strip.
-      faces.push({
-        verts: [baseFrontLeft, baseFrontRight, ridgeEndA],
-        slot: SLOT_SLATE_TOP,
-      })
-    }
-    if (styles[2] === 'gable') {
-      faces.push({
-        verts: [baseBackRight, baseBackLeft, ridgeEndB],
-        slot: SLOT_WALL_EXTERIOR,
-      })
-    } else {
-      faces.push({
-        verts: [baseBackRight, baseBackLeft, ridgeEndB],
-        slot: SLOT_SLATE_TOP,
-      })
-    }
+  if (ridgeAlongX) {
+    // Edges 0 and 2 slope; 1 and 3 cap the ends.
+    faces.push({ verts: [c[0]!, c[1]!, ridgeHigh, ridgeLow], slot: slotFor(0) })
+    faces.push({ verts: [c[2]!, c[3]!, ridgeLow, ridgeHigh], slot: slotFor(2) })
+    faces.push({ verts: [c[1]!, c[2]!, ridgeHigh], slot: slotFor(1) })
+    faces.push({ verts: [c[3]!, c[0]!, ridgeLow], slot: slotFor(3) })
   } else {
-    // Ridge runs parallel to X. Top/bottom edges are hip; left/right
-    // are gable (vertical wall) or hip.
-    if (styles[0] === 'hip') {
-      faces.push({
-        verts: [baseFrontLeft, baseFrontRight, ridgeEndB, ridgeEndA],
-        slot: SLOT_SLATE_TOP,
-      })
-    }
-    if (styles[2] === 'hip') {
-      faces.push({
-        verts: [baseBackRight, baseBackLeft, ridgeEndA, ridgeEndB],
-        slot: SLOT_SLATE_TOP,
-      })
-    }
-    if (styles[3] === 'gable') {
-      faces.push({
-        verts: [baseBackLeft, baseFrontLeft, ridgeEndA],
-        slot: SLOT_WALL_EXTERIOR,
-      })
-    } else {
-      faces.push({
-        verts: [baseBackLeft, baseFrontLeft, ridgeEndA],
-        slot: SLOT_SLATE_TOP,
-      })
-    }
-    if (styles[1] === 'gable') {
-      faces.push({
-        verts: [baseFrontRight, baseBackRight, ridgeEndB],
-        slot: SLOT_WALL_EXTERIOR,
-      })
-    } else {
-      faces.push({
-        verts: [baseFrontRight, baseBackRight, ridgeEndB],
-        slot: SLOT_SLATE_TOP,
-      })
-    }
+    // Edges 1 and 3 slope; 0 and 2 cap the ends.
+    faces.push({ verts: [c[1]!, c[2]!, ridgeHigh, ridgeLow], slot: slotFor(1) })
+    faces.push({ verts: [c[3]!, c[0]!, ridgeLow, ridgeHigh], slot: slotFor(3) })
+    faces.push({ verts: [c[0]!, c[1]!, ridgeLow], slot: slotFor(0) })
+    faces.push({ verts: [c[2]!, c[3]!, ridgeHigh], slot: slotFor(2) })
   }
 
-  // Wall band — vertical strip from z=0 (storey wall top) up to the
-  // eave. Runs to eaveZ, NOT baseZ: when a shallow pitch lifts the
-  // eave above the wall top this band is what closes the gap, and it
-  // is what the operator means by "a parapet will be added". With a
-  // steep pitch eaveZ goes negative, there is no band to draw, and
-  // the storey wall below is what needs clipping instead.
-  if (eaveZ > 1e-3) {
-    const belowEave: [number, number, number][] = polygon.map(([x, z]) => [x, 0, z])
-    for (let i = 0; i < 4; i++) {
-      const j = (i + 1) % 4
-      faces.push({
-        verts: [belowEave[i]!, belowEave[j]!, baseVerts[j]!, baseVerts[i]!],
-        slot: SLOT_WALL_EXTERIOR,
-      })
-    }
+  // Wall band — from the storey wall top (z=0) up to whatever height
+  // this corner's eave ended up at. THIS is the parapet: it grows on
+  // the side whose pitch was shallowed and nowhere else. Skipped where
+  // the eave sits at or below the wall top, since there the wall pokes
+  // through the roof and wants clipping, not filling.
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4
+    if (c[i]![1] <= 1e-3 && c[j]![1] <= 1e-3) continue
+    const lo_i: [number, number, number] = [c[i]![0], 0, c[i]![2]]
+    const lo_j: [number, number, number] = [c[j]![0], 0, c[j]![2]]
+    faces.push({ verts: [lo_i, lo_j, c[j]!, c[i]!], slot: SLOT_WALL_EXTERIOR })
   }
 
-  // Soffit — flat cap under the roof at eave height. Presents to
-  // walk-mode from below so the room ceiling doesn't read as sky.
+  // Soffit — flat cap under the roof so walk-mode doesn't see sky from
+  // below. Sits at the lowest eave so it never pokes out through a
+  // slope.
+  const soffitY = Math.min(...cornerY)
   faces.push({
-    verts: [baseFrontLeft, baseBackLeft, baseBackRight, baseFrontRight],
+    verts: polygon.map(
+      ([x, z]) => [x, soffitY, z] as [number, number, number],
+    ),
     slot: SLOT_SOFFIT,
   })
 
