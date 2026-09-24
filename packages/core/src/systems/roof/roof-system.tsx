@@ -7,7 +7,51 @@ import { sceneRegistry } from '../../hooks/scene-registry/scene-registry'
 import type { AnyNode, AnyNodeId, RoofNode, RoofSegmentNode } from '../../schema'
 import type { RoofType } from '../../schema/nodes/roof-segment'
 import useScene from '../../store/use-scene'
+import { type RoofContext, resolveRoofContext } from './roof-scene'
 import { generateShellSegmentGeometry } from './shell-preview'
+
+// ── Scene-level roof context (junctions, real walls, dormers on windows) ──
+//
+// Roofs now depend on OTHER nodes: a wing is cut back or extended where it
+// meets another roof, walls standing on an edge replace the generated
+// parapet, and a dormer follows its window. resolveRoofContext works that
+// out for every segment at once; it is cached per `nodes` reference (zustand
+// hands out a new object on every mutation) so each mutation costs one pass.
+let _ctxNodes: object | null = null
+let _ctx: RoofContext | null = null
+export function getRoofContext(nodes: Record<string, AnyNode>): RoofContext {
+  if (_ctxNodes !== nodes || !_ctx) {
+    _ctx = resolveRoofContext(nodes)
+    _ctxNodes = nodes
+  }
+  return _ctx
+}
+
+/**
+ * Signature of everything a roof now depends on. The roof system can't rely
+ * on dirty flags for walls/windows: WallSystem runs first (priority 4) and
+ * clears them before we look. So on each new `nodes` object, compare this and
+ * rebuild every roof when it moves.
+ */
+function _roofDependencySignature(nodes: Record<string, AnyNode>): string {
+  const parts: string[] = []
+  for (const n of Object.values(nodes)) {
+    if (!n) continue
+    const t = n.type
+    if (t === 'wall') {
+      const w = n as unknown as { id: string; parentId?: string; start: number[]; end: number[]; height?: number; thickness?: number }
+      parts.push(`w${w.id}${w.parentId}${w.start}${w.end}${w.height}${w.thickness}`)
+    } else if (t === 'window') {
+      const w = n as unknown as { id: string; wallId?: string; position?: number[]; width?: number; height?: number }
+      parts.push(`n${w.id}${w.wallId}${w.position}${w.width}${w.height}`)
+    } else if (t === 'roof' || t === 'roof-segment' || t === 'level' || t === 'ceiling') {
+      parts.push(`${t}${JSON.stringify(n)}`)
+    }
+  }
+  return parts.sort().join('|')
+}
+let _depNodes: object | null = null
+let _depSig = ''
 
 const csgEvaluator = new Evaluator()
 csgEvaluator.useGroups = true
@@ -124,9 +168,21 @@ export const RoofSystem = () => {
       return
     }
 
+    const nodesNow = useScene.getState().nodes
+    if (nodesNow !== _depNodes) {
+      _depNodes = nodesNow
+      const sig = _roofDependencySignature(nodesNow)
+      if (sig !== _depSig) {
+        _depSig = sig
+        for (const n of Object.values(nodesNow)) {
+          if (n?.type === 'roof') pendingRoofUpdates.add(n.id as AnyNodeId)
+        }
+      }
+    }
+
     if (dirtyNodes.size === 0 && pendingRoofUpdates.size === 0) return
 
-    const nodes = useScene.getState().nodes
+    const nodes = nodesNow
 
     // --- Pass 1: Process dirty roof-segments (throttled) ---
     let segmentsProcessed = 0
@@ -250,8 +306,9 @@ function updateMergedRoofGeometry(
   // (gambrel/dutch/mansard) falls back to the legacy CSG path below.
   const shellGeoms: THREE.BufferGeometry[] = []
   let allShell = true
+  const ctx = getRoofContext(nodes)
   for (const child of children) {
-    const g = generateShellSegmentGeometry(child)
+    const g = generateShellSegmentGeometry(child, ctx.segments.get(child.id)?.opts ?? {})
     if (!g) {
       allShell = false
       break
