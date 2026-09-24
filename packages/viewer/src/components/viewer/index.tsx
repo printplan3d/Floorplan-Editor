@@ -7,6 +7,7 @@ import {
   RoofSystem,
   SlabSystem,
   WallSystem,
+  useScene,
   WindowSystem,
 } from '@ritn3d/core'
 import { Bvh } from '@react-three/drei'
@@ -135,6 +136,9 @@ function DebugBridge() {
     if (!enabled) return
     const w = window as any
     w.__ritn3d = store
+    // The node graph the editor edits — roof masses, dormers, levels.
+    // Needed to tell "geometry built wrong" from "authored wrong".
+    w.__ritn3dScene = useScene
     w.__ritn3dFrames = 0
     const s: any = store.getState()
     const gl: any = s.gl

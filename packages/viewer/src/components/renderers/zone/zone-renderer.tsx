@@ -30,7 +30,17 @@ const createWallGradientMaterial = (zoneColor: string) => {
     colorNode: baseColor,
     opacityNode: finalOpacity,
     side: DoubleSide,
-    depthWrite: true,
+    // depthWrite MUST stay false while depthTest is false.
+    //
+    // These quads are invisible by default (the opacity uniform starts
+    // at 0 and ZoneSystem only raises it for the highlighted zone) —
+    // but with depthWrite:true they still STAMPED depth for every
+    // room boundary, and with depthTest:false they did it regardless
+    // of what was already in front. That corrupted depth across the
+    // whole scene and showed up as a field of dots over the house and
+    // the ground. Proved on editor-dev 2026-09-25: flipping this one
+    // flag to false removed the dots completely, nothing else changed.
+    depthWrite: false,
     depthTest: false,
     userData: {
       uOpacity: opacity,
