@@ -697,14 +697,37 @@ export function RoofSegmentPanel() {
               position on the face — U along the eave, V toward the ridge.
             </div>
             {dormers.map((d, idx) => {
-              const u = d.footOnParent?.[0]?.[0] ?? 0.35
-              const v = d.footOnParent?.[0]?.[1] ?? 0.15
+              // Read the MIDPOINT, because that is what setFoot writes
+              // around and what the geometry consumes (uMid/vMid in
+              // shell-preview's _buildDormerGeometry).
+              //
+              // This used to read u from footOnParent[0][0] — the LEFT
+              // edge — while writing [nu - half_w, ...]. So every call
+              // shifted U left by half_w, and since the V slider calls
+              // setFoot(u, nv), nudging V walked the dormer along the
+              // eave by cheekWidth/20 each time. The operator's own
+              // dormer had drifted to uMid = -1.999 (U is a 0..1
+              // fraction, and the slider's range is 0.1..0.9, so it
+              // could not have been entered) — about 19 V moves at
+              // 0.125 a go. That is the "when i move V, it going away
+              // from house" report: not the geometry, the panel.
+              //
+              // V never drifted because it was read and written
+              // consistently; it is made symmetric here too so both
+              // axes mean the same thing.
+              const half_w = (d.cheekWidth ?? 1.2) / 20
+              const HALF_V = 0.075
+              const fp = d.footOnParent
+              const u = fp ? ((fp[0]?.[0] ?? 0) + (fp[1]?.[0] ?? 0)) / 2 : 0.45
+              const v = fp ? ((fp[0]?.[1] ?? 0) + (fp[1]?.[1] ?? 0)) / 2 : 0.25
               const setFoot = (nu: number, nv: number) => {
-                const half_w = (d.cheekWidth ?? 1.2) / 20 // tiny UV span, mostly cosmetic
+                // Clamped so a bad value can never walk off the roof.
+                const cu = Math.min(Math.max(nu, 0), 1)
+                const cv = Math.min(Math.max(nv, 0), 1)
                 updateDormer(idx, {
                   footOnParent: [
-                    [nu - half_w, nv],
-                    [nu + half_w, nv + 0.15],
+                    [cu - half_w, cv - HALF_V],
+                    [cu + half_w, cv + HALF_V],
                   ],
                 })
               }
