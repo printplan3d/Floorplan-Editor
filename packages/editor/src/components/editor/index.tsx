@@ -346,6 +346,14 @@ export default function Editor({
     null,
   )
   const isPreviewMode = useEditor((s) => s.isPreviewMode)
+
+  // Zone name pins ("Room 1"…) are DOM overlays that sit on top of the
+  // geometry. Useful on a share link, in the way on an editing
+  // surface — off for the duration of preview, restored on exit.
+  useEffect(() => {
+    useViewer.getState().setShowZoneLabels(!isPreviewMode)
+    return () => useViewer.getState().setShowZoneLabels(true)
+  }, [isPreviewMode])
   const tool = useEditor((s) => s.tool)
   // Ritn3D 2026-06-18: 3D canvas is mounted ONLY for roof and ceiling editing —
   // every other tool (wall, door, window, item, slab, zone) has a complete 2D
@@ -515,15 +523,13 @@ export default function Editor({
                   presentation, which is the wrong mode for editing. */}
               {/* postProcessing={false}: the TSL post-FX pipeline
                   composites alpha=0 across the whole surface on this
-                  scene, so nothing is visible even though geometry,
-                  camera and the render loop are all healthy (measured
-                  2026-09-24 on editor-dev: context configured, 48 GPU
-                  submits, canvas reads back as a single rgba(0,0,0,0)).
-                  It also owns the render loop via useFrame priority 1,
-                  so opting out hands rendering back to R3F and the
-                  scene draws plainly. The editor needs a working
-                  workflow, not the full look; share links and the
-                  public viewer keep post-FX on. */}
+                  scene, so nothing is visible. <Viewer> mounts
+                  <PlainRenderer /> in its place — do NOT assume R3F
+                  picks up the draw by itself. It does not: seven
+                  systems here keep internal.priority at 7, so R3F
+                  never calls gl.render and whichever priority>0
+                  useFrame renders IS the renderer. Share links and
+                  the public viewer keep post-FX on. */}
               <Viewer postProcessing={false} selectionManager="custom">
                 <SelectionManager />
                 <FloatingActionMenu />

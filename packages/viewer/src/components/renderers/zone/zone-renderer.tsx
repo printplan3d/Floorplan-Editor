@@ -5,6 +5,7 @@ import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, type Group, 
 import { color, float, uniform, uv } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import { useNodeEvents } from '../../../hooks/use-node-events'
+import useViewer from '../../../store/use-viewer'
 import { ZONE_LAYER } from '../../../lib/layers'
 
 const Y_OFFSET = 0.01
@@ -172,6 +173,7 @@ export const ZoneRenderer = ({ node }: { node: ZoneNode }) => {
   }, [node?.color])
 
   const handlers = useNodeEvents(node, 'zone')
+  const showZoneLabels = useViewer((s) => s.showZoneLabels)
 
   if (!(node && floorShape && wallGeometry && floorMaterial && wallMaterial)) {
     return null
@@ -179,6 +181,7 @@ export const ZoneRenderer = ({ node }: { node: ZoneNode }) => {
 
   return (
     <group ref={ref} {...handlers} userData={{ labelPosition: [centroid[0], 1, centroid[1]] }}>
+      {showZoneLabels && (
       <Html
         name="label"
         position={[centroid[0], 1, centroid[1]]}
@@ -236,6 +239,7 @@ export const ZoneRenderer = ({ node }: { node: ZoneNode }) => {
           </div>
         </div>
       </Html>
+      )}
 
       {/* Floor fill */}
       <mesh

@@ -107,10 +107,20 @@ export const CustomCameraControls = () => {
         ? CameraControlsImpl.ACTION.ZOOM
         : CameraControlsImpl.ACTION.DOLLY
 
+    // Preview is a 3D surface, so it gets the mapping every 3D viewer
+    // uses: LEFT drag orbits, RIGHT drag pans, wheel zooms. It used to
+    // put SCREEN_PAN on left and leave rotate on right only, which
+    // read as "I can't rotate the model" — right-drag is not where
+    // anyone looks for orbit, and it fights the context menu.
+    //
+    // The 2D editor keeps its own mapping: left is NONE so drags draw
+    // walls instead of moving the camera, and rotate stays on right.
     return {
-      left: isPreviewMode ? CameraControlsImpl.ACTION.SCREEN_PAN : CameraControlsImpl.ACTION.NONE,
+      left: isPreviewMode ? CameraControlsImpl.ACTION.ROTATE : CameraControlsImpl.ACTION.NONE,
       middle: CameraControlsImpl.ACTION.SCREEN_PAN,
-      right: CameraControlsImpl.ACTION.ROTATE,
+      right: isPreviewMode
+        ? CameraControlsImpl.ACTION.SCREEN_PAN
+        : CameraControlsImpl.ACTION.ROTATE,
       wheel: wheelAction,
     }
   }, [cameraMode, isPreviewMode])
@@ -137,10 +147,15 @@ export const CustomCameraControls = () => {
           : CameraControlsImpl.ACTION.DOLLY
       controls.current.mouseButtons.wheel = wheelAction
       controls.current.mouseButtons.middle = CameraControlsImpl.ACTION.SCREEN_PAN
-      controls.current.mouseButtons.right = CameraControlsImpl.ACTION.ROTATE
-      if (isPreviewMode) {
-        // In preview mode, left-click is always pan (viewer-style)
+      controls.current.mouseButtons.right = isPreviewMode
+        ? CameraControlsImpl.ACTION.SCREEN_PAN
+        : CameraControlsImpl.ACTION.ROTATE
+      if (isPreviewMode && space) {
+        // Hold space to pan with the left button, same as the 2D editor.
         controls.current.mouseButtons.left = CameraControlsImpl.ACTION.SCREEN_PAN
+      } else if (isPreviewMode) {
+        // Left drag orbits — see the mouseButtons memo above.
+        controls.current.mouseButtons.left = CameraControlsImpl.ACTION.ROTATE
       } else if (space) {
         controls.current.mouseButtons.left = CameraControlsImpl.ACTION.SCREEN_PAN
       } else {
@@ -361,10 +376,16 @@ export const CustomCameraControls = () => {
 
   return (
     <CameraControls
+      /* Zoom toward the pointer rather than screen centre, and step
+         faster. Zooming used to crawl and always pulled toward the
+         middle of the screen, so getting close to one corner of the
+         house meant zoom-pan-zoom-pan. */
+      dollySpeed={2}
+      dollyToCursor
       makeDefault
-      maxDistance={100}
+      maxDistance={500}
       maxPolarAngle={maxPolarAngle}
-      minDistance={10}
+      minDistance={2}
       minPolarAngle={0}
       mouseButtons={mouseButtons}
       onRest={onRest}

@@ -20,7 +20,6 @@ import {
 } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three/webgpu'
-import { useRaycastGuard } from '../../lib/raycast-guard'
 import useViewer from '../../store/use-viewer'
 import { GuideSystem } from '../../systems/guide/guide-system'
 import { ItemLightSystem } from '../../systems/item-light/item-light-system'
@@ -69,19 +68,6 @@ declare module '@react-three/fiber' {
 
 extend(THREE as any)
 
-// TEMPORARY (2026-09-23): keeps a single mesh that throws inside
-// raycast from taking the whole render loop down, and names the
-// offender once in the console. See lib/raycast-guard.ts. Remove
-// after the preview-blanking bug is closed.
-//
-// Rendered inside the Canvas (after <Bvh>) rather than called at
-// module scope: the first attempt installed here and was silently
-// replaced by Bvh's acceleratedRaycast assignment before a single
-// raycast ran, so the guard never fired.
-function RaycastGuard() {
-  useRaycastGuard()
-  return null
-}
 
 /**
  * Monitors the WebGPU device for loss events and logs them.
@@ -275,15 +261,9 @@ const Viewer: React.FC<ViewerProps> = ({
       {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
         /> */}
       <Lights />
-      {/* Must sit AFTER <Bvh>: drei's Bvh assigns three-mesh-bvh's
-          acceleratedRaycast onto Mesh.prototype in a layout effect,
-          which clobbers any wrapper installed earlier. RaycastGuard
-          re-checks each frame and re-wraps whatever is currently
-          there, so it survives that and any later remount. */}
       <Bvh>
         <SceneRenderer />
       </Bvh>
-      <RaycastGuard />
 
       {/* Default Systems */}
       <LevelSystem />

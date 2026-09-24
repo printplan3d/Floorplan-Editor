@@ -67,6 +67,18 @@ type ViewerState = {
   debugColors: boolean
   setDebugColors: (enabled: boolean) => void
 
+  /**
+   * Render the floating "Room N" name pins over each zone. Default
+   * true — share links and the public viewer keep them.
+   *
+   * The editor's 3D preview turns them off: it's an editing surface,
+   * and eight DOM pins sit on top of the geometry you're trying to
+   * look at. Gated here rather than deleted from zone-renderer so
+   * other surfaces are unaffected.
+   */
+  showZoneLabels: boolean
+  setShowZoneLabels: (enabled: boolean) => void
+
   cameraDragging: boolean
   setCameraDragging: (dragging: boolean) => void
 }
@@ -184,6 +196,9 @@ const useViewer = create<ViewerState>()(
 
       debugColors: false,
       setDebugColors: (enabled) => set({ debugColors: enabled }),
+
+      showZoneLabels: true,
+      setShowZoneLabels: (enabled) => set({ showZoneLabels: enabled }),
 
       cameraDragging: false,
       setCameraDragging: (dragging) => set({ cameraDragging: dragging }),
