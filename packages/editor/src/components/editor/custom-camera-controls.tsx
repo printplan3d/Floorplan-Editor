@@ -125,6 +125,52 @@ export const CustomCameraControls = () => {
     }
   }, [cameraMode, isPreviewMode])
 
+  // Pinch must DOLLY a perspective camera, never zoom it.
+  //
+  // camera-controls 3.1.2, onMouseWheel:
+  //   // event.ctrlKey is set to true on macOS trackpad pinch gesture.
+  //   // In this case, always zoom.
+  //   const controlMode = event.ctrlKey ? ACTION.ZOOM : this.mouseButtons.wheel
+  // A trackpad pinch arrives as ctrl+wheel, so it ignores our
+  // wheel: DOLLY and forces ZOOM. On an orthographic camera that is
+  // right. On a PERSPECTIVE camera `zoom` divides the field of view, so
+  // pinching out widened the lens instead of moving the camera — the
+  // operator's preview was measured at zoom 0.1187, an effective FOV of
+  // about 151 degrees. That fisheye is the "rotation distorts the house
+  // at some angles". The same code also divides pinch deltas by a
+  // further 10, which is the "4-5 pinches to zoom".
+  //
+  // So for perspective: pin zoom at 1 (the lens is fixed, full stop)
+  // and intercept ctrl+wheel before camera-controls sees it, turning it
+  // into a dolly proportional to the current distance. Listening on
+  // window in the CAPTURE phase guarantees we run before the library's
+  // own listener on the canvas.
+  useEffect(() => {
+    const c = controls.current
+    if (!c) return
+    const perspective = cameraMode === 'perspective'
+    if (!perspective) {
+      c.minZoom = 0.01
+      c.maxZoom = Number.POSITIVE_INFINITY
+      return
+    }
+    c.minZoom = 1
+    c.maxZoom = 1
+    c.zoomTo(1, false)
+
+    const el = (c as unknown as { _domElement?: HTMLElement })._domElement
+    const PINCH_DOLLY = 0.012 // fraction of current distance per wheel unit
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return
+      e.preventDefault()
+      e.stopPropagation()
+      c.dolly(-e.deltaY * PINCH_DOLLY * c.distance, true)
+    }
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false })
+    return () => window.removeEventListener('wheel', onWheel, { capture: true })
+  }, [cameraMode, isPreviewMode])
+
   useEffect(() => {
     const keyState = {
       shiftRight: false,
