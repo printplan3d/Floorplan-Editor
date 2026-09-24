@@ -392,6 +392,7 @@ export function exportFloorPlanJSON(): object {
           // pipeline routes through shell.build_roof for this
           // segment; when absent, the legacy path handles it.
           edge_weights: (rs as any).edgeWeights,
+          ridge_match: (rs as any).ridgeMatch,
           faces_override: (rs as any).facesOverride,
           dormers: (rs as any).dormers,
           roof_override_mesh: (rs as any).roofOverrideMesh,

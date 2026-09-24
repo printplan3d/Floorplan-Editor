@@ -185,6 +185,9 @@ export interface CanonicalRoof {
   // additively. See ROOF_REBUILD_PLAN.md §"Data model — additions to
   // roof_masses" for semantics.
   edge_weights?: number[];
+  // How this wing's ridge meets a roof it runs into (2026-09-25):
+  // 'level' | 'pitch' | 'independent'; absent = automatic.
+  ridge_match?: string;
   faces_override?: { edgeIds: number[]; pitchDeg: number }[];
   dormers?: Array<{
     id: string;
@@ -494,6 +497,9 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
           // unchanged and the pipeline's legacy path stays default.
           ...(Array.isArray((seg as any).edgeWeights) && (seg as any).edgeWeights.length
             ? { edge_weights: (seg as any).edgeWeights }
+            : {}),
+          ...(typeof (seg as any).ridgeMatch === "string"
+            ? { ridge_match: (seg as any).ridgeMatch }
             : {}),
           ...(Array.isArray((seg as any).facesOverride) && (seg as any).facesOverride.length
             ? { faces_override: (seg as any).facesOverride }
@@ -928,6 +934,7 @@ export function canonicalToSceneGraph(
         ...(Array.isArray(s.edge_weights) && s.edge_weights.length
           ? { edgeWeights: s.edge_weights }
           : {}),
+        ...(typeof s.ridge_match === "string" ? { ridgeMatch: s.ridge_match } : {}),
         ...(Array.isArray(s.faces_override) && s.faces_override.length
           ? { facesOverride: s.faces_override }
           : {}),

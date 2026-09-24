@@ -6,7 +6,9 @@ import {
   type RoofSegmentNode,
   RoofSegmentNode as RoofSegmentNodeSchema,
   type RoofType,
+  resolveRoofContext,
   useScene,
+  windowsUnderSegment,
 } from '@ritn3d/core'
 import { DEFAULT_LEVEL_HEIGHT, getLevelHeight, useViewer } from '@ritn3d/viewer'
 import { Copy, Move, Trash2 } from 'lucide-react'
@@ -244,6 +246,18 @@ export function RoofSegmentPanel() {
   const node = selectedId
     ? (nodes[selectedId as AnyNode['id']] as RoofSegmentNode | undefined)
     : undefined
+
+  // Scene-level roof resolution: which roof this wing joins, and which
+  // windows a dormer here could follow. Same function the roof system uses.
+  const roofCtx = useMemo(
+    () => resolveRoofContext(nodes as Record<string, AnyNode>),
+    [nodes],
+  )
+  const joined = node ? roofCtx.segments.get(node.id) : undefined
+  const followableWindows = useMemo(
+    () => (node ? windowsUnderSegment(nodes as Record<string, AnyNode>, roofCtx, node.id) : []),
+    [nodes, roofCtx, node],
+  )
 
   const handleUpdate = useCallback(
     (updates: Partial<RoofSegmentNode>) => {
@@ -674,6 +688,32 @@ export function RoofSegmentPanel() {
         )
       })()}
 
+      {joined?.joinedTo ? (
+        <PanelSection title="Joins another roof">
+          <div className="px-1 pt-1 pb-1 text-[10px] leading-tight text-neutral-500">
+            This wing's ridge runs into another roof, so its inner end is
+            cut to meet it and left open. Ridge now{' '}
+            {joined.ridgeMatchApplied === 'level'
+              ? 'LEVEL with the main ridge (pitch adjusted)'
+              : joined.ridgeMatchApplied === 'pitch'
+                ? "at the main roof's PITCH (ridge drops to suit)"
+                : 'at its OWN height, dying into the main slope'}
+            .
+          </div>
+          <SegmentedControl
+            onChange={(v) =>
+              handleUpdate({ ridgeMatch: v === 'auto' ? undefined : v } as any)
+            }
+            options={[
+              { label: 'Auto', value: 'auto' },
+              { label: 'Level', value: 'level' },
+              { label: 'Pitch', value: 'pitch' },
+              { label: 'Own', value: 'independent' },
+            ]}
+            value={((node as any).ridgeMatch as string | undefined) ?? 'auto'}
+          />
+        </PanelSection>
+      ) : null}
       {(() => {
         // Dormer list. Each dormer stored on the segment as a
         // {id, parentFaceId, footOnParent, type, ridgeHeight,
@@ -752,6 +792,31 @@ export function RoofSegmentPanel() {
                     options={DORMER_TYPE_OPTIONS}
                     value={d.type ?? 'gable'}
                   />
+                  <label className="mt-1.5 flex items-center justify-between gap-2 px-0.5 text-[11px] text-neutral-400">
+                    <span>Follow window</span>
+                    <select
+                      className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-[11px] text-neutral-200"
+                      onChange={(e) =>
+                        updateDormer(idx, { windowId: e.target.value || undefined })
+                      }
+                      value={d.windowId ?? ''}
+                    >
+                      <option value="">None — place by hand</option>
+                      {followableWindows.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {d.windowId ? (
+                    <div className="px-1 pt-1 text-[10px] leading-tight text-neutral-500">
+                      Placed and sized from the window: its front sits on
+                      the window's wall. Move or resize the window and
+                      this dormer follows.
+                    </div>
+                  ) : (
+                  <>
                   <MetricControl
                     label="Parent face"
                     max={n - 1}
@@ -804,6 +869,8 @@ export function RoofSegmentPanel() {
                     unit="m"
                     value={d.cheekWidth ?? 1.2}
                   />
+                  </>
+                  )}
                 </div>
               )
             })}
