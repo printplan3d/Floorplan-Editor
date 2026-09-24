@@ -110,7 +110,15 @@ export function generateShellSegmentGeometry(
   const parts: THREE.BufferGeometry[] = []
 
   // Base solid — walls (below eave), roof slopes, gable triangles.
-  const shell = _buildRectangleShell(polygon, edgeStyles, edgeTans, baseZ, kind)
+  const targetRidgeRise = Math.max(0.01, node.roofHeight ?? 2.5)
+  const shell = _buildRectangleShell(
+    polygon,
+    edgeStyles,
+    edgeTans,
+    baseZ,
+    kind,
+    targetRidgeRise,
+  )
   if (shell) parts.push(shell)
 
   const geom = _concat(parts)
@@ -251,6 +259,7 @@ function _buildRectangleShell(
   tans: number[],
   baseZ: number,
   _kind: string,
+  targetRidgeRise: number,
 ): THREE.BufferGeometry | null {
   if (polygon.length !== 4) return null
 
@@ -280,12 +289,38 @@ function _buildRectangleShell(
   // Which pair collides first drives the ridge orientation.
   const ridgeAlongZ = tX <= tZ // ridge line runs parallel to Z axis
   const ridgeTime = Math.min(tX, tZ)
-  const ridgeZ = baseZ + ridgeTime // eave sits at z=baseZ (parapet); rise = time
+
+  // RIDGE IS PINNED, EAVE FLOATS (operator's model, 2026-09-25).
+  //
+  // The skeleton gives ridgeTime — the rise the authored pitches
+  // WOULD produce measured up from the eave. Previously the eave was
+  // nailed to baseZ and the ridge went wherever that rise landed, so
+  // changing pitch moved the ridge and a shallow roof on a wide house
+  // shot up like a church spire.
+  //
+  // Now the ridge sits where the height slider says and the whole
+  // roof surface slides vertically to meet it. Pitch and ridge height
+  // are independent inputs; the EAVE is the derived value:
+  //
+  //   shift > 0  shallower than the default → eave lifts above the
+  //              wall top → the gap is filled with wall, which reads
+  //              as a parapet (or is where a dormer goes)
+  //   shift < 0  steeper → eave drops below the wall top → the storey
+  //              wall pokes through and gets clipped (visually, not
+  //              deleted — see blender_pipeline_dev/roof/wall_clip.py)
+  //
+  // Backward compatible: with no authored edgeWeights every edge gets
+  // _uniformTanFromRoofHeight, which is defined as roofHeight / run.
+  // That makes ridgeTime === roofHeight exactly, so shift === 0 and
+  // the eave stays on baseZ — existing plans are untouched. Only a
+  // segment with per-edge pitch authored against it moves.
+  const shift = targetRidgeRise - ridgeTime
+  const ridgeZ = baseZ + targetRidgeRise
+  const eaveZ = baseZ + shift
 
   // Corner vertices of the base rectangle at eave height. Eave sits
   // AT the polygon edge (no overhang in Phase 1 — matches backend
   // when eave_overhang_cm=0). Overhang comes back in Phase 5.
-  const eaveZ = baseZ
   const baseVerts: [number, number, number][] = polygon.map(([x, z]) => [x, eaveZ, z])
 
   // Ridge endpoints — for the wavefront that collides FIRST, its two
@@ -407,9 +442,13 @@ function _buildRectangleShell(
     }
   }
 
-  // Parapet wall — vertical strip from z=0 (storey wall top) up to
-  // eave (baseZ). Only visible when parapet > 0.
-  if (baseZ > 1e-3) {
+  // Wall band — vertical strip from z=0 (storey wall top) up to the
+  // eave. Runs to eaveZ, NOT baseZ: when a shallow pitch lifts the
+  // eave above the wall top this band is what closes the gap, and it
+  // is what the operator means by "a parapet will be added". With a
+  // steep pitch eaveZ goes negative, there is no band to draw, and
+  // the storey wall below is what needs clipping instead.
+  if (eaveZ > 1e-3) {
     const belowEave: [number, number, number][] = polygon.map(([x, z]) => [x, 0, z])
     for (let i = 0; i < 4; i++) {
       const j = (i + 1) % 4
