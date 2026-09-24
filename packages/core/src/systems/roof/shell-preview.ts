@@ -497,9 +497,33 @@ function _buildDormerGeometry(
   // where halfSpan happened to equal 4. Overshooting the ridge is
   // what "it goes away from the house" looked like.
   //
-  // Clamped so the dormer's whole depth stays on the slope.
-  const maxInward = Math.max(0, frame.halfSpan - cheekD)
-  const inward = Math.min(vMid * frame.halfSpan, maxInward)
+  // How far up the slope the dormer may sit.
+  //
+  // Two limits, not one. Its whole DEPTH has to stay on the slope
+  // (halfSpan - cheekD), and its own RIDGE has to stay at or below the
+  // main ridge, which costs a further ridgeHeight/tan of run:
+  //
+  //     eave + tan*(inward + cheekD) + ridgeHeight <= eave + tan*halfSpan
+  //
+  // Without the second term a dormer pushed near the top pokes out
+  // through the main ridge, which is what a big dormer did here: 1.5 m
+  // ridge and 2.25 m deep on a roof with only 3.7 m of rise came out
+  // 1.5 m ABOVE the ridge.
+  //
+  // V then maps linearly across whatever run is actually available,
+  // rather than across halfSpan and clamping. Clamping made the slider
+  // saturate part-way — on the operator's roof it stopped moving at
+  // V=0.44 — and dead travel reads as a broken control. Now V=0 is the
+  // eave and V=1 is as far as the dormer can legally go.
+  //
+  // maxInward can be 0 or less when the dormer simply doesn't fit; it
+  // then sits at the eave and the operator needs a smaller one.
+  const tanParentRun = Math.max(MIN_EDGE_WEIGHT, tans[idx]!)
+  const maxInward = Math.max(
+    0,
+    frame.halfSpan - cheekD - spec.ridgeHeight / tanParentRun,
+  )
+  const inward = Math.min(Math.max(vMid, 0), 1) * maxInward
   const anchor = new THREE.Vector2(
     p0[0] + uMid * eave.x + inwardUnit.x * inward,
     p0[1] + uMid * eave.y + inwardUnit.y * inward,
