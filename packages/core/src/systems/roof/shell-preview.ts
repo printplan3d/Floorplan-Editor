@@ -111,14 +111,9 @@ export function generateShellSegmentGeometry(
 
   // Base solid — walls (below eave), roof slopes, gable triangles.
   const targetRidgeRise = Math.max(0.01, node.roofHeight ?? 2.5)
-  const shell = _buildRectangleShell(
-    polygon,
-    edgeStyles,
-    edgeTans,
-    baseZ,
-    kind,
-    targetRidgeRise,
-  )
+  const frame = _roofFrame(polygon, edgeStyles, edgeTans, baseZ, targetRidgeRise)
+  if (!frame) return null
+  const shell = _buildRectangleShell(polygon, edgeStyles, frame)
   if (shell) parts.push(shell)
 
   const geom = _concat(parts)
@@ -143,7 +138,7 @@ export function generateShellSegmentGeometry(
   // and window openings integrate cleanly.
   const dormers = _resolveDormers(node)
   if (dormers.length > 0) {
-    return _unionDormers(geom, dormers, polygon, edgeStyles, edgeTans, baseZ, kind)
+    return _unionDormers(geom, dormers, polygon, edgeStyles, edgeTans, frame)
   }
 
   geom.computeVertexNormals()
@@ -253,19 +248,35 @@ function _uniformTanFromRoofHeight(node: RoofSegmentNode): number {
  * Computes ridge geometry from weighted-skeleton math without running
  * the full simulation — closed form for 4 edges.
  */
-function _buildRectangleShell(
+/**
+ * Everything about a rectangle roof's geometry that both the shell and
+ * its dormers need to agree on: where the ridge is, how far the eave
+ * is from it, and how high each edge's eave ended up.
+ *
+ * Shared deliberately. The dormers used to derive their own placement
+ * from unrelated numbers and drifted off the roof as a result.
+ */
+type RoofFrame = {
+  ridgeAlongX: boolean
+  /** Horizontal run from any eave to the ridge. */
+  halfSpan: number
+  ridgeZ: number
+  /** Eave height per EDGE index. */
+  eaveOf: number[]
+  /** Eave height per polygon CORNER index. */
+  cornerY: number[]
+  ridgeLow: [number, number, number]
+  ridgeHigh: [number, number, number]
+}
+
+function _roofFrame(
   polygon: [number, number][],
   styles: EdgeStyle[],
   tans: number[],
   baseZ: number,
-  _kind: string,
   targetRidgeRise: number,
-): THREE.BufferGeometry | null {
+): RoofFrame | null {
   if (polygon.length !== 4) return null
-
-  // AABB of the polygon in local XZ. Corner order is fixed by
-  // _resolveEdgeStyles: 0=(xMin,zMin) 1=(xMax,zMin) 2=(xMax,zMax)
-  // 3=(xMin,zMax), and edge i runs from corner i to corner i+1.
   const xs = polygon.map((p) => p[0])
   const zs = polygon.map((p) => p[1])
   const xMin = Math.min(...xs)
@@ -276,105 +287,98 @@ function _buildRectangleShell(
   const D = zMax - zMin
   if (W <= 0 || D <= 0) return null
 
-  // ── RIDGE IS CENTRED AND PINNED; EAVES ARE DERIVED PER EDGE ──────
-  //
-  // Operator's rule, 2026-09-25: "ridge stays in the middle", and
-  // "i decrease the pitch on one edge, parapet on both sides
-  // increases" — which it should NOT.
-  //
-  // The first attempt pinned the ridge HEIGHT but slid the whole roof
-  // vertically by one shared offset, so every eave moved together and
-  // a parapet appeared on all sides. And before that, the weighted
-  // straight skeleton let pitch drag the ridge sideways in plan.
-  //
-  // Both are gone. The ridge line now sits on the polygon centreline
-  // and at baseZ + roofHeight, full stop. Each edge drops from that
-  // ridge over the SAME horizontal run (halfSpan) at its OWN pitch,
-  // so its eave is its own business:
+  // RIDGE IS CENTRED AND PINNED; EAVES ARE DERIVED PER EDGE.
+  // Operator's rule 2026-09-25: the ridge stays in the middle at the
+  // slider height, and changing ONE edge's pitch moves ONLY that
+  // edge's eave (growing a parapet on that side alone).
   //
   //     eave_i = ridgeZ - tan_i * halfSpan
   //
-  // Change one edge's pitch and exactly one eave moves. Shallower
-  // lifts that eave above the wall top and the wall band under it
-  // grows into a parapet; steeper drops it below and that wall gets
-  // clipped.
-  //
-  // Still backward compatible. With no authored per-edge pitch every
-  // edge takes _uniformTanFromRoofHeight = roofHeight / run, and run
-  // IS halfSpan, so eave_i = baseZ + rh - rh = baseZ for all four —
-  // identical to the old output, and the hip inset below works out to
-  // halfSpan, the classic equal-pitch hip.
+  // Backward compatible: with no authored per-edge pitch every edge
+  // takes _uniformTanFromRoofHeight = roofHeight / run, and run IS
+  // halfSpan, so every eave lands back on baseZ.
   const gableOnXEnds = styles[1] === 'gable' || styles[3] === 'gable'
   const gableOnZEnds = styles[0] === 'gable' || styles[2] === 'gable'
   // A gable end caps the ridge, so the ridge runs perpendicular to it.
-  // With no gable at all (full hip) it follows the longer axis.
   const ridgeAlongX = gableOnXEnds ? true : gableOnZEnds ? false : W >= D
 
   const halfSpan = (ridgeAlongX ? D : W) / 2
   const ridgeZ = baseZ + targetRidgeRise
 
-  // The two edges that actually slope down to an eave.
   const sideA = ridgeAlongX ? 0 : 1
   const sideB = ridgeAlongX ? 2 : 3
   const eaveA = ridgeZ - Math.max(MIN_EDGE_WEIGHT, tans[sideA]!) * halfSpan
   const eaveB = ridgeZ - Math.max(MIN_EDGE_WEIGHT, tans[sideB]!) * halfSpan
+  const meanEave = (eaveA + eaveB) / 2
 
-  // Corner heights. Each corner takes the eave of the SIDE edge it
-  // belongs to, which is what keeps the shell closed when the two
-  // pitches differ — the end face simply gets a sloping base.
+  const eaveOf = [meanEave, meanEave, meanEave, meanEave]
+  eaveOf[sideA] = eaveA
+  eaveOf[sideB] = eaveB
+
+  // Corners take the eave of the SIDE edge they belong to, which keeps
+  // the shell closed when the two pitches differ — the end face just
+  // gets a sloping base.
   const cornerY = ridgeAlongX
     ? [eaveA, eaveA, eaveB, eaveB]
     : [eaveB, eaveA, eaveA, eaveB]
-  const c = polygon.map(
-    ([x, z], i) => [x, cornerY[i]!, z] as [number, number, number],
-  )
 
-  // Ridge endpoints. A gable end runs the ridge all the way out to the
-  // wall (inset 0); a hip end pulls it back by however far that end's
-  // own pitch needs to climb from its eave to the ridge.
+  // A gable end runs the ridge out to the wall; a hip end pulls it
+  // back by however far its own pitch needs to climb.
   const axisLen = ridgeAlongX ? W : D
-  const endLowIdx = ridgeAlongX ? 3 : 0 // edge at the min end of the ridge axis
-  const endHighIdx = ridgeAlongX ? 1 : 2
-  const insetFor = (edgeIdx: number, meanEave: number): number => {
+  const insetFor = (edgeIdx: number): number => {
     if (styles[edgeIdx] === 'gable') return 0
     const t = Math.max(MIN_EDGE_WEIGHT, tans[edgeIdx]!)
     return Math.min(Math.max((ridgeZ - meanEave) / t, 0), axisLen / 2)
   }
-  const meanEave = (eaveA + eaveB) / 2
-  const insetLow = insetFor(endLowIdx, meanEave)
-  const insetHigh = insetFor(endHighIdx, meanEave)
-
+  const insetLow = insetFor(ridgeAlongX ? 3 : 0)
+  const insetHigh = insetFor(ridgeAlongX ? 1 : 2)
   const mid = ridgeAlongX ? (zMin + zMax) / 2 : (xMin + xMax) / 2
-  const ridgeLow: [number, number, number] = ridgeAlongX
-    ? [xMin + insetLow, ridgeZ, mid]
-    : [mid, ridgeZ, zMin + insetLow]
-  const ridgeHigh: [number, number, number] = ridgeAlongX
-    ? [xMax - insetHigh, ridgeZ, mid]
-    : [mid, ridgeZ, zMax - insetHigh]
+
+  return {
+    ridgeAlongX,
+    halfSpan,
+    ridgeZ,
+    eaveOf,
+    cornerY,
+    ridgeLow: ridgeAlongX
+      ? [xMin + insetLow, ridgeZ, mid]
+      : [mid, ridgeZ, zMin + insetLow],
+    ridgeHigh: ridgeAlongX
+      ? [xMax - insetHigh, ridgeZ, mid]
+      : [mid, ridgeZ, zMax - insetHigh],
+  }
+}
+
+function _buildRectangleShell(
+  polygon: [number, number][],
+  styles: EdgeStyle[],
+  frame: RoofFrame,
+): THREE.BufferGeometry | null {
+  const { ridgeAlongX, cornerY, ridgeLow, ridgeHigh } = frame
+  const c = polygon.map(
+    ([x, z], i) => [x, cornerY[i]!, z] as [number, number, number],
+  )
 
   const faces: { verts: [number, number, number][]; slot: number }[] = []
   const slotFor = (i: number) =>
     styles[i] === 'gable' ? SLOT_WALL_EXTERIOR : SLOT_SLATE_TOP
 
   if (ridgeAlongX) {
-    // Edges 0 and 2 slope; 1 and 3 cap the ends.
     faces.push({ verts: [c[0]!, c[1]!, ridgeHigh, ridgeLow], slot: slotFor(0) })
     faces.push({ verts: [c[2]!, c[3]!, ridgeLow, ridgeHigh], slot: slotFor(2) })
     faces.push({ verts: [c[1]!, c[2]!, ridgeHigh], slot: slotFor(1) })
     faces.push({ verts: [c[3]!, c[0]!, ridgeLow], slot: slotFor(3) })
   } else {
-    // Edges 1 and 3 slope; 0 and 2 cap the ends.
     faces.push({ verts: [c[1]!, c[2]!, ridgeHigh, ridgeLow], slot: slotFor(1) })
     faces.push({ verts: [c[3]!, c[0]!, ridgeLow, ridgeHigh], slot: slotFor(3) })
     faces.push({ verts: [c[0]!, c[1]!, ridgeLow], slot: slotFor(0) })
     faces.push({ verts: [c[2]!, c[3]!, ridgeHigh], slot: slotFor(2) })
   }
 
-  // Wall band — from the storey wall top (z=0) up to whatever height
-  // this corner's eave ended up at. THIS is the parapet: it grows on
-  // the side whose pitch was shallowed and nowhere else. Skipped where
-  // the eave sits at or below the wall top, since there the wall pokes
-  // through the roof and wants clipping, not filling.
+  // Wall band — storey wall top (z=0) up to this corner's eave. THIS
+  // is the parapet: it grows on the side whose pitch was shallowed and
+  // nowhere else. Skipped where the eave is at or below the wall top,
+  // since there the wall pokes through and wants clipping, not filling.
   for (let i = 0; i < 4; i++) {
     const j = (i + 1) % 4
     if (c[i]![1] <= 1e-3 && c[j]![1] <= 1e-3) continue
@@ -384,8 +388,7 @@ function _buildRectangleShell(
   }
 
   // Soffit — flat cap under the roof so walk-mode doesn't see sky from
-  // below. Sits at the lowest eave so it never pokes out through a
-  // slope.
+  // below. Sits at the lowest eave so it never pokes through a slope.
   const soffitY = Math.min(...cornerY)
   faces.push({
     verts: polygon.map(
@@ -427,14 +430,13 @@ function _unionDormers(
   polygon: [number, number][],
   styles: EdgeStyle[],
   tans: number[],
-  baseZ: number,
-  _kind: string,
+  frame: RoofFrame,
 ): THREE.BufferGeometry {
   // Turn the base geometry into a Brush, then union each dormer.
   let acc: Brush = new Brush(base, dummyMats)
   acc.updateMatrixWorld()
   for (const d of dormers) {
-    const dgeo = _buildDormerGeometry(d, polygon, styles, tans, baseZ)
+    const dgeo = _buildDormerGeometry(d, polygon, styles, tans, frame)
     if (!dgeo) continue
     const dbrush = new Brush(dgeo, dummyMats)
     dbrush.updateMatrixWorld()
@@ -461,8 +463,8 @@ function _buildDormerGeometry(
   spec: DormerSpec,
   polygon: [number, number][],
   styles: EdgeStyle[],
-  _tans: number[],
-  baseZ: number,
+  tans: number[],
+  frame: RoofFrame,
 ): THREE.BufferGeometry | null {
   // Locate the parent face's eave edge from polygon + styles.
   // For a rectangle, hip-style edges are potential parent faces.
@@ -482,14 +484,26 @@ function _buildDormerGeometry(
 
   const uMid = 0.5 * (spec.footOnParent[0][0] + spec.footOnParent[1][0])
   const vMid = 0.5 * (spec.footOnParent[0][1] + spec.footOnParent[1][1])
-  const vSpan = Math.min(eaveLen, 4.0)
-  const anchor = new THREE.Vector2(
-    p0[0] + uMid * eave.x + vMid * inwardUnit.x * vSpan,
-    p0[1] + uMid * eave.y + vMid * inwardUnit.y * vSpan,
-  )
-
   const halfW = spec.cheekWidth / 2
   const cheekD = spec.ridgeHeight * 1.5
+
+  // V runs eave -> ridge, so its run is the frame's halfSpan.
+  //
+  // This used to be Math.min(eaveLen, 4.0). eaveLen is the length
+  // ALONG the eave — the wrong dimension entirely — and the 4.0 was
+  // arbitrary. Checked against the operator's own plan: on one roof
+  // V=1 overshot 0.13m PAST the ridge and off the far slope, on
+  // another it stopped 0.34m short, and they agreed only on the roof
+  // where halfSpan happened to equal 4. Overshooting the ridge is
+  // what "it goes away from the house" looked like.
+  //
+  // Clamped so the dormer's whole depth stays on the slope.
+  const maxInward = Math.max(0, frame.halfSpan - cheekD)
+  const inward = Math.min(vMid * frame.halfSpan, maxInward)
+  const anchor = new THREE.Vector2(
+    p0[0] + uMid * eave.x + inwardUnit.x * inward,
+    p0[1] + uMid * eave.y + inwardUnit.y * inward,
+  )
 
   const corner = (offW: number, offD: number): [number, number] => [
     anchor.x + offW * eaveUnit.x + offD * inwardUnit.x,
@@ -501,8 +515,22 @@ function _buildDormerGeometry(
   const c2 = corner(halfW, cheekD)
   const c3 = corner(-halfW, cheekD)
 
-  const bZ = baseZ
-  const rZ = baseZ + spec.ridgeHeight
+  // Sit ON the slope, not on the eave plane.
+  //
+  // bZ used to be baseZ flat, so the dormer stayed at eave height
+  // wherever V put it while the roof climbed away above it. On the
+  // operator's roof (eave 2.70, ridge 6.40) its ridge was already
+  // under the roof surface by V=0.25 and 2.53m buried by V=0.9 — and
+  // at V=0.05 it floated 0.61m clear of the eave. Both read as the
+  // dormer wandering off the house.
+  const tanParent = Math.max(MIN_EDGE_WEIGHT, tans[idx]!)
+  const eaveParent = frame.eaveOf[idx]!
+  const zAt = (dist: number) => eaveParent + tanParent * Math.max(0, dist)
+  const zFront = zAt(inward)
+  const zBack = zAt(inward + cheekD)
+  // Ridge measured above the REAR, where the dormer meets the roof, so
+  // it always emerges instead of sinking in on a steep pitch.
+  const rZ = zBack + spec.ridgeHeight
 
   if (spec.type === 'gable') {
     // 6 verts: 4 base + 2 ridge apex points.
@@ -515,10 +543,10 @@ function _buildDormerGeometry(
       anchor.y + 0.75 * cheekD * inwardUnit.y,
     ]
     const verts: [number, number, number][] = [
-      [c0[0], bZ, c0[1]],
-      [c1[0], bZ, c1[1]],
-      [c2[0], bZ, c2[1]],
-      [c3[0], bZ, c3[1]],
+      [c0[0], zFront, c0[1]],
+      [c1[0], zFront, c1[1]],
+      [c2[0], zBack, c2[1]],
+      [c3[0], zBack, c3[1]],
       [rf[0], rZ, rf[1]],
       [rb[0], rZ, rb[1]],
     ]
@@ -533,10 +561,10 @@ function _buildDormerGeometry(
 
   if (spec.type === 'shed') {
     const verts: [number, number, number][] = [
-      [c0[0], bZ, c0[1]],
-      [c1[0], bZ, c1[1]],
-      [c2[0], bZ, c2[1]],
-      [c3[0], bZ, c3[1]],
+      [c0[0], zFront, c0[1]],
+      [c1[0], zFront, c1[1]],
+      [c2[0], zBack, c2[1]],
+      [c3[0], zBack, c3[1]],
       [c0[0], rZ, c0[1]],
       [c1[0], rZ, c1[1]],
     ]
@@ -555,10 +583,10 @@ function _buildDormerGeometry(
       anchor.y + (cheekD / 2) * inwardUnit.y,
     ]
     const verts: [number, number, number][] = [
-      [c0[0], bZ, c0[1]],
-      [c1[0], bZ, c1[1]],
-      [c2[0], bZ, c2[1]],
-      [c3[0], bZ, c3[1]],
+      [c0[0], zFront, c0[1]],
+      [c1[0], zFront, c1[1]],
+      [c2[0], zBack, c2[1]],
+      [c3[0], zBack, c3[1]],
       [centre[0], rZ, centre[1]],
     ]
     return _facesToGeometry([
