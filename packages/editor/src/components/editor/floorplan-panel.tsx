@@ -53,6 +53,11 @@ import {
 import { useShallow } from "zustand/react/shallow";
 import { sfxEmitter } from "../../lib/sfx-bus";
 import { cn } from "../../lib/utils";
+import {
+  segmentLocalToWorld,
+  segmentPlacement,
+  segmentWorldToLocal,
+} from "../../lib/roof-transform";
 import useEditor from "../../store/use-editor";
 import { FLOORPLAN_SYMBOL_MIME } from "../ui/symbol-catalog";
 import { snapToHalf } from "../tools/item/placement-math";
@@ -4693,24 +4698,19 @@ export function FloorplanPanel() {
     for (const childId of lvl.children ?? []) {
       const roof = allNodes[childId as AnyNodeId] as any;
       if (!roof || roof.type !== "roof") continue;
-      const gx = roof.position?.[0] ?? 0;
-      const gz = roof.position?.[2] ?? 0;
-      const grot = roof.rotation ?? 0;
-      const cos = Math.cos(grot);
-      const sin = Math.sin(grot);
       for (const segId of roof.children ?? []) {
         const seg = allNodes[segId as AnyNodeId] as any;
         if (!seg || seg.type !== "roof-segment") continue;
-        const lx = seg.position?.[0] ?? 0;
-        const lz = seg.position?.[2] ?? 0;
+        // Same convention as the 3D view (lib/roof-transform).
+        const pl = segmentPlacement(roof, seg);
         rects.push({
           roofId: roof.id,
           segId: seg.id,
-          cx: gx + lx * cos - lz * sin,
-          cz: gz + lx * sin + lz * cos,
+          cx: pl.cx,
+          cz: pl.cz,
           width: seg.width ?? 8,
           depth: seg.depth ?? 6,
-          rotation: grot + (seg.rotation ?? 0),
+          rotation: pl.rot,
           roofType: seg.roofType ?? "gable",
           material: seg.material ?? "slate",
           ridgeAxis: (seg.ridgeAxis ?? "auto") as
@@ -8710,12 +8710,11 @@ export function FloorplanPanel() {
       // Testing here mirrors the stair/zone flow and keeps the selection.
       const roofClick = roofRects.find((r) => {
         // Local point in the roof's un-rotated frame.
-        const dx = planPoint[0] - r.cx;
-        const dy = planPoint[1] - r.cz;
-        const cos = Math.cos(-r.rotation);
-        const sin = Math.sin(-r.rotation);
-        const lx = dx * cos - dy * sin;
-        const ly = dx * sin + dy * cos;
+        const [lx, ly] = segmentWorldToLocal(
+          { cx: r.cx, cz: r.cz, rot: r.rotation },
+          planPoint[0],
+          planPoint[1],
+        );
         return (
           Math.abs(lx) <= r.width / 2 && Math.abs(ly) <= r.depth / 2
         );
@@ -11634,25 +11633,13 @@ export function FloorplanPanel() {
                     const roof = state.nodes[seg.parentId as AnyNodeId] as
                       | any
                       | undefined;
-                    const gx = roof?.position?.[0] ?? 0;
-                    const gz = roof?.position?.[2] ?? 0;
-                    const grot = roof?.rotation ?? 0;
-                    const lx = seg.position?.[0] ?? 0;
-                    const lz = seg.position?.[2] ?? 0;
-                    const totalRot = grot + (seg.rotation ?? 0);
-                    // Segment center in plan coords, then inverse-transform
-                    // the pointer into segment-local coords (undo translate
-                    // + rotate).
-                    const cosG = Math.cos(grot);
-                    const sinG = Math.sin(grot);
-                    const cx = gx + lx * cosG - lz * sinG;
-                    const cz = gz + lx * sinG + lz * cosG;
-                    const dx = planPt[0] - cx;
-                    const dz = planPt[1] - cz;
-                    const cosR = Math.cos(-totalRot);
-                    const sinR = Math.sin(-totalRot);
-                    const localX = dx * cosR - dz * sinR;
-                    const localZ = dx * sinR + dz * cosR;
+                    // Pointer into segment-local coords (undo translate +
+                    // rotate), same convention as the 3D view.
+                    const [localX, localZ] = segmentWorldToLocal(
+                      segmentPlacement(roof ?? {}, seg),
+                      planPt[0],
+                      planPt[1],
+                    );
                     // Ensure custom-shape mode: if the segment still has
                     // no polygon (rectangle mode), seed one from the
                     // current width/depth before writing the drag.
@@ -11815,8 +11802,13 @@ export function FloorplanPanel() {
                     <g
                       key={r.segId}
                       data-element="roof"
+                      // The plan maps world -> SVG as (-x, -z). Drawing
+                      // local points NEGATED under rotate(-θ) lands each at
+                      // exactly segmentLocalToWorld(...) — the 3D view's
+                      // convention. (A centred rectangle is symmetric, so
+                      // only the rotation sign shows for it.)
                       transform={`translate(${svgCx} ${svgCy}) rotate(${
-                        (r.rotation * 180) / Math.PI
+                        (-r.rotation * 180) / Math.PI
                       })`}
                       onClick={(event) => {
                         // Stop the click before it bubbles to the SVG
@@ -11838,7 +11830,7 @@ export function FloorplanPanel() {
                       {r.polygon && r.polygon.length >= 3 ? (
                         <polygon
                           points={r.polygon
-                            .map((p) => `${p[0]},${p[1]}`)
+                            .map((p) => `${-p[0]},${-p[1]}`)
                             .join(' ')}
                           fill={isSel ? "rgba(180,83,9,0.16)" : "rgba(180,83,9,0.08)"}
                           stroke={isSel ? "#b45309" : "#8a5a20"}
@@ -11935,16 +11927,14 @@ export function FloorplanPanel() {
                             [r.width / 2, r.depth / 2],
                             [-r.width / 2, r.depth / 2],
                           ];
-                    const cos = Math.cos(r.rotation);
-                    const sin = Math.sin(r.rotation);
+                    const pl = { cx: r.cx, cz: r.cz, rot: r.rotation };
                     return (
                       <g
                         data-element="roof-corners"
                         key={`${r.segId}-corners`}
                       >
                         {localCorners.map((lp, i) => {
-                          const wx = r.cx + lp[0] * cos - lp[1] * sin;
-                          const wz = r.cz + lp[0] * sin + lp[1] * cos;
+                          const [wx, wz] = segmentLocalToWorld(pl, lp[0], lp[1]);
                           const active =
                             roofCornerDrag &&
                             roofCornerDrag.segId === r.segId &&

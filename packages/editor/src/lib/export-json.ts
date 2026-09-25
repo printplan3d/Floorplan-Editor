@@ -19,6 +19,7 @@ import {
   getLevelHeight,
   useViewer,
 } from "@ritn3d/viewer";
+import { segmentLocalToWorld, segmentPlacement } from "./roof-transform";
 
 /**
  * Export the current floor plan as structured JSON matching the Ritn3D Blender pipeline format.
@@ -327,12 +328,11 @@ export function exportFloorPlanJSON(): object {
         const rs = seg as RoofSegmentNode;
         // World-space center of the segment: rotate the segment's local
         // XZ offset by the group rotation, then translate by the group.
-        const cosG = Math.cos(roof.rotation);
-        const sinG = Math.sin(roof.rotation);
-        const worldCx = roof.position[0] + rs.position[0] * cosG - rs.position[2] * sinG;
-        const worldCz = roof.position[2] + rs.position[0] * sinG + rs.position[2] * cosG;
-        // Absolute rotation of the segment about Y (radians).
-        const worldRot = roof.rotation + rs.rotation;
+        // Same convention as the 3D view (lib/roof-transform). This used
+        // the opposite rotation sign until 2026-09-25, so a roof rotated
+        // by 90 degrees reached Blender turned 180 degrees from what the
+        // 3D view showed: per-edge pitches on the opposite side.
+        const pl = segmentPlacement(roof, rs);
         // Corners in world XZ. Prefer the explicit polygon field when
         // set (user-drawn quadrilateral / trapezoidal footprint) —
         // interpret those verts as local plan coords, then apply the
@@ -340,8 +340,6 @@ export function exportFloorPlanJSON(): object {
         // the width/depth path. Fall back to the width/depth rectangle
         // for anything without an explicit polygon. flipX applied at
         // the end so the polygon lands in the same frame walls do.
-        const cosR = Math.cos(worldRot);
-        const sinR = Math.sin(worldRot);
         let local: [number, number][];
         const rsPoly = (rs as any).polygon as [number, number][] | undefined;
         if (rsPoly && Array.isArray(rsPoly) && rsPoly.length >= 3) {
@@ -353,11 +351,9 @@ export function exportFloorPlanJSON(): object {
             [-w2, -d2], [w2, -d2], [w2, d2], [-w2, d2],
           ];
         }
-        const polygonWorld: [number, number][] = local.map(([lx, lz]) => {
-          const wx = worldCx + lx * cosR - lz * sinR;
-          const wz = worldCz + lx * sinR + lz * cosR;
-          return flipX([wx, wz]);
-        });
+        const polygonWorld: [number, number][] = local.map(([lx, lz]) =>
+          flipX(segmentLocalToWorld(pl, lx, lz)),
+        );
         levelRoofs.push({
           id: rs.id,
           roof_id: roof.id,

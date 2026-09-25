@@ -38,6 +38,7 @@ import {
   WindowNode,
   ZoneNode,
 } from "@ritn3d/core";
+import { segmentPlacement } from "./roof-transform";
 import type { SceneGraph } from "./scene";
 
 // Loose structural types for the canonical wire shape.
@@ -469,13 +470,9 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
       for (const segId of n.children ?? []) {
         const seg = nodes[segId];
         if (!seg || seg.type !== "roof-segment") continue;
-        // Segment world center = group position + rotated local offset.
-        const lx = seg.position?.[0] ?? 0;
-        const lz = seg.position?.[2] ?? 0;
-        const cos = Math.cos(n.rotation ?? 0);
-        const sin = Math.sin(n.rotation ?? 0);
-        const wx = (n.position?.[0] ?? 0) + lx * cos - lz * sin;
-        const wz = (n.position?.[2] ?? 0) + lx * sin + lz * cos;
+        // Segment world center = group position + rotated local offset,
+        // in the 3D view's rotation convention (lib/roof-transform).
+        const { cx: wx, cz: wz } = segmentPlacement(n, seg);
         const segPos = rot180([wx, wz]);
         roofs.push({
           id: seg.id,
