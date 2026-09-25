@@ -91,7 +91,7 @@ export const RoofWallClipSystem = () => {
           | { wallId?: string; parentId?: string; position?: number[]; height?: number }
           | undefined
         if (!obj || !node) continue
-        const covered = _openingCovered(node, nodes, ctx)
+        const covered = openingCoveredByRoof(node, nodes, ctx)
         const ud = obj.userData as { __roofHidden?: boolean }
         if (covered && obj.visible) {
           obj.visible = false
@@ -317,8 +317,9 @@ function _loftPrism(sections: Section[]): THREE.BufferGeometry {
   return g
 }
 
-/** True when the roof passes below this window/door's centre. */
-function _openingCovered(
+/** True when the roof passes below this window/door's centre. The preview
+ *  hides such openings, and the render export leaves them out (roof-export). */
+export function openingCoveredByRoof(
   node: { wallId?: string; parentId?: string; position?: number[] },
   nodes: Record<string, AnyNode>,
   ctx: RoofContext,

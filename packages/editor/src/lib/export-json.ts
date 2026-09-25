@@ -5,7 +5,10 @@ import {
   DEFAULT_WALL_HEIGHT,
   DEFAULT_WALL_THICKNESS,
   type DoorNode,
+  getRoofContext,
   getStairFootprint,
+  openingCoveredByRoof,
+  roofMeshesForExport,
   type RoofNode,
   type RoofSegmentNode,
   type StairNode,
@@ -31,12 +34,29 @@ import { segmentLocalToWorld, segmentPlacement } from "./roof-transform";
    is precisely how this codebase ended up with two encoders for one format. */
 const flipX = ([x, y]: [number, number]): [number, number] => [-x, y];
 const flipBulge = (b: number) => -b;
+/** World (X, Y up, Z) roof mesh -> plan frame [flipX(X, Z)..., height]. The
+ *  map (X, Y, Z) -> (-X, Z, Y) is a proper rotation, so face winding (and
+ *  outward facing) survives. */
+const toPlanMesh = (m: { vertices: number[]; faces: number[] }) => {
+  const v: number[] = [];
+  for (let i = 0; i < m.vertices.length; i += 3) {
+    v.push(-m.vertices[i]!, m.vertices[i + 2]!, m.vertices[i + 1]!);
+  }
+  return { vertices: v, faces: m.faces };
+};
 
 export function exportFloorPlanJSON(): object {
   const { nodes } = useScene.getState();
   const { selection } = useViewer.getState();
 
   const allNodes = Object.values(nodes);
+  // The roof exactly as the preview draws it (joins, filled-in walls,
+  // dormers). The pipeline renders these meshes as-is, so render and
+  // preview can't disagree. Openings the roof covers are left out, the
+  // same ones the preview hides.
+  const roofCtx = getRoofContext(nodes as any);
+  const roofMeshes = roofMeshesForExport(nodes as any, roofCtx);
+  const covered = (n: any) => openingCoveredByRoof(n, nodes as any, roofCtx);
 
   /* Sorted by level number, because `elevation` below is a running total —
      iterating in scene order would stack floor 2 under floor 1 whenever the
@@ -112,6 +132,7 @@ export function exportFloorPlanJSON(): object {
           .filter(Boolean);
         for (const wc of wallChildren) {
           if (!wc) continue; // .filter(Boolean) doesn't narrow the TS type
+          if ((wc.type === "door" || wc.type === "window") && covered(wc)) continue;
           if (wc.type === "door") {
             const d = wc as DoorNode;
             // For curved walls, "position_along_wall" is parametric over arc
@@ -392,6 +413,11 @@ export function exportFloorPlanJSON(): object {
           faces_override: (rs as any).facesOverride,
           dormers: (rs as any).dormers,
           roof_override_mesh: (rs as any).roofOverrideMesh,
+          // Final mesh in plan frame: [x, y, height] per vertex, x flipped
+          // like every other coordinate here (flipX), faces as triangles.
+          ...(roofMeshes.has(rs.id)
+            ? { editor_mesh: toPlanMesh(roofMeshes.get(rs.id)!) }
+            : {}),
         });
       }
     }
