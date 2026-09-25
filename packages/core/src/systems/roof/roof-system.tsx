@@ -74,7 +74,7 @@ const _tmpQuaternion = new THREE.Quaternion()
 // three.js resolve `material[idx]` to undefined, and both the stock
 // Mesh.raycast and the three-mesh-bvh accelerated raycast then throw
 // on `.side`. Clamp on the way in.
-const ROOF_MAX_SLOT = 3
+const ROOF_MAX_SLOT = 4
 
 /**
  * Concatenate roof part geometries into one, guaranteeing that EVERY
@@ -451,7 +451,7 @@ const dummyMats: [
   new THREE.MeshBasicMaterial(),
   new THREE.MeshBasicMaterial(),
 ]
-const ROOF_MATERIAL_SLOT_COUNT = 4
+const ROOF_MATERIAL_SLOT_COUNT = 5
 
 function mapRoofGroupMaterialIndex(
   groupMaterialIndex: number | undefined,

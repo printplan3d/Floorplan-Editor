@@ -13,8 +13,8 @@ for (const [id, m] of meshes) {
   const v = []
   for (let i = 0; i < m.vertices.length; i += 3) v.push(-m.vertices[i], m.vertices[i + 2], m.vertices[i + 1]) // export-json toPlanMesh
   const ys = m.vertices.filter((_, i) => i % 3 === 1)
-  out[id] = { editor_mesh: { vertices: v, faces: m.faces }, worldYmax: Math.max(...ys), worldYmin: Math.min(...ys) }
+  out[id] = { editor_mesh: { vertices: v, faces: m.faces, ...(m.glass.length ? { glass: m.glass } : {}) }, worldYmax: Math.max(...ys), worldYmin: Math.min(...ys) }
 }
 const target = process.argv[2]
 if (target) writeFileSync(target, JSON.stringify(out))
-process.stdout.write(Object.entries(out).map(([id, o]) => `${id}: verts ${o.editor_mesh.vertices.length / 3} tris ${o.editor_mesh.faces.length / 3} y=[${o.worldYmin.toFixed(2)},${o.worldYmax.toFixed(2)}]`).join('\n') + '\n')
+process.stdout.write(Object.entries(out).map(([id, o]) => `${id}: verts ${o.editor_mesh.vertices.length / 3} tris ${o.editor_mesh.faces.length / 3} glass ${(o.editor_mesh.glass || []).length} y=[${o.worldYmin.toFixed(2)},${o.worldYmax.toFixed(2)}]`).join('\n') + '\n')

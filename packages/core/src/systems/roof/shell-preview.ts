@@ -28,7 +28,7 @@
  * backend refuses those too) — callers fall back to roof-system's legacy path.
  */
 import * as THREE from 'three'
-import { ADDITION, Brush, Evaluator } from 'three-bvh-csg'
+import { ADDITION, Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg'
 import type { RoofSegmentNode } from '../../schema'
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -37,13 +37,23 @@ const NEAR_VERTICAL_TAN = 100.0 // "vertical" gable edge
 
 /** Fascia board depth — backend DEFAULT_FASCIA_THICKNESS_M (shell.py). */
 const FASCIA_M = 0.18
+/** Roof build-up: the down-facing underside sits this far below the slates. */
+const ROOF_UNDERSIDE_M = 0.08
+/** Dormer roof trim: slab thickness, side-eave and front overhangs, and how
+ *  far the slab's top sits above the dormer body's own roof planes (so the
+ *  union never meets coplanar faces). */
+const DORMER_ROOF_T = 0.12
+const DORMER_EAVE_OH = 0.1
+const DORMER_FRONT_OH = 0.15
+const DORMER_ROOF_LIFT = 0.03
 /** How far past its footprint a roof still counts as covering a point, so
  *  walls standing ON the roof edge line are trimmed. Half a wall + margin. */
 const COVER_BUFFER = 0.15
 
 // three-bvh-csg needs materials to union brushes; dummies here, and
 // roof-system's material mapper picks real ones by slot.
-const dummyMats: [THREE.Material, THREE.Material, THREE.Material, THREE.Material] = [
+const dummyMats: THREE.Material[] = [
+  new THREE.MeshBasicMaterial(),
   new THREE.MeshBasicMaterial(),
   new THREE.MeshBasicMaterial(),
   new THREE.MeshBasicMaterial(),
@@ -77,6 +87,9 @@ const SLOT_WALL_EXTERIOR = 0
 const SLOT_SLATE_TOP = 1
 const SLOT_SOFFIT = 2
 const SLOT_FASCIA = 3
+/** Dormer window glass. The render pipeline puts these faces in a glass
+ *  object (roof/mesh.py); the preview gives them a glass material. */
+export const SLOT_GLASS = 4
 
 // ─── Public types ─────────────────────────────────────────────────
 
@@ -178,6 +191,10 @@ type ResolvedDormer = {
   /** Distance ahead of the front face still covered by this dormer in the
    *  height field (a followed window's wall stands there). */
   forwardCover: number
+  /** Height of the main slope where the front meets it (local Y). */
+  zFront: number
+  /** Built over a real window: that window is its front, so no own glass. */
+  followsWindow: boolean
 }
 
 type RoofFrame = {
@@ -217,6 +234,8 @@ export type ShellShape = {
   frame: RoofFrame
   realWalls: RealWallSpan[]
   noInteriorCap: boolean
+  /** Down-facing ceiling polygons under the slopes (set by the builder). */
+  undersides?: V3[][]
   infillFloor: number
   clipVolumes: ClipVolume[]
   dormers: ResolvedDormer[]
@@ -333,6 +352,23 @@ export function generateShellSegmentGeometry(
   if (!base) return new THREE.BufferGeometry()
   let geom = ensureGroupCoverage(base)
   if (shape.dormers.length > 0) geom = _unionDormers(geom, shape)
+  if (shape.undersides?.length) {
+    const vols = shape.dormers.map(_dormerCeilingVolume)
+    const faces: { verts: V3[]; slot: number }[] = []
+    for (const u of shape.undersides) {
+      let pieces: V3[][] = [u]
+      for (const v of vols) pieces = pieces.flatMap((pc) => _minusConvex(pc, v))
+      for (const pc of pieces) {
+        const clean = _dedupe(pc)
+        if (clean.length >= 3 && _area(clean) > 1e-6) faces.push({ verts: clean, slot: SLOT_SOFFIT })
+      }
+    }
+    if (faces.length) {
+      const merged = _appendGeometry(ensureGroupCoverage(geom), _facesToGeometry(faces))
+      geom.dispose()
+      geom = ensureGroupCoverage(merged)
+    }
+  }
   if (shape.clipVolumes.length > 0) {
     const cut = _subtractVolumes(geom, shape.clipVolumes)
     geom.dispose()
@@ -784,6 +820,22 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   // Mirror correction for the ridge-along-Z orientation (x <-> z swap).
   if (!ridgeAlongX) for (const fc of faces) fc.verts.reverse()
 
+  // Undersides. Slates are single-sided, so from inside the house the roof
+  // was invisible and windows showed open sky (operator, 2026-09-26) once
+  // the flat interior cap went. Every slope gets a down-facing twin
+  // ROOF_UNDERSIDE_M below it: the ceiling seen from inside. They are added
+  // AFTER the dormer union (see _undersides) — inside the union a dormer
+  // body would swallow the ceiling behind its valley line.
+  shape.undersides = []
+  for (const fc of faces) {
+    if (fc.slot !== SLOT_SLATE_TOP) continue
+    const n = _faceNormal(fc.verts)
+    const L = Math.hypot(n[0], n[1], n[2])
+    if (L < 1e-12) continue
+    const k = ROOF_UNDERSIDE_M / L
+    shape.undersides.push(fc.verts.map((p) => [p[0] - n[0] * k, p[1] - n[1] * k, p[2] - n[2] * k] as V3).reverse())
+  }
+
   // ── Wall-line infill ──────────────────────────────────────────────
   // Along every edge line, the wall between the storey wall top (y = 0) and
   // the roof: a strip under an eave, strip + gable on a gable/abut end.
@@ -914,14 +966,12 @@ function _resolveDormer(
   const uMid = ov ? ov.uMid : 0.5 * (spec.footOnParent[0][0] + spec.footOnParent[1][0])
   const vMid = 0.5 * (spec.footOnParent[0][1] + spec.footOnParent[1][1])
   const cheekWidth = Math.max(0.3, ov ? ov.cheekWidth : spec.cheekWidth)
-  const rh = Math.max(0.2, ov ? ov.ridgeHeight : spec.ridgeHeight)
+  let rh = Math.max(0.2, ov ? ov.ridgeHeight : spec.ridgeHeight)
   const halfW = cheekWidth / 2
 
   const tanParent = Math.max(MIN_EDGE_WEIGHT, f.tanOf[idx]!)
   const eaveParent = f.eaveOf[idx]!
   const tanShed = tanParent / 3
-  // Run over which the main roof climbs back up to meet the dormer's roof.
-  const runToBury = spec.type === 'shed' ? rh / (tanParent + tanShed) : rh / tanParent
 
   // Run from this edge in to the ridge: the half-span for a side edge, the
   // hip inset for a hip end.
@@ -931,6 +981,15 @@ function _resolveDormer(
       : idx === f.eEndLo
         ? f.rLoU - f.uMin
         : f.uMax - f.rHiU
+  // Run over which the main roof climbs back up to meet the dormer's roof.
+  // A shed roof rises inward too (at tanShed, shallower), so the main slope
+  // only gains tanParent - tanShed per metre on it. The dormer must be
+  // swallowed at least 0.3 m short of the main ridge, or it pokes over onto
+  // the far slope (a 1.5 m shed on a 30 degree, 4 m half-span did): cap its
+  // height so it is.
+  const gain = spec.type === 'shed' ? tanParent - tanShed : tanParent
+  rh = Math.min(rh, Math.max(0.2, (run - 0.3) * gain))
+  const runToBury = rh / gain
   // Free dormers: V maps across the usable run so the ridge stays under the
   // main ridge. Window-following dormers: the window's wall decides.
   const maxInward = Math.max(0, run - runToBury)
@@ -958,6 +1017,8 @@ function _resolveDormer(
     tanParent,
     tanShed,
     forwardCover: ov ? inward + 0.05 : 0.05,
+    zFront,
+    followsWindow: !!ov,
   }
 }
 
@@ -970,7 +1031,7 @@ function _dormerHeightAt(d: ResolvedDormer, x: number, z: number): number | null
   if (Math.abs(s) > d.halfW + 0.05) return null
   if (dep < -d.forwardCover || dep > d.cheekD) return null
   const lat = Math.min(1, Math.abs(s) / Math.max(1e-6, d.halfW))
-  if (d.type === 'shed') return d.rZ - d.tanShed * Math.max(0, dep)
+  if (d.type === 'shed') return d.rZ + d.tanShed * Math.max(0, dep)
   const gable = d.rZ - (d.rZ - d.zEaveD) * lat
   if (d.type === 'hip') {
     const d0 = (d.rZ - d.zEaveD) / d.tanParent
@@ -1001,8 +1062,362 @@ function _unionDormers(base: THREE.BufferGeometry, shape: ShellShape): THREE.Buf
       dbrush.geometry.dispose()
     }
   }
-  const out = acc.geometry
+  // Trim: a thick roof slab with overhangs on every dormer, so its edges
+  // read as fascia and barge boards, not bare sheets (operator, 2026-09-26).
+  for (const d of shape.dormers) {
+    for (const top of _dormerRoofTop(d)) {
+      const slab = _dormerRoofSlab(d, top)
+      if (!slab) continue
+      const b = new Brush(slab, dummyMats)
+      b.updateMatrixWorld()
+      try {
+        const next = _csg.evaluate(acc, b, ADDITION) as Brush
+        _remapToSlots(next)
+        acc.geometry.dispose()
+        acc = next
+      } catch (e) {
+        console.warn('shell-preview: dormer trim union failed', e)
+      }
+      b.geometry.dispose()
+    }
+  }
+
+  // A dormer always has a window (operator, 2026-09-26). One built over a
+  // real window uses that; every other one gets its own: a recess cut
+  // into the front with a glass pane at the back of it.
+  // Plain faces appended after the CSG: dormer glass and dormer ceilings.
+  const glass: { verts: V3[]; slot: number }[] = []
+  for (const d of shape.dormers) {
+    if (d.followsWindow) continue
+    const w = _dormerWindow(d)
+    if (!w) continue
+    const cut = new Brush(w.recess, dummyMats)
+    cut.updateMatrixWorld()
+    try {
+      const next = _csg.evaluate(acc, cut, SUBTRACTION) as Brush
+      _remapToSlots(next)
+      acc.geometry.dispose()
+      acc = next
+      glass.push({ verts: w.glass, slot: SLOT_GLASS })
+    } catch (e) {
+      console.warn('shell-preview: dormer window cut failed', e)
+    }
+    cut.geometry.dispose()
+  }
+  // The dormer body's bottom plate sits inside the house below the slope;
+  // from a room it read as a floating ceiling. Drop it (the body only needed
+  // it closed for the union).
+  let out = _dropFaces(acc.geometry, (a, b, c) =>
+    shape.dormers.some(
+      (d) =>
+        Math.abs(a[1] - d.zBase) < 1e-4 && Math.abs(b[1] - d.zBase) < 1e-4 && Math.abs(c[1] - d.zBase) < 1e-4,
+    ),
+  )
+  if (out !== acc.geometry) acc.geometry.dispose()
+  _normaliseFacing(out)
+  // Ceiling inside each dormer. The union swallows the trim slab's bottom
+  // and the body's own roof (both inside one another), leaving only slates
+  // seen from behind — sky from the room. Add each roof plane's underside,
+  // ROOF_UNDERSIDE_M down, where the dormer roof stands above the main
+  // slope (behind that it's buried in the main roof).
+  for (const d of shape.dormers) {
+    const rel = (p: V3) => {
+      const rx = p[0] - d.anchor[0]
+      const rz = p[2] - d.anchor[1]
+      return rx * d.inwardUnit[0] + rz * d.inwardUnit[1]
+    }
+    for (const top of _dormerRoofTop(d)) {
+      const kept = _clipHalf(top, (p) => p[1] - (d.zFront + d.tanParent * rel(p)))
+      if (kept.length < 3) continue
+      glass.push({
+        verts: kept.map((p) => [p[0], p[1] - ROOF_UNDERSIDE_M, p[2]] as V3).reverse(),
+        slot: SLOT_SOFFIT,
+      })
+    }
+  }
+  if (glass.length) {
+    const merged = _appendGeometry(ensureGroupCoverage(out), _facesToGeometry(glass))
+    out.dispose()
+    out = merged
+  }
   out.computeVertexNormals()
+  return out
+}
+
+/**
+ * Where a dormer has its own ceiling (between its cheeks, from its front
+ * back to where its roof dips under the main slope), as a vertical convex
+ * volume. The main roof's underside is cut away there; everywhere else —
+ * behind the valley line too — it stays.
+ */
+function _dormerCeilingVolume(d: ResolvedDormer): ClipVolume {
+  const e = d.eaveUnit
+  const i = d.inwardUnit
+  const a = d.anchor
+  const vol: ClipVolume = [
+    // |w| <= halfW
+    { n: [e[0], 0, e[1]], p: [a[0] - e[0] * d.halfW, 0, a[1] - e[1] * d.halfW], eps: 0.001 },
+    { n: [-e[0], 0, -e[1]], p: [a[0] + e[0] * d.halfW, 0, a[1] + e[1] * d.halfW], eps: 0.001 },
+    // dd >= 0 (behind the front face)
+    { n: [i[0], 0, i[1]], p: [a[0], 0, a[1]], eps: 0.001 },
+  ]
+  // Each dormer roof plane above the parent slope: yP(x,z) - parent(x,z) >= 0,
+  // a vertical plane in plan.
+  for (const top of _dormerRoofTop(d)) {
+    const n = _faceNormal(top)
+    if (Math.abs(n[1]) < 1e-9) continue
+    const p0 = top[0]!
+    // yP = p0y - (nx (x-x0) + nz (z-z0)) / ny ; parent = zFront + tanParent * dd
+    const gx = -n[0] / n[1] - d.tanParent * i[0]
+    const gz = -n[2] / n[1] - d.tanParent * i[1]
+    const c0 = p0[1] + (n[0] * p0[0] + n[2] * p0[2]) / n[1] - d.zFront + d.tanParent * (i[0] * a[0] + i[1] * a[1])
+    // f(x,z) = gx x + gz z + c0 >= 0  ->  plane through any point with f = 0
+    const L = Math.hypot(gx, gz)
+    if (L < 1e-9) continue
+    const px = (-c0 * gx) / (L * L)
+    const pz = (-c0 * gz) / (L * L)
+    vol.push({ n: [gx / L, 0, gz / L], p: [px, 0, pz], eps: 0.001 })
+  }
+  return vol
+}
+
+/** The dormer's roof planes (outward-facing polygons, local frame) — the
+ *  same points _buildDormerGeometry uses. */
+function _dormerRoofTop(d: ResolvedDormer): V3[][] {
+  const { anchor, eaveUnit, inwardUnit, halfW, cheekD, rZ, zEaveD } = d
+  const at = (offW: number, offD: number, y: number): V3 => [
+    anchor[0] + offW * eaveUnit[0] + offD * inwardUnit[0],
+    y,
+    anchor[1] + offW * eaveUnit[1] + offD * inwardUnit[1],
+  ]
+  if (d.type === 'shed') {
+    const zBack = rZ + d.tanShed * cheekD
+    return [[at(-halfW, 0, rZ), at(halfW, 0, rZ), at(halfW, cheekD, zBack), at(-halfW, cheekD, zBack)]]
+  }
+  const TLf = at(-halfW, 0, zEaveD)
+  const TRf = at(halfW, 0, zEaveD)
+  const TLb = at(-halfW, cheekD, zEaveD)
+  const TRb = at(halfW, cheekD, zEaveD)
+  const APb = at(0, cheekD, rZ)
+  if (d.type === 'hip') {
+    const d0 = Math.min(cheekD * 0.9, (rZ - zEaveD) / d.tanParent)
+    const APf = at(0, d0, rZ)
+    return [
+      [TRf, APf, TLf],
+      [TLf, APf, APb, TLb],
+      [TRf, TRb, APb, APf],
+    ]
+  }
+  const APf = at(0, 0, rZ)
+  return [
+    [TLf, APf, APb, TLb],
+    [TRf, TRb, APb, APf],
+  ]
+}
+
+/**
+ * One roof plane of a dormer as a closed trim slab: the plane stretched
+ * DORMER_EAVE_OH past the cheeks and DORMER_FRONT_OH past the front (along
+ * the plane itself), lifted DORMER_ROOF_LIFT, DORMER_ROOF_T thick. Top =
+ * slate, bottom = soffit, edges = fascia / barge boards.
+ */
+function _dormerRoofSlab(d: ResolvedDormer, top: V3[]): THREE.BufferGeometry | null {
+  const n = _faceNormal(top)
+  if (Math.abs(n[1]) < 1e-6) return null
+  const p0 = top[0]!
+  const yOn = (x: number, z: number) => p0[1] - (n[0] * (x - p0[0]) + n[2] * (z - p0[2])) / n[1]
+  const moved: V3[] = top.map((p) => {
+    const rx = p[0] - d.anchor[0]
+    const rz = p[2] - d.anchor[1]
+    let w = rx * d.eaveUnit[0] + rz * d.eaveUnit[1]
+    let dd = rx * d.inwardUnit[0] + rz * d.inwardUnit[1]
+    if (Math.abs(Math.abs(w) - d.halfW) < 1e-6) w += Math.sign(w) * DORMER_EAVE_OH
+    if (Math.abs(dd) < 1e-6) dd = -DORMER_FRONT_OH
+    const x = d.anchor[0] + w * d.eaveUnit[0] + dd * d.inwardUnit[0]
+    const z = d.anchor[1] + w * d.eaveUnit[1] + dd * d.inwardUnit[1]
+    return [x, yOn(x, z), z]
+  })
+  const up = moved.map((p) => [p[0], p[1] + DORMER_ROOF_LIFT, p[2]] as V3)
+  const dn = moved.map((p) => [p[0], p[1] + DORMER_ROOF_LIFT - DORMER_ROOF_T, p[2]] as V3)
+  const faces: { verts: V3[]; slot: number }[] = [
+    { verts: up, slot: 0 },
+    { verts: [...dn].reverse(), slot: 0 },
+  ]
+  for (let i = 0; i < up.length; i++) {
+    const j = (i + 1) % up.length
+    faces.push({ verts: [dn[i]!, dn[j]!, up[j]!, up[i]!], slot: 0 })
+  }
+  const g = _closedOutward(faces)
+  // Slot by facing, now that every face points out.
+  g.clearGroups()
+  let k = 0
+  for (const f of faces) {
+    const fn = _faceNormal(f.verts)
+    const L = Math.hypot(fn[0], fn[1], fn[2]) || 1
+    const ny = fn[1] / L
+    const slot = ny > 0.3 ? SLOT_SLATE_TOP : ny < -0.3 ? SLOT_SOFFIT : SLOT_FASCIA
+    const tris = (f.verts.length - 2) * 3
+    g.addGroup(k, tris, slot)
+    k += tris
+  }
+  return g
+}
+
+/**
+ * Slates face up and sloped soffits face down, by definition. The CSG
+ * occasionally hands back a triangle wound the other way where coplanar
+ * pieces meet (seen at a dormer's front, under the barge board); the
+ * render sorts faces by facing, so a flipped soffit would come out slated.
+ * Swap the winding of any such triangle in place. The flat interior cap
+ * (a soffit facing up, hidden) is left alone.
+ */
+function _normaliseFacing(geom: THREE.BufferGeometry): void {
+  const pos = geom.getAttribute('position') as THREE.BufferAttribute
+  const idx = geom.getIndex()
+  if (!pos || !idx) return
+  const v = (i: number): V3 => [pos.getX(i), pos.getY(i), pos.getZ(i)]
+  for (const g of geom.groups) {
+    const slot = g.materialIndex ?? 0
+    if (slot !== SLOT_SLATE_TOP && slot !== SLOT_SOFFIT) continue
+    for (let k = g.start; k < g.start + g.count; k += 3) {
+      const a = v(idx.getX(k))
+      const b = v(idx.getX(k + 1))
+      const c = v(idx.getX(k + 2))
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2]
+      const wx = c[0] - a[0], wy = c[1] - a[1], wz = c[2] - a[2]
+      const nx = uy * wz - uz * wy
+      const ny = uz * wx - ux * wz
+      const nz = ux * wy - uy * wx
+      const L = Math.hypot(nx, ny, nz)
+      if (L < 1e-12) continue
+      const t = ny / L
+      const wrong = slot === SLOT_SLATE_TOP ? t < -0.05 : t > 0.05 && t < 0.99
+      if (!wrong) continue
+      const i1 = idx.getX(k + 1)
+      idx.setX(k + 1, idx.getX(k + 2))
+      idx.setX(k + 2, i1)
+    }
+  }
+  idx.needsUpdate = true
+}
+
+/** Copy of geom without the triangles pred() matches (returns geom itself
+ *  when nothing matched). */
+function _dropFaces(geom: THREE.BufferGeometry, pred: (a: V3, b: V3, c: V3) => boolean): THREE.BufferGeometry {
+  const pos = geom.getAttribute('position') as THREE.BufferAttribute
+  const idx = geom.getIndex()
+  const vert = (i: number): V3 => [pos.getX(i), pos.getY(i), pos.getZ(i)]
+  const faces: { verts: V3[]; slot: number }[] = []
+  let dropped = 0
+  const groups = geom.groups.length ? geom.groups : [{ start: 0, count: idx ? idx.count : pos.count, materialIndex: 0 }]
+  for (const g of groups) {
+    for (let k = g.start; k < g.start + g.count; k += 3) {
+      const t = [0, 1, 2].map((o) => vert(idx ? idx.getX(k + o) : k + o))
+      if (pred(t[0]!, t[1]!, t[2]!)) {
+        dropped++
+        continue
+      }
+      faces.push({ verts: [...t].reverse(), slot: g.materialIndex ?? 0 })
+    }
+  }
+  if (!dropped) return geom
+  return ensureGroupCoverage(_facesToGeometry(faces))
+}
+
+/** Recess reveal depth and the wall kept around a dormer window. */
+const DORMER_WIN_DEPTH = 0.08
+const DORMER_WIN_SIDE = 0.2
+const DORMER_WIN_SILL = 0.15
+const DORMER_WIN_HEAD = 0.1
+const DORMER_WIN_MIN = 0.3
+
+/**
+ * The window of a free dormer: the part of its front face that stands
+ * clear of the main slope (from zFront up to the dormer eave, or the
+ * shed roof edge), less a margin of wall all round. Returns the recess
+ * solid to subtract and the glass quad (outward-facing) at its back, or
+ * null when the front is too small for a window.
+ */
+function _dormerWindow(d: ResolvedDormer): { recess: THREE.BufferGeometry; glass: V3[] } | null {
+  const top = d.type === 'shed' ? d.rZ : d.zEaveD
+  const sill = d.zFront + DORMER_WIN_SILL
+  const head = top - DORMER_WIN_HEAD
+  const halfW = d.halfW - DORMER_WIN_SIDE
+  if (head - sill < DORMER_WIN_MIN || halfW * 2 < DORMER_WIN_MIN) return null
+  const at = (offW: number, offD: number, y: number): V3 => [
+    d.anchor[0] + offW * d.eaveUnit[0] + offD * d.inwardUnit[0],
+    y,
+    d.anchor[1] + offW * d.eaveUnit[1] + offD * d.inwardUnit[1],
+  ]
+  // Box from 0.1 m in front of the face to DORMER_WIN_DEPTH behind it.
+  const f0 = -0.1
+  const f1 = DORMER_WIN_DEPTH
+  const c = (w: number, dd: number, y: number) => at(w, dd, y)
+  const L0 = c(-halfW, f0, sill), R0 = c(halfW, f0, sill), R0t = c(halfW, f0, head), L0t = c(-halfW, f0, head)
+  const L1 = c(-halfW, f1, sill), R1 = c(halfW, f1, sill), R1t = c(halfW, f1, head), L1t = c(-halfW, f1, head)
+  const faces: { verts: V3[]; slot: number }[] = [
+    { verts: [L0, R0, R0t, L0t], slot: SLOT_WALL_EXTERIOR },
+    { verts: [R1, L1, L1t, R1t], slot: SLOT_WALL_EXTERIOR },
+    { verts: [L1, L0, L0t, L1t], slot: SLOT_WALL_EXTERIOR },
+    { verts: [R0, R1, R1t, R0t], slot: SLOT_WALL_EXTERIOR },
+    { verts: [L0t, R0t, R1t, L1t], slot: SLOT_WALL_EXTERIOR },
+    { verts: [L1, R1, R0, L0], slot: SLOT_WALL_EXTERIOR },
+  ]
+  const recess = _closedOutward(faces)
+  // Glass at the back of the recess, facing out of the dormer front.
+  const gd = DORMER_WIN_DEPTH - 0.01
+  let pane: V3[] = [c(-halfW, gd, sill), c(halfW, gd, sill), c(halfW, gd, head), c(-halfW, gd, head)]
+  const n = _faceNormal(pane)
+  if (n[0] * -d.inwardUnit[0] + n[2] * -d.inwardUnit[1] < 0) pane = pane.reverse()
+  return { recess, glass: pane }
+}
+
+/** Faces of a convex closed solid -> geometry with every face turned to
+ *  point away from the centroid (orientation-proof for CSG). */
+function _closedOutward(faces: { verts: V3[]; slot: number }[]): THREE.BufferGeometry {
+  let cx = 0
+  let cy = 0
+  let cz = 0
+  let k = 0
+  for (const f of faces) for (const p of f.verts) {
+    cx += p[0]
+    cy += p[1]
+    cz += p[2]
+    k++
+  }
+  cx /= k
+  cy /= k
+  cz /= k
+  for (const f of faces) {
+    const n = _faceNormal(f.verts)
+    const p = f.verts[0]!
+    if (n[0] * (p[0] - cx) + n[1] * (p[1] - cy) + n[2] * (p[2] - cz) < 0) f.verts.reverse()
+  }
+  return _facesToGeometry(faces)
+}
+
+/** a + b as one indexed geometry, groups carried over. */
+function _appendGeometry(a: THREE.BufferGeometry, b: THREE.BufferGeometry): THREE.BufferGeometry {
+  const pos: number[] = []
+  const idx: number[] = []
+  const groups: { start: number; count: number; slot: number }[] = []
+  let base = 0
+  for (const g of [a, b]) {
+    const p = g.getAttribute('position') as THREE.BufferAttribute
+    const ix = g.getIndex()
+    if (!p) continue
+    for (let i = 0; i < p.count; i++) pos.push(p.getX(i), p.getY(i), p.getZ(i))
+    const n = ix ? ix.count : p.count
+    const start = idx.length
+    for (let i = 0; i < n; i++) idx.push((ix ? ix.getX(i) : i) + base)
+    const gs = g.groups.length ? g.groups : [{ start: 0, count: n, materialIndex: 0 }]
+    for (const gr of gs) groups.push({ start: start + gr.start, count: gr.count, slot: gr.materialIndex ?? 0 })
+    base += p.count
+  }
+  const out = new THREE.BufferGeometry()
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  out.setIndex(idx)
+  for (const g of groups) out.addGroup(g.start, g.count, g.slot)
   return out
 }
 
@@ -1024,8 +1439,11 @@ function _buildDormerGeometry(d: ResolvedDormer): THREE.BufferGeometry | null {
   const BRb = at(halfW, cheekD, zBase)
 
   if (d.type === 'shed') {
-    // Front wall up to rZ, single shallow slope running back into the roof.
-    const zBack = rZ - d.tanShed * cheekD
+    // Front wall up to the shed's eave (rZ); the roof then RISES inward at a
+    // third of the main pitch until the main slope overtakes it — low at the
+    // front, so it drains forward. (Until 2026-09-26 it fell backward into
+    // the main roof: a wedge that read as a chimney, draining into the house.)
+    const zBack = rZ + d.tanShed * cheekD
     const TLf = at(-halfW, 0, rZ)
     const TRf = at(halfW, 0, rZ)
     const TLb = at(-halfW, cheekD, zBack)
@@ -1120,7 +1538,7 @@ function _facesToGeometry(faces: { verts: V3[]; slot: number }[]): THREE.BufferG
 
 // roofMaterials has four entries; a group past that makes material[idx]
 // undefined and both stock and BVH raycast throw. Clamp every slot.
-const MAX_SLOT = 3
+const MAX_SLOT = 4
 
 /**
  * Ensure a geometry's groups tile its ENTIRE index buffer with in-range
