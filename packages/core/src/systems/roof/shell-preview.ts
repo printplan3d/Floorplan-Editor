@@ -80,7 +80,22 @@ const SLOT_FASCIA = 3
 
 // ─── Public types ─────────────────────────────────────────────────
 
-type EdgeStyle = 'hip' | 'gable' | 'junction'
+/** hip: slopes to an eave. gable: vertical wall, roof overhangs it (rake).
+ *  junction: open, lives inside a neighbouring roof. abut: vertical closing
+ *  wall with NO overhang, a step where two roofs of different profile meet. */
+type EdgeStyle = 'hip' | 'gable' | 'junction' | 'abut'
+
+/** A real wall standing along part of an edge (resolved by roof-scene). */
+export type RealWallSpan = {
+  edge: number
+  /** Fractions along the edge (0 = its start corner). */
+  t0: number
+  t1: number
+  /** Top of the wall in segment-local Y. */
+  top: number
+  /** How far inside the edge line the wall stands, metres. */
+  inset: number
+}
 type V3 = [number, number, number]
 type V2 = [number, number]
 
@@ -103,16 +118,21 @@ export type ShellBuildOptions = {
    *  slope). That end becomes a JUNCTION (open, no overhang). */
   truncateLo?: number
   truncateHi?: number
-  /** Make an end a junction without moving it (continuation seams). */
-  junctionLo?: boolean
-  junctionHi?: boolean
+  /** Style for an end: 'junction' (open) or 'abut' (closed step wall, no
+   *  overhang). A moved end defaults to 'junction'. */
+  endLo?: 'junction' | 'abut'
+  endHi?: 'junction' | 'abut'
   /** Ridge rise above baseZ that replaces roofHeight (level-matched ridges).
    *  The default pitch is re-derived from it, so eaves stay put. */
   ridgeRiseOverride?: number
   /** One pitch for every sloped edge (pitch-matched / dropped ridges). */
   uniformTanOverride?: number
-  /** Local-Y top of the REAL wall standing on each edge line, or null. */
-  realWallTop?: (number | null)[]
+  /** Real walls standing along the edges. Generated infill is drawn only
+   *  where they aren't (and above their tops where they are). */
+  realWalls?: RealWallSpan[]
+  /** Omit the flat interior ceiling. Set when walls stand under this roof
+   *  on the level above: the cap would slice straight through that floor. */
+  noInteriorCap?: boolean
   dormerOverrides?: Record<string, DormerOverride>
 }
 
@@ -180,7 +200,8 @@ export type ShellShape = {
   tans: number[]
   baseZ: number
   frame: RoofFrame
-  realWallTop: (number | null)[]
+  realWalls: RealWallSpan[]
+  noInteriorCap: boolean
   dormers: ResolvedDormer[]
 }
 
@@ -234,8 +255,10 @@ export function resolveShellShape(
   const eEndLo = ridgeAlongX ? 3 : 0
   const eEndHi = ridgeAlongX ? 1 : 2
   const styles: EdgeStyle[] = [...baseStyles]
-  if (opts.truncateLo != null || opts.junctionLo) styles[eEndLo] = 'junction'
-  if (opts.truncateHi != null || opts.junctionHi) styles[eEndHi] = 'junction'
+  if (opts.endLo) styles[eEndLo] = opts.endLo
+  else if (opts.truncateLo != null) styles[eEndLo] = 'junction'
+  if (opts.endHi) styles[eEndHi] = opts.endHi
+  else if (opts.truncateHi != null) styles[eEndHi] = 'junction'
 
   const halfSpan = (ridgeAlongX ? zMax - zMin : xMax - xMin) / 2
   let rise = Math.max(0.01, opts.ridgeRiseOverride ?? node.roofHeight ?? 2.5)
@@ -246,12 +269,21 @@ export function resolveShellShape(
   const overhang = Math.max(0, Number((node as { overhang?: number }).overhang ?? 0.3))
   const frame = _roofFrame(polygon, styles, tans, baseZ, rise, overhang, ridgeAlongX)
 
-  const realWallTop = [0, 1, 2, 3].map((i) => {
-    const t = opts.realWallTop?.[i]
-    return typeof t === 'number' && Number.isFinite(t) ? t : null
-  })
+  const realWalls = (opts.realWalls ?? []).filter(
+    (w) => Number.isFinite(w.t0) && Number.isFinite(w.t1) && Number.isFinite(w.top) && w.t1 > w.t0,
+  )
 
-  const shape: ShellShape = { node, polygon, styles, tans, baseZ, frame, realWallTop, dormers: [] }
+  const shape: ShellShape = {
+    node,
+    polygon,
+    styles,
+    tans,
+    baseZ,
+    frame,
+    realWalls,
+    noInteriorCap: !!opts.noInteriorCap,
+    dormers: [],
+  }
   shape.dormers = _resolveDormers(node)
     .map((d) => _resolveDormer(d, shape, opts.dormerOverrides?.[d.id]))
     .filter((d): d is ResolvedDormer => d !== null)
@@ -285,8 +317,10 @@ export function shellHeightAtLocal(shape: ShellShape, x: number, z: number): num
   const f = shape.frame
   const u = f.ridgeAlongX ? x : z
   const v = f.ridgeAlongX ? z : x
-  const bLo = shape.styles[f.eEndLo] === 'junction' ? 0.02 : COVER_BUFFER
-  const bHi = shape.styles[f.eEndHi] === 'junction' ? 0.02 : COVER_BUFFER
+  // A junction/abut end hands over exactly at its wall; don't reach past it.
+  const tight = (st: EdgeStyle | undefined) => st === 'junction' || st === 'abut'
+  const bLo = tight(shape.styles[f.eEndLo]) ? 0.02 : COVER_BUFFER
+  const bHi = tight(shape.styles[f.eEndHi]) ? 0.02 : COVER_BUFFER
   let best: number | null = null
   if (
     u >= f.uMin - bLo &&
@@ -452,22 +486,70 @@ function _roofFrame(
 
 // ─── Main shell ───────────────────────────────────────────────────
 
-/** Keep the part of a planar polygon at or above height y0 (Sutherland–Hodgman). */
-function _clipAbove(verts: V3[], y0: number): V3[] {
-  if (y0 <= -1e8) return verts
+/** Keep the part of a planar polygon where f(p) >= 0 (Sutherland–Hodgman). */
+function _clipHalf(verts: V3[], f: (p: V3) => number): V3[] {
   const out: V3[] = []
   for (let i = 0; i < verts.length; i++) {
     const a = verts[i]!
     const b = verts[(i + 1) % verts.length]!
-    const ain = a[1] >= y0 - 1e-6
-    const bin = b[1] >= y0 - 1e-6
+    const fa = f(a)
+    const fb = f(b)
+    const ain = fa >= -1e-7
+    const bin = fb >= -1e-7
     if (ain) out.push(a)
     if (ain !== bin) {
-      const t = (y0 - a[1]) / (b[1] - a[1])
-      out.push([a[0] + (b[0] - a[0]) * t, y0, a[2] + (b[2] - a[2]) * t])
+      const t = fa / (fa - fb)
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t])
     }
   }
-  return out
+  // Drop consecutive duplicates (degenerate corners where an eave sits at 0).
+  return out.filter((p, i) => {
+    const q = out[(i + out.length - 1) % out.length]!
+    return Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) + Math.abs(p[2] - q[2]) > 1e-7
+  })
+}
+
+/** Normal _facesToGeometry will give this vertex list (it reverses first). */
+function _faceNormal(verts: V3[]): V3 {
+  const r = [...verts].reverse()
+  const a = r[0]!
+  const b = r[1]!
+  const c = r[2]!
+  const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
+  const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
+  return [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!]
+}
+
+type EdgeRun = { t0: number; t1: number; top: number; inset: number }
+
+/** Split an edge into runs by which real wall (if any) stands along it. A
+ *  run with no wall has top = -Infinity. */
+function _edgeRuns(spans: RealWallSpan[]): EdgeRun[] {
+  const pts = new Set<number>([0, 1])
+  for (const s of spans) {
+    pts.add(Math.min(1, Math.max(0, s.t0)))
+    pts.add(Math.min(1, Math.max(0, s.t1)))
+  }
+  const cuts = [...pts].sort((a, b) => a - b)
+  const runs: EdgeRun[] = []
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const t0 = cuts[i]!
+    const t1 = cuts[i + 1]!
+    if (t1 - t0 < 1e-6) continue
+    const mid = (t0 + t1) / 2
+    let top = Number.NEGATIVE_INFINITY
+    let inset = 0
+    for (const s of spans) {
+      if (s.t0 <= mid && s.t1 >= mid && s.top > top) {
+        top = s.top
+        inset = s.inset
+      }
+    }
+    const prev = runs[runs.length - 1]
+    if (prev && prev.top === top && prev.inset === inset) prev.t1 = t1
+    else runs.push({ t0, t1, top, inset })
+  }
+  return runs
 }
 
 function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
@@ -477,6 +559,7 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   const P = (u: number, y: number, v: number): V3 => (ridgeAlongX ? [u, y, v] : [v, y, u])
   const styleLo = shape.styles[f.eEndLo]!
   const styleHi = shape.styles[f.eEndHi]!
+  const noOverhangEnd = (st: EdgeStyle) => st === 'junction' || st === 'abut'
 
   const eLo = eaveOf[f.eSideLo]!
   const eHi = eaveOf[f.eSideHi]!
@@ -485,16 +568,17 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   const F = oh > 1e-3 ? FASCIA_M : 0
 
   // Ridge u-extent. Gable ends run the ridge PAST the wall by the overhang
-  // (the rake); junction ends stop exactly at the wall; hips keep their inset.
+  // (the rake); junction/abut ends stop exactly at the wall; hips keep
+  // their inset.
   const rLoU = f.rLoU - (styleLo === 'gable' ? oh : 0)
   const rHiU = f.rHiU + (styleHi === 'gable' ? oh : 0)
   const R_lo = P(rLoU, ridgeZ, vMid)
   const R_hi = P(rHiU, ridgeZ, vMid)
 
-  // Eave-line extent: outset everywhere except at a junction end, which must
-  // stop dead so nothing pokes out from under the neighbouring roof.
-  const uLoO = styleLo === 'junction' ? uMin : uMin - oh
-  const uHiO = styleHi === 'junction' ? uMax : uMax + oh
+  // Eave-line extent: outset everywhere except at a junction/abut end, which
+  // must stop dead so nothing pokes into or out of the neighbouring roof.
+  const uLoO = noOverhangEnd(styleLo) ? uMin : uMin - oh
+  const uHiO = noOverhangEnd(styleHi) ? uMax : uMax + oh
   const vLoO = vMin - oh
   const vHiO = vMax + oh
   const E_ll = P(uLoO, eLoO, vLoO)
@@ -520,30 +604,16 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
     add([P(uHiO, eHiO - F, vMax), P(uLoO, eHiO - F, vMax), down(E_lh), down(E_hh)], SLOT_SOFFIT)
   }
 
-  // Wall-line infill above a real wall on edge e, if any.
-  const wallTopOf = (e: number) => shape.realWallTop[e]
-  const infillFloor = (e: number) => {
-    const t = wallTopOf(e)
-    return t == null ? 0 : Math.max(0, t)
-  }
-
+  // Overhang dressing at the ends. The vertical end walls themselves are
+  // part of the wall-line infill below.
   const end = (atHi: boolean) => {
     const style = atHi ? styleHi : styleLo
-    if (style === 'junction') return // open: lives inside the neighbouring roof
-    const e = atHi ? f.eEndHi : f.eEndLo
+    if (style === 'junction' || style === 'abut') return
     const uWall = atHi ? uMax : uMin
     const uOut = atHi ? uHiO : uLoO
     const R = atHi ? R_hi : R_lo
     const orient = (vs: V3[]) => (atHi ? vs : [...vs].reverse())
-
     if (style === 'gable') {
-      // Vertical gable wall on the wall line — but only ABOVE any real wall
-      // standing there, which is then the gable itself (windows and all).
-      const tri = _clipAbove(
-        [P(uWall, eLo, vMin), P(uWall, eHi, vMax), P(uWall, ridgeZ, vMid)],
-        wallTopOf(e) ?? -1e9,
-      )
-      add(orient(tri), SLOT_WALL_EXTERIOR)
       if (F > 0) {
         const A = P(uOut, eLoO, vLoO)
         const B = P(uOut, ridgeZ, vMid)
@@ -569,26 +639,92 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   // Mirror correction for the ridge-along-Z orientation (x <-> z swap).
   if (!ridgeAlongX) for (const fc of faces) fc.verts.reverse()
 
-  // Wall band (parapet) at the WALL line, from the storey wall top — or the
-  // top of a real wall standing on that line — up to the eave. Skipped at
-  // junction ends.
+  // ── Wall-line infill ──────────────────────────────────────────────
+  // Along every edge line, the wall between the storey wall top (y = 0) and
+  // the roof: a strip under an eave, strip + gable on a gable/abut end.
+  // Where a REAL wall stands along part of the edge, only the part ABOVE its
+  // top is generated there (the real wall, windows and all, is the
+  // parapet), and a return face closes the slot between the edge line and
+  // the inset real wall at each end of that stretch.
   const poly = shape.polygon
-  const wallPts = poly.map(([x, z], i) => [x, cornerY[i]!, z] as V3)
   for (let i = 0; i < 4; i++) {
-    if (shape.styles[i] === 'junction') continue
+    const st = shape.styles[i]!
+    if (st === 'junction') continue
     const j = (i + 1) % 4
-    const floor = infillFloor(i)
-    if (wallPts[i]![1] <= floor + 1e-3 && wallPts[j]![1] <= floor + 1e-3) continue
-    const quad = _clipAbove(
-      [[wallPts[i]![0], 0, wallPts[i]![2]], [wallPts[j]![0], 0, wallPts[j]![2]], wallPts[j]!, wallPts[i]!],
-      floor,
-    )
-    add(quad, SLOT_WALL_EXTERIOR)
+    const pi = poly[i]!
+    const pj = poly[j]!
+    const ex = pj[0] - pi[0]
+    const ez = pj[1] - pi[1]
+    const L = Math.hypot(ex, ez)
+    if (L < 1e-6) continue
+    const dir: V2 = [ex / L, ez / L]
+    const inward: V2 = [-dir[1], dir[0]]
+    const yi = cornerY[i]!
+    const yj = cornerY[j]!
+    // Outline in edge order (outward-facing; checked by the facing audit).
+    const outline: V3[] =
+      st === 'gable' || st === 'abut'
+        ? [
+            [pi[0], 0, pi[1]],
+            [pj[0], 0, pj[1]],
+            [pj[0], yj, pj[1]],
+            [(pi[0] + pj[0]) / 2, ridgeZ, (pi[1] + pj[1]) / 2],
+            [pi[0], yi, pi[1]],
+          ]
+        : [
+            [pi[0], 0, pi[1]],
+            [pj[0], 0, pj[1]],
+            [pj[0], yj, pj[1]],
+            [pi[0], yi, pi[1]],
+          ]
+    const along = (p: V3) => (p[0] - pi[0]) * dir[0] + (p[2] - pi[1]) * dir[1]
+    const eaveAt = (t: number) => yi + (yj - yi) * t
+    const runs = _edgeRuns(shape.realWalls.filter((w) => w.edge === i))
+    for (let k = 0; k < runs.length; k++) {
+      const r = runs[k]!
+      const covered = Number.isFinite(r.top)
+      const floor = covered ? Math.max(0, r.top) : 0
+      let piece = _clipHalf(outline, (p) => along(p) - r.t0 * L)
+      piece = _clipHalf(piece, (p) => r.t1 * L - along(p))
+      piece = _clipHalf(piece, (p) => p[1] - floor)
+      add(piece, SLOT_WALL_EXTERIOR)
+
+      // Return faces where a covered stretch meets an uncovered one.
+      if (!covered || r.inset <= 0.02) continue
+      const bounds: [number, EdgeRun | undefined, number][] = [
+        [r.t0, runs[k - 1], 1],
+        [r.t1, runs[k + 1], -1],
+      ]
+      for (const [tb, neighbour, towardCovered] of bounds) {
+        if (tb <= 1e-6 || tb >= 1 - 1e-6) continue // corner: the next edge closes it
+        if (neighbour && Number.isFinite(neighbour.top) && neighbour.top >= r.top) continue
+        const ax = pi[0] + dir[0] * tb * L
+        const az = pi[1] + dir[1] * tb * L
+        const bx = ax + inward[0] * r.inset
+        const bz = az + inward[1] * r.inset
+        const h = Math.max(eaveAt(tb), 0)
+        if (h <= 1e-3) continue
+        let quad: V3[] = [
+          [ax, 0, az],
+          [bx, 0, bz],
+          [bx, h, bz],
+          [ax, h, az],
+        ]
+        // Face INTO the covered stretch's slot (along +/- the edge).
+        const n = _faceNormal(quad)
+        if ((n[0] * dir[0] + n[2] * dir[1]) * towardCovered < 0) quad = quad.reverse()
+        add(quad, SLOT_WALL_EXTERIOR)
+      }
+    }
   }
 
-  // Interior cap so walk-mode doesn't see sky from below.
-  const capY = Math.min(...cornerY)
-  add(poly.map(([x, z]) => [x, capY, z] as V3), SLOT_SOFFIT)
+  // Interior cap so walk-mode doesn't see sky from below. Not when walls
+  // stand under this roof on the level above: then it sits in the middle of
+  // that floor and shows through its windows as a flat plane.
+  if (!shape.noInteriorCap) {
+    const capY = Math.min(...cornerY)
+    add(poly.map(([x, z]) => [x, capY, z] as V3), SLOT_SOFFIT)
+  }
 
   return _facesToGeometry(faces)
 }

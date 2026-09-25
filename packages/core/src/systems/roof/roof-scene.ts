@@ -28,6 +28,7 @@
 import type { AnyNode, RoofNode, RoofSegmentNode, WallNode } from '../../schema'
 import {
   type DormerOverride,
+  type RealWallSpan,
   resolveShellShape,
   type ShellBuildOptions,
   type ShellShape,
@@ -48,6 +49,9 @@ const PARALLEL_SIN = Math.sin((10 * Math.PI) / 180)
 const CONTINUATION_LATERAL = 0.5
 /** A real wall within this distance of an edge line counts as standing on it. */
 const WALL_ON_EDGE = 0.5
+/** Continuation seams stay open only if both roofs' eaves agree this well;
+ *  otherwise each side gets a closed step wall. */
+const SEAM_PROFILE_TOL = 0.2
 
 export type RidgeMatch = 'level' | 'pitch' | 'independent'
 
@@ -232,12 +236,19 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     }
   }
 
-  // Pass 2: real walls standing on each edge -> infill only above them.
+  // Pass 2: real walls. Along each edge, where one stands the generated
+  // infill steps aside for it; and if any wall stands under this roof on the
+  // level above, drop the flat interior ceiling that would slice that floor.
   const walls = Object.values(nodes).filter((n): n is WallNode => !!n && n.type === 'wall')
   for (const r of segs.values()) {
-    const tops = _realWallTops(r, walls, levels)
-    if (tops.some((t) => t != null)) {
-      r.opts = { ...r.opts, realWallTop: tops }
+    const spans = _realWallSpans(r, walls, levels)
+    const upper = _hasUpperWalls(r, walls, levels)
+    if (spans.length || upper) {
+      r.opts = {
+        ...r.opts,
+        ...(spans.length ? { realWalls: spans } : {}),
+        ...(upper ? { noInteriorCap: true } : {}),
+      }
       rebuild(r)
     }
   }
@@ -271,8 +282,8 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
 
   // Which of B's ends sits inside A? (Only ends not already joined.)
   const bInside = (w: V2) => insideFootprint(pa, A.shape, w[0], w[1], 0.3)
-  const loIn = !B.opts.truncateLo && !B.opts.junctionLo && bInside(rb.a)
-  const hiIn = !B.opts.truncateHi && !B.opts.junctionHi && bInside(rb.b)
+  const loIn = B.opts.truncateLo == null && !B.opts.endLo && bInside(rb.a)
+  const hiIn = B.opts.truncateHi == null && !B.opts.endHi && bInside(rb.b)
   if (!loIn && !hiIn) return
   if (loIn && hiIn) return // B wholly inside A along its ridge: nothing sensible to join
 
@@ -334,23 +345,73 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
   rebuild(B)
 
   if (parallel) {
-    // A's end facing the seam opens too, so the ridge runs straight through.
+    // Continuation seam. If both roofs have the same cross-section there,
+    // open A's end too and one ridge runs straight through. If they don't
+    // (the operator had raised one roof's eaves to 5.54 / 4.23 m while the
+    // other's sat at 2.70), open ends leave a hole — so close BOTH sides
+    // with a step wall instead.
     const fa = A.shape.frame
     const uA = localU(pa, A.shape, hit[0], hit[1])
     const nearLo = Math.abs(uA - fa.uMin) < Math.abs(uA - fa.uMax)
-    A.opts = nearLo ? { ...A.opts, junctionLo: true } : { ...A.opts, junctionHi: true }
+    const match = _seamProfilesMatch(A, B)
+    const style = match ? 'junction' : 'abut'
+    A.opts = nearLo ? { ...A.opts, endLo: style } : { ...A.opts, endHi: style }
     rebuild(A)
+    if (!match) {
+      B.opts = buriedIsLo ? { ...B.opts, endLo: 'abut' } : { ...B.opts, endHi: 'abut' }
+      rebuild(B)
+    }
   }
 }
 
-function _realWallTops(
+/** Do two roofs meeting end to end have the same eave heights (world)? */
+function _seamProfilesMatch(A: ResolvedSegment, B: ResolvedSegment): boolean {
+  const eaves = (r: ResolvedSegment) => {
+    const f = r.shape.frame
+    const mid = (f.uMin + f.uMax) / 2
+    const at = (v: number) => (f.ridgeAlongX ? toWorld(r.placement, mid, v) : toWorld(r.placement, v, mid))
+    return [
+      { p: at(f.vMin), y: r.placement.baseY + f.eaveOf[f.eSideLo]! },
+      { p: at(f.vMax), y: r.placement.baseY + f.eaveOf[f.eSideHi]! },
+    ]
+  }
+  const ea = eaves(A)
+  const eb = eaves(B)
+  if (Math.abs(ridgeWorld(A.placement, A.shape).y - ridgeWorld(B.placement, B.shape).y) > SEAM_PROFILE_TOL) {
+    return false
+  }
+  for (const a of ea) {
+    // Pair each of A's sides with B's side on the same side of the ridge.
+    let best = eb[0]!
+    let bestD = Number.POSITIVE_INFINITY
+    const ra = ridgeWorld(A.placement, A.shape)
+    const sideA = Math.sign((a.p[0] - ra.a[0]) * ra.dir[1] - (a.p[1] - ra.a[1]) * ra.dir[0])
+    for (const b of eb) {
+      const sideB = Math.sign((b.p[0] - ra.a[0]) * ra.dir[1] - (b.p[1] - ra.a[1]) * ra.dir[0])
+      const d = sideA === sideB ? 0 : 1
+      if (d < bestD) {
+        bestD = d
+        best = b
+      }
+    }
+    if (Math.abs(a.y - best.y) > SEAM_PROFILE_TOL) return false
+  }
+  return true
+}
+
+/**
+ * Real walls standing along each edge: parallel to it, within WALL_ON_EDGE
+ * inside it, rising above the roof base. Each becomes a span [t0, t1] along
+ * the edge with its top and how far in it stands.
+ */
+function _realWallSpans(
   r: ResolvedSegment,
   walls: WallNode[],
   levels: Map<string, { elev: number; height: number }>,
-): (number | null)[] {
+): RealWallSpan[] {
   const p = r.placement
   const s = r.shape
-  const tops: (number | null)[] = [null, null, null, null]
+  const out: RealWallSpan[] = []
   for (let e = 0; e < 4; e++) {
     if (s.styles[e] === 'junction') continue
     const [l0, l1] = shellEdgeLocal(s, e)
@@ -359,7 +420,7 @@ function _realWallTops(
     const L = Math.hypot(b[0] - a[0], b[1] - a[1])
     if (L < 1e-6) continue
     const d: V2 = [(b[0] - a[0]) / L, (b[1] - a[1]) / L]
-    let best: number | null = null
+    const inN: V2 = [-d[1], d[0]] // CCW polygon, proper rotation: left = inward
     for (const w of walls) {
       if ((w.bulge ?? 0) !== 0) continue
       const ws = w.start
@@ -368,25 +429,39 @@ function _realWallTops(
       if (wl < 1e-6) continue
       const wd: V2 = [(we[0] - ws[0]) / wl, (we[1] - ws[1]) / wl]
       if (Math.abs(d[0] * wd[1] - d[1] * wd[0]) > 0.09) continue // not parallel (~5 deg)
-      // Perpendicular distance of the wall's midpoint from the edge line.
       const mx = (ws[0] + we[0]) / 2
       const mz = (ws[1] + we[1]) / 2
-      const perp = Math.abs((mx - a[0]) * d[1] - (mz - a[1]) * d[0])
-      if (perp > WALL_ON_EDGE) continue
-      // Overlap along the edge.
-      const t0 = (ws[0] - a[0]) * d[0] + (ws[1] - a[1]) * d[1]
-      const t1 = (we[0] - a[0]) * d[0] + (we[1] - a[1]) * d[1]
-      const ov = Math.min(L, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1))
-      if (ov < 0.3 * L) continue
+      const inset = (mx - a[0]) * inN[0] + (mz - a[1]) * inN[1]
+      if (inset < -0.15 || inset > WALL_ON_EDGE) continue
       const lv = w.parentId ? levels.get(w.parentId) : undefined
-      const topWorld = (lv ? lv.elev : 0) + (w.height ?? 2.7)
-      const topLocal = topWorld - p.baseY
+      const topLocal = (lv ? lv.elev : 0) + (w.height ?? 2.7) - p.baseY
       if (topLocal <= 0.05) continue // below the roof base: not in the infill zone
-      if (best == null || topLocal > best) best = topLocal
+      const t0 = ((ws[0] - a[0]) * d[0] + (ws[1] - a[1]) * d[1]) / L
+      const t1 = ((we[0] - a[0]) * d[0] + (we[1] - a[1]) * d[1]) / L
+      const lo = Math.max(0, Math.min(t0, t1))
+      const hi = Math.min(1, Math.max(t0, t1))
+      if (hi - lo < 0.02) continue
+      out.push({ edge: e, t0: lo, t1: hi, top: topLocal, inset: Math.max(0, inset) })
     }
-    tops[e] = best
   }
-  return tops
+  return out
+}
+
+/** Does any wall stand under this roof, rising above its base? */
+function _hasUpperWalls(
+  r: ResolvedSegment,
+  walls: WallNode[],
+  levels: Map<string, { elev: number; height: number }>,
+): boolean {
+  for (const w of walls) {
+    const lv = w.parentId ? levels.get(w.parentId) : undefined
+    const top = (lv ? lv.elev : 0) + (w.height ?? 2.7)
+    if (top <= r.placement.baseY + 0.05) continue
+    const mx = (w.start[0] + w.end[0]) / 2
+    const mz = (w.start[1] + w.end[1]) / 2
+    if (insideFootprint(r.placement, r.shape, mx, mz, 0)) return true
+  }
+  return false
 }
 
 function _dormerWindowOverrides(
