@@ -23,16 +23,26 @@ ev.useGroups = false
 ev.attributes = ['position', 'normal']
 const wallGeo = ev.evaluate(new Brush(box), new Brush(hole), SUBTRACTION).geometry
 
-function profile(g) {
-  // Highest wall point in each 0.25 m band along x, and whether the window
-  // opening survived (no wall material inside the hole's middle).
+function profile(g, picks) {
+  // True wall top at each x: slice every triangle with the plane x = k and
+  // keep the highest crossing. And whether the window opening survived (no
+  // wall material inside the hole's middle).
   const p = g.attributes.position.array
   const bands = {}
   let inHole = 0
+  for (let i = 0; i < p.length; i += 9) {
+    const V = [0, 1, 2].map((j) => [p[i + 3 * j], p[i + 3 * j + 1]])
+    for (const k of picks) {
+      for (let e = 0; e < 3; e++) {
+        const [a, b] = [V[e], V[(e + 1) % 3]]
+        if ((a[0] - k) * (b[0] - k) > 0 || a[0] === b[0]) continue
+        const y = a[1] + ((b[1] - a[1]) * (k - a[0])) / (b[0] - a[0])
+        bands[k] = Math.max(bands[k] ?? -1e9, y)
+      }
+    }
+  }
   for (let i = 0; i < p.length; i += 3) {
     const x = p[i], y = p[i + 1]
-    const k = Math.round(x * 4) / 4
-    bands[k] = Math.max(bands[k] ?? -1e9, y)
     if (x > 1.0 && x < 1.96 && y > 1.0 && y < 2.0) inHole++
   }
   return { bands, inHole }
@@ -43,8 +53,8 @@ function run(label, nodes) {
   const node = nodes['wall_183n']
   const out = clipWallGeometry(wallGeo, node, 0, ctx)
   const g = out ?? wallGeo
-  const { bands, inHole } = profile(g)
-  const pick = [0, 0.75, 1.0, 1.5, 2.0, 2.25, 3.0, 4.0]
+  const pick = [0.01, 0.75, 1.0, 1.5, 2.0, 2.25, 3.0, 4.0, 4.21]
+  const { bands, inHole } = profile(g, pick)
   P(`\n${label}: ${out ? 'CLIPPED' : 'unchanged'}  tris ${g.attributes.position.count / 3}`)
   P('  wall top (local y) at x =', pick.map((x) => `${x}:${r2(bands[x] ?? NaN)}`).join('  '))
   P('  window opening kept clear:', inHole === 0 ? 'yes' : `NO (${inHole} verts inside)`)

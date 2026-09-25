@@ -29,6 +29,8 @@ import type { AnyNode, RoofNode, RoofSegmentNode, WallNode } from '../../schema'
 import {
   type DormerOverride,
   type RealWallSpan,
+  type ClipVolume,
+  shellVolumeLocal,
   resolveShellShape,
   type ShellBuildOptions,
   type ShellShape,
@@ -64,8 +66,11 @@ export type SegmentPlacement = {
   sin: number
   tx: number
   tz: number
-  /** World Y of the segment's local y = 0 (the storey wall top). */
+  /** World Y of the segment's local y = 0 (the storey wall top, plus any
+   *  Y offset on the roof or segment). */
   baseY: number
+  /** Local Y of the storey wall top (<= 0 when the segment is lifted). */
+  floorY: number
 }
 
 export type ResolvedSegment = {
@@ -151,6 +156,7 @@ export function collectPlacements(nodes: Nodes): SegmentPlacement[] {
       tx: (rp[0] ?? 0) + rc * (sp[0] ?? 0) + rs * (sp[2] ?? 0),
       tz: (rp[2] ?? 0) - rs * (sp[0] ?? 0) + rc * (sp[2] ?? 0),
       baseY: (lv ? lv.elev + lv.height : 0) + (rp[1] ?? 0) + (sp[1] ?? 0),
+      floorY: Math.min(0, -((rp[1] ?? 0) + (sp[1] ?? 0))),
     })
   }
   return out
@@ -205,8 +211,9 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
 
   // Pass 0: each segment on its own.
   for (const p of placements) {
-    const shape = resolveShellShape(p.seg)
-    if (shape) segs.set(p.seg.id, { placement: p, opts: {}, shape })
+    const opts: ShellBuildOptions = p.floorY < 0 ? { infillFloor: p.floorY } : {}
+    const shape = resolveShellShape(p.seg, opts)
+    if (shape) segs.set(p.seg.id, { placement: p, opts, shape })
   }
 
   // Order: highest ridge first, then largest footprint, then id.
@@ -258,6 +265,21 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     const ov = _dormerWindowOverrides(r, nodes, levels)
     if (ov) {
       r.opts = { ...r.opts, dormerOverrides: ov }
+      rebuild(r)
+    }
+  }
+
+  // Pass 4: meeting roofs read as ONE roof. Each segment drops whatever of
+  // it lies inside a neighbour on the same level (shapes are final now).
+  for (const r of segs.values()) {
+    const vols: ClipVolume[] = []
+    for (const o of segs.values()) {
+      if (o === r || o.placement.levelId !== r.placement.levelId) continue
+      if (!_footprintsOverlap(r, o)) continue
+      vols.push(_volumeInto(o, r))
+    }
+    if (vols.length) {
+      r.opts = { ...r.opts, clipVolumes: vols }
       rebuild(r)
     }
   }
@@ -317,6 +339,13 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
     // Continuation: same ridge line (near enough). Meet at A's end wall.
     const lateral = Math.abs((rb.a[0] - ra.a[0]) * ra.dir[1] - (rb.a[1] - ra.a[1]) * ra.dir[0])
     if (lateral > CONTINUATION_LATERAL) return
+    // Share A's side lines when they're close, so the two masses read as
+    // one roof: no kink in the ridge or the eaves at the seam.
+    const snap = _sideSnap(A, B)
+    if (snap) {
+      B.opts = { ...B.opts, sideLo: snap[0], sideHi: snap[1] }
+      rebuild(B)
+    }
     for (let t = 0; t <= maxWalk; t += STEP) {
       const w: V2 = [outer[0] + walkDir[0] * t, outer[1] + walkDir[1] * t]
       if (insideFootprint(pa, A.shape, w[0], w[1], 0)) {
@@ -362,6 +391,68 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
       rebuild(B)
     }
   }
+}
+
+/** A's side (eave) lines expressed in B's local across-ridge coordinate,
+ *  if each is within CONTINUATION_LATERAL of B's own. */
+function _sideSnap(A: ResolvedSegment, B: ResolvedSegment): [number, number] | null {
+  const fa = A.shape.frame
+  const fb = B.shape.frame
+  const mid = (fa.uMin + fa.uMax) / 2
+  const at = (v: number) => (fa.ridgeAlongX ? toWorld(A.placement, mid, v) : toWorld(A.placement, v, mid))
+  const vb = (w: V2) => {
+    const [x, z] = toLocal(B.placement, w[0], w[1])
+    return fb.ridgeAlongX ? z : x
+  }
+  const s1 = vb(at(fa.vMin))
+  const s2 = vb(at(fa.vMax))
+  const lo = Math.min(s1, s2)
+  const hi = Math.max(s1, s2)
+  if (Math.abs(lo - fb.vMin) > CONTINUATION_LATERAL || Math.abs(hi - fb.vMax) > CONTINUATION_LATERAL) return null
+  if (Math.abs(lo - fb.vMin) < 1e-4 && Math.abs(hi - fb.vMax) < 1e-4) return null
+  return [lo, hi]
+}
+
+/** World XZ corners of a segment's wall-line footprint. */
+function _cornersWorld(r: ResolvedSegment): V2[] {
+  return r.shape.polygon.map(([x, z]) => toWorld(r.placement, x, z))
+}
+
+/** Separating-axis test on the two (rotated) rectangles, 5 cm margin. */
+function _footprintsOverlap(a: ResolvedSegment, b: ResolvedSegment): boolean {
+  const ca = _cornersWorld(a)
+  const cb = _cornersWorld(b)
+  for (const poly of [ca, cb]) {
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i]!
+      const q = poly[(i + 1) % poly.length]!
+      const ax: V2 = [-(q[1] - p[1]), q[0] - p[0]]
+      const proj = (c: V2[]) => c.map((v) => v[0] * ax[0] + v[1] * ax[1])
+      const pa = proj(ca)
+      const pb = proj(cb)
+      const L = Math.hypot(ax[0], ax[1]) || 1
+      if (Math.max(...pa) + 0.05 * L < Math.min(...pb) || Math.max(...pb) + 0.05 * L < Math.min(...pa)) return false
+    }
+  }
+  return true
+}
+
+/** Neighbour `o`'s volume, re-expressed in `r`'s local frame. */
+function _volumeInto(o: ResolvedSegment, r: ResolvedSegment): ClipVolume {
+  const po = o.placement
+  const pr = r.placement
+  return shellVolumeLocal(o.shape).map((h) => {
+    // point: o-local -> world -> r-local
+    const [wx, wz] = toWorld(po, h.p[0], h.p[2])
+    const [lx, lz] = toLocal(pr, wx, wz)
+    const y = h.p[1] + po.baseY - pr.baseY
+    // normal: rotate o-local -> world -> r-local (no translation)
+    const nwx = po.cos * h.n[0] + po.sin * h.n[2]
+    const nwz = -po.sin * h.n[0] + po.cos * h.n[2]
+    const nlx = pr.cos * nwx - pr.sin * nwz
+    const nlz = pr.sin * nwx + pr.cos * nwz
+    return { n: [nlx, h.n[1], nlz], p: [lx, y, lz], eps: h.eps }
+  })
 }
 
 /** Do two roofs meeting end to end have the same eave heights (world)? */

@@ -134,7 +134,22 @@ export type ShellBuildOptions = {
    *  on the level above: the cap would slice straight through that floor. */
   noInteriorCap?: boolean
   dormerOverrides?: Record<string, DormerOverride>
+  /** Local Y the wall infill starts from (the storey wall top). 0 unless the
+   *  segment is lifted above the storey by its own Y offset — then negative,
+   *  so the infill still reaches down to the walls below. */
+  infillFloor?: number
+  /** Override the side (eave) lines, in local coordinates across the ridge.
+   *  Set on a continuation so both masses share one cross-section. */
+  sideLo?: number
+  sideHi?: number
+  /** Neighbouring roofs' volumes (local frame). Every face of this roof
+   *  that falls inside one is cut away, so meeting roofs read as ONE roof:
+   *  no slope, gable, infill or board inside another roof. */
+  clipVolumes?: ClipVolume[]
 }
+
+/** A convex volume as half-spaces: inside where n·(q - p) + eps >= 0 for all. */
+export type ClipVolume = { n: V3; p: V3; eps: number }[]
 
 type DormerSpec = {
   id: string
@@ -202,6 +217,8 @@ export type ShellShape = {
   frame: RoofFrame
   realWalls: RealWallSpan[]
   noInteriorCap: boolean
+  infillFloor: number
+  clipVolumes: ClipVolume[]
   dormers: ResolvedDormer[]
 }
 
@@ -245,6 +262,16 @@ export function resolveShellShape(
     if (opts.truncateLo != null) zMin = clampLo(opts.truncateLo, zMax)
     if (opts.truncateHi != null) zMax = clampHi(opts.truncateHi, zMin)
   }
+  // Continuation: share the neighbour's side lines.
+  if (opts.sideLo != null && opts.sideHi != null && opts.sideHi - opts.sideLo > 0.4) {
+    if (ridgeAlongX) {
+      zMin = opts.sideLo
+      zMax = opts.sideHi
+    } else {
+      xMin = opts.sideLo
+      xMax = opts.sideHi
+    }
+  }
   const polygon: V2[] = [
     [xMin, zMin],
     [xMax, zMin],
@@ -282,6 +309,8 @@ export function resolveShellShape(
     frame,
     realWalls,
     noInteriorCap: !!opts.noInteriorCap,
+    infillFloor: Math.min(0, Number.isFinite(opts.infillFloor) ? opts.infillFloor! : 0),
+    clipVolumes: opts.clipVolumes ?? [],
     dormers: [],
   }
   shape.dormers = _resolveDormers(node)
@@ -302,10 +331,126 @@ export function generateShellSegmentGeometry(
   if (!shape) return null
   const base = _buildRectangleShell(shape)
   if (!base) return new THREE.BufferGeometry()
-  const geom = ensureGroupCoverage(base)
-  if (shape.dormers.length > 0) return _unionDormers(geom, shape)
+  let geom = ensureGroupCoverage(base)
+  if (shape.dormers.length > 0) geom = _unionDormers(geom, shape)
+  if (shape.clipVolumes.length > 0) {
+    const cut = _subtractVolumes(geom, shape.clipVolumes)
+    geom.dispose()
+    geom = ensureGroupCoverage(cut)
+  }
   geom.computeVertexNormals()
   return geom
+}
+
+/**
+ * Remove every part of the geometry lying inside any of the volumes: the
+ * surface of the UNION of this roof with its neighbours, as far as this roof
+ * contributes to it. Works per triangle, so it applies after the dormer CSG.
+ */
+function _subtractVolumes(geom: THREE.BufferGeometry, volumes: ClipVolume[]): THREE.BufferGeometry {
+  const pos = geom.getAttribute('position') as THREE.BufferAttribute
+  const idx = geom.getIndex()
+  const vert = (i: number): V3 => [pos.getX(i), pos.getY(i), pos.getZ(i)]
+  const faces: { verts: V3[]; slot: number }[] = []
+  const groups = geom.groups.length
+    ? geom.groups
+    : [{ start: 0, count: idx ? idx.count : pos.count, materialIndex: 0 }]
+  for (const g of groups) {
+    for (let k = g.start; k < g.start + g.count; k += 3) {
+      const tri: V3[] = [0, 1, 2].map((o) => vert(idx ? idx.getX(k + o) : k + o))
+      let pieces: V3[][] = [tri]
+      for (const vol of volumes) {
+        const next: V3[][] = []
+        for (const pc of pieces) next.push(..._minusConvex(pc, vol))
+        pieces = next
+        if (!pieces.length) break
+      }
+      // _facesToGeometry reverses once; hand it the reversed walk so the
+      // original winding (and facing) survives.
+      for (const pc of pieces) {
+        const clean = _dedupe(pc)
+        if (clean.length >= 3 && _area(clean) > 1e-6) faces.push({ verts: clean.reverse(), slot: g.materialIndex ?? 0 })
+      }
+    }
+  }
+  return _facesToGeometry(faces)
+}
+
+/** Planar convex polygon minus a convex volume -> the pieces outside it. */
+function _minusConvex(poly: V3[], vol: ClipVolume): V3[][] {
+  const out: V3[][] = []
+  let rest = poly
+  for (const h of vol) {
+    const f = (q: V3) => h.n[0] * (q[0] - h.p[0]) + h.n[1] * (q[1] - h.p[1]) + h.n[2] * (q[2] - h.p[2]) + h.eps
+    const outside = _clipHalf(rest, (q) => -f(q))
+    if (outside.length >= 3 && _area(outside) > 1e-8) out.push(outside)
+    rest = _clipHalf(rest, f)
+    if (rest.length < 3 || _area(rest) <= 1e-8) return out
+  }
+  return out // what's left of `rest` is inside the volume: dropped
+}
+
+/** Drop consecutive points closer than 0.01 mm (float noise from clipping). */
+function _dedupe(poly: V3[]): V3[] {
+  const out: V3[] = []
+  for (const q of poly) {
+    const last = out[out.length - 1]
+    if (!last || Math.hypot(q[0] - last[0], q[1] - last[1], q[2] - last[2]) > 1e-5) out.push(q)
+  }
+  while (out.length > 1) {
+    const a = out[0]!
+    const b = out[out.length - 1]!
+    if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > 1e-5) break
+    out.pop()
+  }
+  return out
+}
+
+function _area(poly: V3[]): number {
+  let x = 0
+  let y = 0
+  let z = 0
+  for (let i = 1; i < poly.length - 1; i++) {
+    const a = poly[0]!
+    const b = poly[i]!
+    const c = poly[i + 1]!
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
+    const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
+    x += u[1]! * v[2]! - u[2]! * v[1]!
+    y += u[2]! * v[0]! - u[0]! * v[2]!
+    z += u[0]! * v[1]! - u[1]! * v[0]!
+  }
+  return Math.hypot(x, y, z) / 2
+}
+
+/**
+ * This roof's volume as half-spaces in ITS local frame: inside the wall-line
+ * footprint, under every slope, above the infill floor. Vertical sides are
+ * inclusive (a neighbour's face lying on this roof's wall line counts as
+ * inside, so a shared seam wall drops out of both roofs); the slopes are
+ * strict, so a coplanar slope never cancels itself out.
+ */
+export function shellVolumeLocal(shape: ShellShape): ClipVolume {
+  const f = shape.frame
+  const poly = shape.polygon
+  const vol: ClipVolume = []
+  for (let i = 0; i < 4; i++) {
+    const a = poly[i]!
+    const b = poly[(i + 1) % 4]!
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L] // inward (CCW in x/z as used by the infill)
+    vol.push({ n: [m[0], 0, m[1]], p: [a[0], 0, a[1]], eps: 0.01 })
+    const sloped = i === f.eSideLo || i === f.eSideHi || shape.styles[i] === 'hip'
+    if (sloped) {
+      // y <= eave_i + tan_i * d  ->  tan_i*d - y + eave_i >= 0
+      const t = f.tanOf[i]!
+      const e = f.eaveOf[i]!
+      const k = Math.hypot(t, 1)
+      vol.push({ n: [(t * m[0]) / k, -1 / k, (t * m[1]) / k], p: [a[0], e, a[1]], eps: -0.005 })
+    }
+  }
+  vol.push({ n: [0, 1, 0], p: [0, shape.infillFloor, 0], eps: 0.01 })
+  return vol
 }
 
 /**
@@ -647,6 +792,7 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   // parapet), and a return face closes the slot between the edge line and
   // the inset real wall at each end of that stretch.
   const poly = shape.polygon
+  const y0 = shape.infillFloor
   for (let i = 0; i < 4; i++) {
     const st = shape.styles[i]!
     if (st === 'junction') continue
@@ -665,15 +811,15 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
     const outline: V3[] =
       st === 'gable' || st === 'abut'
         ? [
-            [pi[0], 0, pi[1]],
-            [pj[0], 0, pj[1]],
+            [pi[0], y0, pi[1]],
+            [pj[0], y0, pj[1]],
             [pj[0], yj, pj[1]],
             [(pi[0] + pj[0]) / 2, ridgeZ, (pi[1] + pj[1]) / 2],
             [pi[0], yi, pi[1]],
           ]
         : [
-            [pi[0], 0, pi[1]],
-            [pj[0], 0, pj[1]],
+            [pi[0], y0, pi[1]],
+            [pj[0], y0, pj[1]],
             [pj[0], yj, pj[1]],
             [pi[0], yi, pi[1]],
           ]
@@ -683,7 +829,7 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
     for (let k = 0; k < runs.length; k++) {
       const r = runs[k]!
       const covered = Number.isFinite(r.top)
-      const floor = covered ? Math.max(0, r.top) : 0
+      const floor = covered ? Math.max(y0, r.top) : y0
       let piece = _clipHalf(outline, (p) => along(p) - r.t0 * L)
       piece = _clipHalf(piece, (p) => r.t1 * L - along(p))
       piece = _clipHalf(piece, (p) => p[1] - floor)
@@ -702,11 +848,11 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
         const az = pi[1] + dir[1] * tb * L
         const bx = ax + inward[0] * r.inset
         const bz = az + inward[1] * r.inset
-        const h = Math.max(eaveAt(tb), 0)
-        if (h <= 1e-3) continue
+        const h = Math.max(eaveAt(tb), y0)
+        if (h - y0 <= 1e-3) continue
         let quad: V3[] = [
-          [ax, 0, az],
-          [bx, 0, bz],
+          [ax, y0, az],
+          [bx, y0, bz],
           [bx, h, bz],
           [ax, h, az],
         ]

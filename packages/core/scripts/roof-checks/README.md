@@ -9,6 +9,8 @@ npx tsc --build
 node --import ./scripts/roof-checks/register.mjs scripts/roof-checks/scene-check.mjs
 node --import ./scripts/roof-checks/register.mjs scripts/roof-checks/geom-check.mjs
 node --import ./scripts/roof-checks/register.mjs scripts/roof-checks/clip-check.mjs
+node --import ./scripts/roof-checks/register.mjs scripts/roof-checks/gap-check.mjs
+node --import ./scripts/roof-checks/register.mjs scripts/roof-checks/union-check.mjs
 ```
 
 - `plan-fixture.mjs` — a real two-storey plan (22 walls, 17 openings, 3 roofs)
@@ -18,6 +20,10 @@ node --import ./scripts/roof-checks/register.mjs scripts/roof-checks/clip-check.
 - `geom-check.mjs` — builds every resolved segment and audits triangle facing
   (slate up, soffit down) and material slots; includes synthetic L plans.
 - `clip-check.mjs` — trims a wall with a real window opening to the roof.
+- `gap-check.mjs` — ray tests for holes at edges, seams, gable ends, slots.
+- `union-check.mjs` — meeting roofs read as one: no face buried in another
+  roof, the level-1 room not split, infill down to the wall top, shared side
+  lines. Fails 7/13 with the neighbour clipping turned off.
 - `register.mjs` / `ext-loader.mjs` — the compiled output uses extensionless
   imports; this hook lets plain Node resolve them.
 
