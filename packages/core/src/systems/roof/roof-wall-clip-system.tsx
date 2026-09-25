@@ -2,6 +2,15 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { Brush, Evaluator, INTERSECTION } from 'three-bvh-csg'
 import { sceneRegistry } from '../../hooks/scene-registry/scene-registry'
+import {
+  arcLength,
+  arcParamsFromBulge,
+  isStraight,
+  pointAndTangentAtT,
+  tangentAtEnd,
+  tangentAtStart,
+  tessellateArc,
+} from '../../lib/arc-math'
 import type { AnyNode, WallNode } from '../../schema'
 import useScene from '../../store/use-scene'
 import type { RoofContext } from './roof-scene'
@@ -31,6 +40,12 @@ clipEvaluator.useGroups = false
 clipEvaluator.attributes = ['position', 'normal']
 
 const SAMPLE_STEP = 0.05
+/** How far past each wall face the roof is sampled. */
+const SIDE_MARGIN = 0.05
+
+/** One cross-section of a trimming prism, wall-local: points left of, on,
+ *  and right of the centreline with the roof height (wall-local y) at each. */
+type Section = { l: [number, number]; c: [number, number]; r: [number, number]; yl: number; yc: number; yr: number }
 const MAX_SAMPLES = 800
 /** Taller than any building; stands in for "no roof over this point". */
 const OPEN_SKY = 100
@@ -102,7 +117,7 @@ export function clipWallGeometry(
   slabY: number,
   ctx: RoofContext,
 ): THREE.BufferGeometry | null {
-  if ((node.bulge ?? 0) !== 0) return null // arc walls: not handled yet
+  if (!isStraight(node.bulge ?? 0)) return _clipArcWall(src, node, slabY, ctx)
   const [sx, sz] = node.start
   const [ex, ez] = node.end
   const len = Math.hypot(ex - sx, ez - sz)
@@ -113,25 +128,34 @@ export function clipWallGeometry(
   const baseY = (lv ? lv.elev : 0) + slabY
   const top = node.height ?? 2.7
 
-  // Sample the roof height along the wall's centreline, in wall-local x/y.
+  // Sample the roof along the wall, at its centreline AND just outside both
+  // faces: on a slope the roof differs across the thickness, and a top that
+  // is flat across it pokes the downhill face through the slates.
+  const halfT = (node.thickness ?? 0.15) / 2
+  const W = halfT + SIDE_MARGIN
   const x0 = -0.5
   const x1 = len + 0.5
   const n = Math.min(MAX_SAMPLES, Math.max(2, Math.ceil((x1 - x0) / SAMPLE_STEP) + 1))
-  const xs: number[] = []
-  const ys: number[] = []
+  const at = (x: number, z: number) => {
+    // wall-local (x, z) -> world, then the roof there
+    const h = ctx.heightAt(sx + dx * x - dz * z, sz + dz * x + dx * z)
+    return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY)
+  }
+  const sections: Section[] = []
   let needs = false
   for (let i = 0; i < n; i++) {
     const x = x0 + ((x1 - x0) * i) / (n - 1)
-    const h = ctx.heightAt(sx + dx * x, sz + dz * x)
-    const y = h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY)
-    xs.push(x)
-    ys.push(y)
-    if (x >= 0 && x <= len && y < top - 0.005) needs = true
+    const sec: Section = { l: [x, W], c: [x, 0], r: [x, -W], yl: at(x, W), yc: at(x, 0), yr: at(x, -W) }
+    if (x >= 0 && x <= len && Math.min(sec.yl, sec.yc, sec.yr) < top - 0.005) needs = true
+    sections.push(sec)
   }
   if (!needs) return null
+  return _intersect(src, _loftPrism(sections), node.id)
+}
 
+/** src ∩ prism, or null if the CSG fails (the wall then shows untrimmed). */
+function _intersect(src: THREE.BufferGeometry, prism: THREE.BufferGeometry, id: string): THREE.BufferGeometry | null {
   try {
-    const prism = _profilePrism(xs, ys)
     const a = new Brush(src)
     a.updateMatrixWorld()
     const b = new Brush(prism)
@@ -142,38 +166,151 @@ export function clipWallGeometry(
     g.computeVertexNormals()
     return g
   } catch (e) {
-    console.warn('roof-wall-clip: wall clip failed', node.id, e)
+    prism.dispose()
+    console.warn('roof-wall-clip: wall clip failed', id, e)
     return null
   }
 }
 
 /**
- * Closed prism in wall-local space: bottom at y = -50, top following the
- * sampled roof profile, extruded well past the wall thickness in z.
+ * Curved walls. The mesh uses the same wall-local frame as a straight wall
+ * (origin at start, x along the CHORD, z across it), but the body bends away
+ * from the chord, so a prism extruded straight across z would read the roof
+ * at the wrong place. Instead the prism is lofted along the arc itself: a
+ * band a little wider than the wall, following the centreline, its top at
+ * the roof height sampled at each point of the arc.
  */
-function _profilePrism(xs: number[], ys: number[]): THREE.BufferGeometry {
-  const Z = 5
+function _clipArcWall(
+  src: THREE.BufferGeometry,
+  node: WallNode,
+  slabY: number,
+  ctx: RoofContext,
+): THREE.BufferGeometry | null {
+  const start = node.start
+  const end = node.end
+  const bulge = node.bulge ?? 0
+  const arc = arcParamsFromBulge(start, end, bulge)
+  if (!arc) return null
+  const chord = Math.hypot(end[0] - start[0], end[1] - start[1])
+  if (chord < 1e-3) return null
+  const lv = node.parentId ? ctx.levels.get(node.parentId) : undefined
+  const baseY = (lv ? lv.elev : 0) + slabY
+  const top = node.height ?? 2.7
+  const halfT = (node.thickness ?? 0.15) / 2
+  // Wide enough to hold the wall, never so wide the inner edge folds over.
+  const W = Math.min(halfT + SIDE_MARGIN, arc.radius * 0.8)
+  if (W <= halfT) return null
+
+  // Centreline: 0.5 m straight run-out along each end tangent (like the
+  // straight prism's overshoot), then the arc at <= SAMPLE_STEP spacing.
+  let pts = tessellateArc(start, end, bulge, SAMPLE_STEP) as [number, number][]
+  if (pts.length > MAX_SAMPLES) pts = tessellateArc(start, end, bulge, arcLength(start, end, bulge) / MAX_SAMPLES) as [number, number][]
+  const t0 = tangentAtStart(start, end, bulge)
+  const t1 = tangentAtEnd(start, end, bulge)
+  const line: { p: [number, number]; onWall: boolean }[] = [
+    { p: [start[0] - t0[0] * 0.5, start[1] - t0[1] * 0.5], onWall: false },
+    ...pts.map((p) => ({ p, onWall: true })),
+    { p: [end[0] + t1[0] * 0.5, end[1] + t1[1] * 0.5], onWall: false },
+  ]
+
+  // World -> wall-local (same transform as generateExtrudedWall).
+  const a = Math.atan2(end[1] - start[1], end[0] - start[0])
+  const ca = Math.cos(a)
+  const sa = Math.sin(a)
+  const toLocal = (X: number, Z: number): [number, number] => {
+    const dx = X - start[0]
+    const dz = Z - start[1]
+    return [dx * ca + dz * sa, -dx * sa + dz * ca]
+  }
+
+  const roofAt = (X: number, Z: number) => {
+    const h = ctx.heightAt(X, Z)
+    return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY)
+  }
+  const sections: Section[] = []
+  let needs = false
+  for (let i = 0; i < line.length; i++) {
+    const here = line[i]!.p
+    const prev = line[Math.max(0, i - 1)]!.p
+    const next = line[Math.min(line.length - 1, i + 1)]!.p
+    const tx = next[0] - prev[0]
+    const tz = next[1] - prev[1]
+    const m = Math.hypot(tx, tz)
+    if (m < 1e-9) continue
+    const nx = -tz / m
+    const nz = tx / m
+    const L: [number, number] = [here[0] + nx * W, here[1] + nz * W]
+    const R: [number, number] = [here[0] - nx * W, here[1] - nz * W]
+    const sec: Section = {
+      l: toLocal(L[0], L[1]),
+      c: toLocal(here[0], here[1]),
+      r: toLocal(R[0], R[1]),
+      yl: roofAt(L[0], L[1]),
+      yc: roofAt(here[0], here[1]),
+      yr: roofAt(R[0], R[1]),
+    }
+    if (line[i]!.onWall && Math.min(sec.yl, sec.yc, sec.yr) < top - 0.005) needs = true
+    sections.push(sec)
+  }
+  if (!needs || sections.length < 2) return null
+  return _intersect(src, _loftPrism(sections), node.id)
+}
+
+/**
+ * Closed solid lofted through cross-sections (wall-local). Each section is a
+ * vertical pentagon: flat bottom at y = -50, top running l -> c -> r through
+ * the roof heights there. The roof is a min of planes (never bulges up), so
+ * a top interpolated between samples stays under it. Orientation is fixed
+ * afterwards from the signed volume, so the caller needn't care which side
+ * l is on.
+ */
+function _loftPrism(sections: Section[]): THREE.BufferGeometry {
   const B = -50
   const pos: number[] = []
   const quad = (a: number[], b: number[], c: number[], d: number[]) => {
     pos.push(...a, ...b, ...c, ...a, ...c, ...d)
   }
-  const last = xs.length - 1
-  for (let i = 0; i < last; i++) {
-    const xa = xs[i]!
-    const xb = xs[i + 1]!
-    const ya = ys[i]!
-    const yb = ys[i + 1]!
-    // Front (+z) and back (-z) faces, as strips between samples.
-    quad([xa, B, Z], [xb, B, Z], [xb, yb, Z], [xa, ya, Z])
-    quad([xb, B, -Z], [xa, B, -Z], [xa, ya, -Z], [xb, yb, -Z])
-    // Top follows the roof; bottom is flat.
-    quad([xa, ya, Z], [xb, yb, Z], [xb, yb, -Z], [xa, ya, -Z])
-    quad([xa, B, -Z], [xb, B, -Z], [xb, B, Z], [xa, B, Z])
+  const ring = (s: Section) => [
+    [s.l[0], B, s.l[1]],
+    [s.r[0], B, s.r[1]],
+    [s.r[0], s.yr, s.r[1]],
+    [s.c[0], s.yc, s.c[1]],
+    [s.l[0], s.yl, s.l[1]],
+  ]
+  const K = 5
+  for (let i = 0; i < sections.length - 1; i++) {
+    const A = ring(sections[i]!)
+    const C = ring(sections[i + 1]!)
+    for (let k = 0; k < K; k++) {
+      const k2 = (k + 1) % K
+      quad(A[k]!, C[k]!, C[k2]!, A[k2]!)
+    }
   }
-  // End caps.
-  quad([xs[0]!, B, -Z], [xs[0]!, B, Z], [xs[0]!, ys[0]!, Z], [xs[0]!, ys[0]!, -Z])
-  quad([xs[last]!, B, Z], [xs[last]!, B, -Z], [xs[last]!, ys[last]!, -Z], [xs[last]!, ys[last]!, Z])
+  // End caps, fanned from the bottom-left corner.
+  const first = ring(sections[0]!)
+  const last = ring(sections[sections.length - 1]!)
+  for (let k = 1; k < K - 1; k++) {
+    pos.push(...first[0]!, ...first[k + 1]!, ...first[k]!)
+    pos.push(...last[0]!, ...last[k]!, ...last[k + 1]!)
+  }
+
+  // Signed volume; flip every triangle if the loft came out inside-out.
+  let vol = 0
+  for (let i = 0; i < pos.length; i += 9) {
+    const [ax, ay, az, bx, by, bz, cx, cy, cz] = pos.slice(i, i + 9) as number[] as [
+      number, number, number, number, number, number, number, number, number,
+    ]
+    vol += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)
+  }
+  if (vol < 0) {
+    for (let i = 0; i < pos.length; i += 9) {
+      for (let j = 0; j < 3; j++) {
+        const t = pos[i + 3 + j]!
+        pos[i + 3 + j] = pos[i + 6 + j]!
+        pos[i + 6 + j] = t
+      }
+    }
+  }
   const g = new THREE.BufferGeometry()
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
   g.computeVertexNormals()
@@ -188,12 +325,13 @@ function _openingCovered(
 ): boolean {
   const wall = nodes[node.wallId ?? node.parentId ?? ''] as WallNode | undefined
   if (!wall || wall.type !== 'wall') return false
-  const len = Math.hypot(wall.end[0] - wall.start[0], wall.end[1] - wall.start[1])
+  // Opening position is arc length along the wall (chord length if straight).
+  const bulge = wall.bulge ?? 0
+  const len = arcLength(wall.start, wall.end, bulge)
   if (len < 1e-6) return false
   const along = node.position?.[0] ?? 0
-  const x = wall.start[0] + ((wall.end[0] - wall.start[0]) / len) * along
-  const z = wall.start[1] + ((wall.end[1] - wall.start[1]) / len) * along
-  const h = ctx.heightAt(x, z)
+  const { point } = pointAndTangentAtT(wall.start, wall.end, bulge, along / len)
+  const h = ctx.heightAt(point[0], point[1])
   if (h == null) return false
   const lv = wall.parentId ? ctx.levels.get(wall.parentId) : undefined
   const cy = (lv ? lv.elev : 0) + (node.position?.[1] ?? 1)
