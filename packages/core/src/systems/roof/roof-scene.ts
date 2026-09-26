@@ -424,7 +424,13 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
   if (parallel) {
     // Continuation: same ridge line (near enough). Meet at A's end wall.
     const lateral = Math.abs((rb.a[0] - ra.a[0]) * ra.dir[1] - (rb.a[1] - ra.a[1]) * ra.dir[0])
-    if (lateral > CONTINUATION_LATERAL) return
+    // Ridges a little apart still meet end to end: a narrower or shifted
+    // section stepping down from a bigger one. Up to a fifth of the narrower
+    // span (operator 2026-09-27: at 0.57 m apart they didn't join, so each
+    // kept a full overhanging gable over the other — dark slots / orange
+    // soffits between the stepped gables).
+    const lateralMax = Math.max(CONTINUATION_LATERAL, 0.2 * Math.min(spanOf(A.shape), spanOf(B.shape)))
+    if (lateral > lateralMax) return
     // Share A's side lines when they're close, so the two masses read as
     // one roof: no kink in the ridge or the eaves at the seam.
     const snap = _sideSnap(A, B)
