@@ -767,24 +767,29 @@ export function RoofSegmentPanel() {
 
       {(() => {
         // Per-edge pitch section. Reads / writes edgeWeights[] — one
-        // entry per polygon edge. UI shows PITCH ANGLE in degrees; we
-        // convert to tan(pitch) on write. When all edges have the
-        // default pitch we clear edgeWeights so old plans that used
-        // the roofHeight/half-span pitch still work unchanged.
+        // entry per polygon edge, tan(pitch). Shows the pitch each edge is
+        // actually BUILT with (from the resolved roof: roofHeight over the
+        // half-span, any authored weight, a Pitch/Level match), not a flat
+        // 30° for every edge not set by hand (operator 2026-09-26). Gable /
+        // open ends have no slope, so no slider.
         const n = edgeCount(node)
         const currentWeights = ((node as any).edgeWeights as number[] | undefined) ?? []
-        const pitches: number[] = Array.from({ length: n }, (_, i) => {
+        const built = joined?.shape
+        const sloped = (i: number) =>
+          built
+            ? i === built.frame.eSideLo || i === built.frame.eSideHi || built.styles[i] === 'hip'
+            : true
+        const tanOf = (i: number): number => {
+          const t = built?.frame.tanOf[i]
+          if (typeof t === 'number' && sloped(i)) return t
           const w = currentWeights[i]
-          return typeof w === 'number' ? weightToDeg(w) : DEFAULT_PITCH_DEG
-        })
+          return typeof w === 'number' && w > 0 ? w : degToWeight(DEFAULT_PITCH_DEG)
+        }
+        const pitches: number[] = Array.from({ length: n }, (_, i) => weightToDeg(tanOf(i)))
         const setPitch = (i: number, deg: number) => {
-          const next = [...pitches]
-          next[i] = deg
-          const weights = next.map(degToWeight)
-          const allDefault = next.every((d) => d === DEFAULT_PITCH_DEG)
-          handleUpdate({
-            edgeWeights: allDefault ? undefined : weights,
-          } as any)
+          // The other edges keep the pitch they're built with.
+          const weights = Array.from({ length: n }, (_, k) => (k === i ? degToWeight(deg) : tanOf(k)))
+          handleUpdate({ edgeWeights: weights } as any)
         }
         const clearAll = () => handleUpdate({ edgeWeights: undefined } as any)
         return (
@@ -793,19 +798,29 @@ export function RoofSegmentPanel() {
               Shell-rebuild only (RITN3D_USE_SHELL_BUILDER=1). Different
               pitches per edge produce a variable-pitch roof.
             </div>
-            {pitches.map((p, i) => (
-              <SliderControl
-                key={i}
-                label={edgeLabel(i, n)}
-                max={70}
-                min={5}
-                onChange={(v) => setPitch(i, v)}
-                precision={0}
-                step={1}
-                unit="°"
-                value={p}
-              />
-            ))}
+            {pitches.map((p, i) =>
+              sloped(i) ? (
+                <SliderControl
+                  key={i}
+                  label={edgeLabel(i, n)}
+                  max={70}
+                  min={5}
+                  onChange={(v) => setPitch(i, v)}
+                  precision={0}
+                  step={1}
+                  unit="°"
+                  value={p}
+                />
+              ) : (
+                <div
+                  className="flex justify-between px-1 py-1 text-[11px] text-neutral-500"
+                  key={i}
+                >
+                  <span>{edgeLabel(i, n)}</span>
+                  <span>{built?.styles[i] === 'gable' ? 'gable end, no slope' : 'joins another roof, no slope'}</span>
+                </div>
+              ),
+            )}
             <div className="flex gap-1.5 px-1 pt-2 pb-1">
               <ActionButton label="Reset to Default" onClick={clearAll} />
             </div>
