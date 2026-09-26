@@ -1043,8 +1043,21 @@ function _resolveDormer(
   const inward = ov ? Math.max(0, ov.inward) : Math.min(Math.max(vMid, 0), 1) * refRun
   // Then keep it clear of the ridge FROM WHERE IT STANDS: a steep shed pitch
   // lowers the front instead of moving the dormer.
-  rh = Math.min(rh, Math.max(0.2, (run - 0.3 - inward) * gain))
-  const runToBury = rh / gain
+  let runToBury: number
+  if (spec.type === 'shed' && !ov) {
+    // A free shed pivots about its BACK line (operator 2026-09-26: "the end
+    // on the roof stays fixed, the other end moves up and down as I change
+    // the pitch"). Its depth is set once — by the asked height at the
+    // default pitch (main / 3), so an unchanged shed looks as before — and
+    // kept clear of the ridge. The pitch then sets how far the front eave
+    // drops from that fixed back line: rh = depth * (tanParent - tanShed).
+    const depth = Math.min(rhAsked / (tanParent - tanParent / 3), Math.max(0.3, run - 0.3 - inward))
+    rh = Math.max(0.05, depth * gain)
+    runToBury = depth
+  } else {
+    rh = Math.min(rh, Math.max(0.2, (run - 0.3 - inward) * gain))
+    runToBury = rh / gain
+  }
 
   const anchor: V2 = [
     p0[0] + uMid * ex + inwardUnit[0] * inward,

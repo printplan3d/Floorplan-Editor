@@ -172,6 +172,27 @@ P('\ndormer position vs shed pitch and type')
   ok(Math.abs(ref[0] - -4.64) < 0.01 && Math.abs(ref[1] - -3.22) < 0.01, `gable where it was before (-4.64, -3.22)`)
 }
 
+// ── Shed pitch pivots the roof about its fixed back line ──
+// Operator: "the end on the roof should be fixed, the other end moves up
+// and down as I change the pitch".
+P('\nshed pitch pivots about the back line')
+{
+  const shed = (pitchDeg) => {
+    const plan = buildPlan({ extra: { rseg_7ywyzq: { depth: 4.499, edgeWeights: [0.577, 0.577, 0.577, 0.249],
+      dormers: [{ id: 'd', type: 'shed', parentFaceId: 0, ridgeHeight: 1.5, cheekWidth: 2.6, footOnParent: [[0.335, 0.275], [0.565, 0.425]], pitchDeg }] } } })
+    const r = resolveRoofContext(plan).segments.get('rseg_7ywyzq'), d = r.shape.dormers[0], y0 = r.placement.baseY
+    const depth = d.cheekD - 0.15
+    return { front: d.anchor, depth, back: y0 + d.zFront + d.tanParent * depth, eave: y0 + d.rZ }
+  }
+  const rows = [5, 11, 20, 27].map((a) => [a, shed(a)])
+  const ref = rows[0][1]
+  const fixed = rows.every(([, v]) => Math.hypot(v.front[0] - ref.front[0], v.front[1] - ref.front[1]) < 1e-6 &&
+    Math.abs(v.depth - ref.depth) < 1e-6 && Math.abs(v.back - ref.back) < 1e-6)
+  const falling = rows.every(([, v], i) => i === 0 || v.eave < rows[i - 1][1].eave)
+  ok(fixed, `front, depth (${r2(ref.depth)} m) and back line (${r2(ref.back)} m) fixed for 5/11/20/27 deg`)
+  ok(falling, `front eave drops as the pitch rises: ${rows.map(([a, v]) => `${a} deg ${r2(v.eave)}`).join(', ')}`)
+}
+
 const withWin = buildPlan({ dormerWindow: 'window_lh3r' })
 const rw = resolveRoofContext(withWin).segments.get('rseg_7ywyzq')
 P('\ndormer following window lh3r')
