@@ -331,6 +331,11 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     for (const o of segs.values()) {
       if (o === r || o.placement.levelId !== r.placement.levelId) continue
       if (seamNbrs.get(r)?.includes(o)) continue
+      // A gable's rake overhang doesn't run out over a lower neighbouring
+      // roof: cut back to the gable wall where the neighbour is (operator
+      // 2026-09-27: from low down you looked up under the overhang, and
+      // it read as a gap between the two gables).
+      if (_footprintsOverlap(r, o, r.shape.frame.overhang + 0.1)) vols.push(..._rakesOver(o, r))
       if (!_footprintsOverlap(r, o)) continue
       vols.push(_volumeInto(o, r))
     }
@@ -855,7 +860,7 @@ function _cornersWorld(r: ResolvedSegment): V2[] {
 }
 
 /** Separating-axis test on the two (rotated) rectangles, 5 cm margin. */
-function _footprintsOverlap(a: ResolvedSegment, b: ResolvedSegment): boolean {
+function _footprintsOverlap(a: ResolvedSegment, b: ResolvedSegment, margin = 0.05): boolean {
   const ca = _cornersWorld(a)
   const cb = _cornersWorld(b)
   for (const poly of [ca, cb]) {
@@ -867,10 +872,44 @@ function _footprintsOverlap(a: ResolvedSegment, b: ResolvedSegment): boolean {
       const pa = proj(ca)
       const pb = proj(cb)
       const L = Math.hypot(ax[0], ax[1]) || 1
-      if (Math.max(...pa) + 0.05 * L < Math.min(...pb) || Math.max(...pb) + 0.05 * L < Math.min(...pa)) return false
+      if (Math.max(...pa) + margin * L < Math.min(...pb) || Math.max(...pb) + margin * L < Math.min(...pa)) return false
     }
   }
   return true
+}
+
+/**
+ * For each of r's gable ends: the part of its overhang (past the gable wall
+ * line) standing over neighbour o's footprint, as a volume in r's frame —
+ * any height, so the rake, its soffit and its fascia go wherever o is.
+ */
+function _rakesOver(o: ResolvedSegment, r: ResolvedSegment): ClipVolume[] {
+  const f = r.shape.frame
+  if (f.overhang < 1e-3) return []
+  const po = o.placement
+  const pr = r.placement
+  // o's wall-line footprint: its vertical half-spaces only.
+  const prism = shellVolumeLocal(o.shape, false)
+    .filter((h) => Math.abs(h.n[1]) < 1e-9 && Math.hypot(h.n[0], h.n[2]) > 0.5)
+    .map((h) => {
+      const [wx, wz] = toWorld(po, h.p[0], h.p[2])
+      const [lx, lz] = toLocal(pr, wx, wz)
+      const nwx = po.cos * h.n[0] + po.sin * h.n[2]
+      const nwz = -po.sin * h.n[0] + po.cos * h.n[2]
+      return { n: [pr.cos * nwx - pr.sin * nwz, 0, pr.sin * nwx + pr.cos * nwz] as [number, number, number], p: [lx, 0, lz] as [number, number, number], eps: 0 }
+    })
+  const out: ClipVolume[] = []
+  const poly = r.shape.polygon
+  for (const e of [f.eEndLo, f.eEndHi]) {
+    if (r.shape.styles[e] !== 'gable') continue
+    const a = poly[e]!
+    const b = poly[(e + 1) % 4]!
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    const m: [number, number] = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L] // inward
+    // Past the gable wall line (strictly), and inside o's footprint.
+    out.push([{ n: [-m[0], 0, -m[1]], p: [a[0], 0, a[1]], eps: -0.005 }, ...prism])
+  }
+  return out
 }
 
 /** Neighbour `o`'s volume, re-expressed in `r`'s local frame. */
