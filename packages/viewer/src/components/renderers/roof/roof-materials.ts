@@ -17,6 +17,8 @@ export const roofMaterials: THREE.Material[] = [
     side: THREE.DoubleSide,
     depthWrite: false,
   }),
+  // 5: Behind dormer glass — a dark interior.
+  new THREE.MeshStandardMaterial({ color: '#23272e', roughness: 1, side: THREE.DoubleSide }),
 ]
 
 // Debug materials — vivid, distinct colours to identify each surface group.
@@ -26,4 +28,5 @@ export const roofDebugMaterials: THREE.Material[] = [
   new THREE.MeshStandardMaterial({ color: '#dddddd', roughness: 0.9, side: THREE.DoubleSide }), // 2: Interior
   new THREE.MeshStandardMaterial({ color: '#4ade80', roughness: 0.9, side: THREE.FrontSide }), // 3: Shingle
   new THREE.MeshStandardMaterial({ color: '#60a5fa', roughness: 0.1, side: THREE.DoubleSide }), // 4: Glass
+  new THREE.MeshStandardMaterial({ color: '#23272e', roughness: 1, side: THREE.DoubleSide }), // 5: Behind glass
 ]

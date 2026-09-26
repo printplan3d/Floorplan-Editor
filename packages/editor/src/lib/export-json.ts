@@ -37,13 +37,30 @@ const flipBulge = (b: number) => -b;
 /** World (X, Y up, Z) roof mesh -> plan frame [flipX(X, Z)..., height]. The
  *  map (X, Y, Z) -> (-X, Z, Y) is a proper rotation, so face winding (and
  *  outward facing) survives. */
-const toPlanMesh = (m: { vertices: number[]; faces: number[]; glass: number[] }) => {
+const toPlanVerts = (vertices: number[]) => {
   const v: number[] = [];
-  for (let i = 0; i < m.vertices.length; i += 3) {
-    v.push(-m.vertices[i]!, m.vertices[i + 2]!, m.vertices[i + 1]!);
+  for (let i = 0; i < vertices.length; i += 3) {
+    v.push(-vertices[i]!, vertices[i + 2]!, vertices[i + 1]!);
   }
-  return { vertices: v, faces: m.faces, ...(m.glass.length ? { glass: m.glass } : {}) };
+  return v;
 };
+const toPlanMesh = (m: {
+  vertices: number[];
+  faces: number[];
+  glass: number[];
+  backing?: number[];
+  wallMesh?: { vertices: number[]; faces: number[] };
+}) => ({
+  vertices: toPlanVerts(m.vertices),
+  faces: m.faces,
+  ...(m.glass.length ? { glass: m.glass } : {}),
+  // Dark panels behind dormer glass, and the roof without dormers (what
+  // walls are trimmed against) — see roofMeshesForExport.
+  ...(m.backing?.length ? { backing: m.backing } : {}),
+  ...(m.wallMesh
+    ? { wall_mesh: { vertices: toPlanVerts(m.wallMesh.vertices), faces: m.wallMesh.faces } }
+    : {}),
+});
 
 export function exportFloorPlanJSON(): object {
   const { nodes } = useScene.getState();

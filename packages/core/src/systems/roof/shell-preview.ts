@@ -58,6 +58,7 @@ const dummyMats: THREE.Material[] = [
   new THREE.MeshBasicMaterial(),
   new THREE.MeshBasicMaterial(),
   new THREE.MeshBasicMaterial(),
+  new THREE.MeshBasicMaterial(),
 ]
 
 const _csg = new Evaluator()
@@ -90,6 +91,10 @@ const SLOT_FASCIA = 3
 /** Dormer window glass. The render pipeline puts these faces in a glass
  *  object (roof/mesh.py); the preview gives them a glass material. */
 export const SLOT_GLASS = 4
+/** The dark panel behind dormer glass. Its own slot so the render pipeline
+ *  can give it a dark finish (it sorts faces by direction otherwise, and a
+ *  vertical panel came out as white wall behind the glass). */
+export const SLOT_BACKING = 5
 
 // ─── Public types ─────────────────────────────────────────────────
 
@@ -1526,8 +1531,8 @@ function _unionDormers(base: THREE.BufferGeometry, shape: ShellShape): THREE.Buf
       acc = next
       glass.push({ verts: w.glass, slot: SLOT_GLASS })
       // Both windings: seen from outside whatever the material's side.
-      glass.push({ verts: w.backing, slot: SLOT_FASCIA })
-      glass.push({ verts: [...w.backing].reverse(), slot: SLOT_FASCIA })
+      glass.push({ verts: w.backing, slot: SLOT_BACKING })
+      glass.push({ verts: [...w.backing].reverse(), slot: SLOT_BACKING })
     } catch (e) {
       console.warn('shell-preview: dormer window cut failed', e)
     }
@@ -2004,7 +2009,7 @@ function _facesToGeometry(faces: { verts: V3[]; slot: number }[]): THREE.BufferG
 
 // roofMaterials has four entries; a group past that makes material[idx]
 // undefined and both stock and BVH raycast throw. Clamp every slot.
-const MAX_SLOT = 4
+const MAX_SLOT = 5
 
 /**
  * Ensure a geometry's groups tile its ENTIRE index buffer with in-range
