@@ -163,6 +163,45 @@ export type ShellBuildOptions = {
    *  that falls inside one is cut away, so meeting roofs read as ONE roof:
    *  no slope, gable, infill or board inside another roof. */
   clipVolumes?: ClipVolume[]
+  /** Footprint edges shared with a neighbouring roof (see RoofSeam). */
+  seams?: RoofSeam[]
+}
+
+/**
+ * A seam: a footprint edge this roof shares with a neighbouring roof whose
+ * ridge also runs into it, at the same height (two wings meeting at an
+ * angle, drawn as two sections). The two roofs fuse there: each runs on
+ * past the drawn edge and stops dead where its slope meets the
+ * neighbour's, a valley on one side of the ridge and a hip on the other.
+ * No overhang, fascia or closing wall there. Local frame.
+ */
+export type RoofSeam = {
+  /** The drawn (shared) edge, a -> b, outward normal n toward the
+   *  neighbour: replaces the footprint cut along it, and bounds the
+   *  roof's volume for other neighbours. */
+  a: V2
+  b: V2
+  n: V2
+  /** One per side of this roof's ridge (see RoofSeamHalf). */
+  halves: RoofSeamHalf[]
+}
+
+/**
+ * One side of a seam: the roof is removed where it is past the meeting
+ * line (n·(q - p) > 0) AND on this side of its own ridge (s·(q - r) > 0).
+ */
+export type RoofSeamHalf = {
+  p: V2
+  n: V2
+  r: V2
+  s: V2
+  /** The meeting line's run under the roof, for step walls. */
+  from: V2
+  to: V2
+  /** The neighbour's roof height (this roof's local Y) along from -> to at
+   *  parameter t. Where this roof stands higher, a step wall closes the
+   *  gap down to it. */
+  profile?: { t: number; y: number }[]
 }
 
 /** A convex volume as half-spaces: inside where n·(q - p) + eps >= 0 for all. */
@@ -249,6 +288,10 @@ export type ShellShape = {
    *  normal). The roof is built on the footprint's rectangle and cut back
    *  to these. Empty when the footprint IS its rectangle. */
   footprintCuts: { a: V2; b: V2; n: V2 }[]
+  /** The drawn footprint, ridge frame, CCW (x, z). */
+  footprint: V2[]
+  /** Edges shared with a neighbouring roof (see RoofSeam). */
+  seams: RoofSeam[]
   /** Sides whose eave has no overhang (see ShellBuildOptions.sideLoFlush). */
   flushLo: boolean
   flushHi: boolean
@@ -301,7 +344,21 @@ export function resolveShellShape(
   let zMax = Math.max(...zs)
   if (!(xMax > xMin && zMax > zMin)) return null
 
-  const footprintCuts = _footprintCuts(raw, xMin, xMax, zMin, zMax)
+  const seams = (opts.seams ?? []).filter(
+    (m) => Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1]) > 1e-3 && m.halves.length > 0,
+  )
+  // A seam replaces the footprint cut along the same line: no overhang,
+  // fascia or closing wall there.
+  const footprintCuts = _footprintCuts(raw, xMin, xMax, zMin, zMax).filter(
+    (c) =>
+      !seams.some((m) => {
+        const par = Math.abs(c.n[0] * m.n[1] - c.n[1] * m.n[0]) < 0.14 && c.n[0] * m.n[0] + c.n[1] * m.n[1] > 0
+        const mid: V2 = [(c.a[0] + c.b[0]) / 2, (c.a[1] + c.b[1]) / 2]
+        const d = Math.abs(m.n[0] * (mid[0] - m.a[0]) + m.n[1] * (mid[1] - m.a[1]))
+        return par && d < 0.4
+      }),
+  )
+  const footprint = _ccw(raw)
   const baseStyles = _resolveEdgeStyles(node, raw)
   // Fix the ridge orientation from the UNtruncated footprint — truncating a
   // hip along its ridge must not be able to flip it.
@@ -378,6 +435,8 @@ export function resolveShellShape(
     clipVolumes: opts.clipVolumes ?? [],
     dormers: [],
     footprintCuts,
+    footprint,
+    seams,
   }
   shape.dormers = _resolveDormers(node)
     .map((d) => _resolveDormer(d, shape, opts.dormerOverrides?.[d.id]))
@@ -416,7 +475,7 @@ export function generateShellSegmentGeometry(
       geom = ensureGroupCoverage(merged)
     }
   }
-  if (shape.footprintCuts.length > 0) {
+  if (shape.footprintCuts.length > 0 || shape.seams.length > 0) {
     // A 4-point footprint that isn't a rectangle (operator 2026-09-26: "some
     // four-point roofs are still shown as a rectangle"): cut the rectangle
     // roof back to each slanted edge (plus the overhang), then close it — a
@@ -425,12 +484,28 @@ export function generateShellSegmentGeometry(
     const vols: ClipVolume[] = shape.footprintCuts.map((c) => [
       { n: [c.n[0], 0, c.n[1]], p: [c.a[0] + c.n[0] * oh, 0, c.a[1] + c.n[1] * oh], eps: 0 },
     ])
+    // Seams: cut dead where the neighbour takes over (it carries on from there).
+    const seamVols = _seamVolumes(shape)
+    vols.push(...seamVols)
     const cut = _subtractVolumes(geom, vols)
     geom.dispose()
-    const closing = _footprintClosing(shape)
-    geom = closing.length
-      ? ensureGroupCoverage(_appendGeometry(ensureGroupCoverage(cut), _facesToGeometry(closing)))
+    // Closing walls / fascias of the other cut edges stop at the seam too.
+    let closingGeom = _facesToGeometry(_footprintClosing(shape))
+    if (seamVols.length && closingGeom.getAttribute('position').count > 0) {
+      const c = _subtractVolumes(closingGeom, seamVols)
+      closingGeom.dispose()
+      closingGeom = c
+    }
+    const steps = _seamSteps(shape)
+    if (steps.length) {
+      const both = _appendGeometry(ensureGroupCoverage(closingGeom), _facesToGeometry(steps))
+      closingGeom.dispose()
+      closingGeom = both
+    }
+    geom = (closingGeom.getAttribute('position')?.count ?? 0) > 0
+      ? ensureGroupCoverage(_appendGeometry(ensureGroupCoverage(cut), ensureGroupCoverage(closingGeom)))
       : ensureGroupCoverage(cut)
+    closingGeom.dispose()
     cut.dispose()
   }
   if (shape.clipVolumes.length > 0) {
@@ -561,6 +636,10 @@ export function shellVolumeLocal(shape: ShellShape, withOverhang = false): ClipV
   for (const c of shape.footprintCuts) {
     vol.push({ n: [-c.n[0], 0, -c.n[1]], p: [c.a[0] + c.n[0] * oh, 0, c.a[1] + c.n[1] * oh], eps: 0.01 })
   }
+  // A seam never overhangs: the neighbour's own roof starts right there.
+  for (const m of shape.seams) {
+    vol.push({ n: [-m.n[0], 0, -m.n[1]], p: [m.a[0], 0, m.a[1]], eps: 0.01 })
+  }
   vol.push({ n: [0, 1, 0], p: [0, shape.infillFloor, 0], eps: 0.01 })
   return vol
 }
@@ -591,9 +670,14 @@ export function shellHeightAtLocal(shape: ShellShape, x: number, z: number): num
     )
     if (shape.styles[f.eEndLo] === 'hip') h = Math.min(h, f.meanEave + f.tanOf[f.eEndLo]! * (u - f.uMin))
     if (shape.styles[f.eEndHi] === 'hip') h = Math.min(h, f.meanEave + f.tanOf[f.eEndHi]! * (f.uMax - u))
-    const outside = shape.footprintCuts.some(
-      (c) => c.n[0] * (x - c.a[0]) + c.n[1] * (z - c.a[1]) > COVER_BUFFER,
-    )
+    const outside =
+      shape.footprintCuts.some((c) => c.n[0] * (x - c.a[0]) + c.n[1] * (z - c.a[1]) > COVER_BUFFER) ||
+      shape.seams.some((m) =>
+        m.halves.some(
+          (h) =>
+            h.n[0] * (x - h.p[0]) + h.n[1] * (z - h.p[1]) > 0.02 && h.s[0] * (x - h.r[0]) + h.s[1] * (z - h.r[1]) > 0,
+        ),
+      )
     if (!outside) best = h
   }
   for (const d of shape.dormers) {
@@ -646,6 +730,88 @@ function _footprintCuts(raw: V2[], xMin: number, xMax: number, zMin: number, zMa
     out.push({ a, b, n })
   }
   return out
+}
+
+/** The polygon wound counter-clockwise in (x, z). */
+function _ccw(poly: V2[]): V2[] {
+  let area = 0
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i]!
+    const q = poly[(i + 1) % poly.length]!
+    area += p[0] * q[1] - q[0] * p[1]
+  }
+  return area > 0 ? [...poly] : [...poly].reverse()
+}
+
+/**
+ * Step walls on the seams: where this roof stands higher than the
+ * neighbour at the seam line (ridges or eaves at different heights), a wall
+ * on the line from the neighbour's roof up to this one. Nothing where the
+ * two meet flush.
+ */
+function _seamSteps(shape: ShellShape): { verts: V3[]; slot: number }[] {
+  const faces: { verts: V3[]; slot: number }[] = []
+  const y0 = shape.infillFloor
+  for (const m of shape.seams) {
+    for (const h of m.halves) {
+      // Walk so that the wall faces the neighbour (outward = h.n).
+      let [p, q] = [h.from, h.to]
+      let prof = h.profile ?? []
+      if ((q[1] - p[1]) * h.n[0] - (q[0] - p[0]) * h.n[1] < 0) {
+        ;[p, q] = [q, p]
+        prof = prof.map((e) => ({ t: 1 - e.t, y: e.y })).reverse()
+      }
+      const L = Math.hypot(q[0] - p[0], q[1] - p[1])
+      if (L < 1e-3) continue
+      const ts = new Set<number>([0, 1])
+      const steps = Math.max(1, Math.ceil(L / 0.1))
+      for (let k = 1; k < steps; k++) ts.add(k / steps)
+      for (const e of prof) if (e.t > 0 && e.t < 1) ts.add(e.t)
+      const t = [...ts].sort((i, j) => i - j)
+      const nbrY = (tt: number): number => {
+        if (!prof.length) return y0
+        if (tt <= prof[0]!.t) return prof[0]!.y
+        for (let k = 0; k < prof.length - 1; k++) {
+          const e = prof[k]!
+          const g = prof[k + 1]!
+          if (tt <= g.t) return e.y + ((g.y - e.y) * (tt - e.t)) / Math.max(1e-9, g.t - e.t)
+        }
+        return prof[prof.length - 1]!.y
+      }
+      const at = (tt: number): [number, number] => [p[0] + (q[0] - p[0]) * tt, p[1] + (q[1] - p[1]) * tt]
+      for (let k = 0; k < t.length - 1; k++) {
+        const [x0, z0] = at(t[k]!)
+        const [x1, z1] = at(t[k + 1]!)
+        const top0 = Math.max(y0, _slopeY(shape, x0, z0))
+        const top1 = Math.max(y0, _slopeY(shape, x1, z1))
+        const bot0 = Math.min(top0, Math.max(y0, nbrY(t[k]!)))
+        const bot1 = Math.min(top1, Math.max(y0, nbrY(t[k + 1]!)))
+        if (top0 - bot0 < 0.01 && top1 - bot1 < 0.01) continue
+        faces.push({
+          verts: [
+            [x0, bot0, z0],
+            [x1, bot1, z1],
+            [x1, top1, z1],
+            [x0, top0, z0],
+          ],
+          slot: SLOT_WALL_EXTERIOR,
+        })
+      }
+    }
+  }
+  return faces
+}
+
+/** Where the seams remove this roof: one convex volume per seam half. */
+function _seamVolumes(shape: ShellShape): ClipVolume[] {
+  return shape.seams.flatMap((m) =>
+    m.halves.map(
+      (h): ClipVolume => [
+        { n: [h.n[0], 0, h.n[1]], p: [h.p[0], 0, h.p[1]], eps: 0 },
+        { n: [h.s[0], 0, h.s[1]], p: [h.r[0], 0, h.r[1]], eps: 0 },
+      ],
+    ),
+  )
 }
 
 /** The main slope surface (no dormers), local Y, at any local point. */

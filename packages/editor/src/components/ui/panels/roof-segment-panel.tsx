@@ -7,6 +7,8 @@ import {
   RoofSegmentNode as RoofSegmentNodeSchema,
   type RoofType,
   resolveRoofContext,
+  roofHeightForRidge,
+  touchingSegments,
   useScene,
   windowsUnderSegment,
 } from '@ritn3d/core'
@@ -15,6 +17,7 @@ import { Copy, Move, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo } from 'react'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import useEditor from '../../../store/use-editor'
+import { useDormerPick } from '../../../store/use-dormer-pick'
 import { ActionButton, ActionGroup } from '../controls/action-button'
 import { MetricControl } from '../controls/metric-control'
 import { PanelSection } from '../controls/panel-section'
@@ -301,6 +304,48 @@ export function RoofSegmentPanel() {
     [nodes],
   )
   const joined = node ? roofCtx.segments.get(node.id) : undefined
+  // Touching sections and their ridge heights, for Match height.
+  const touching = useMemo(() => {
+    if (!node) return []
+    const all = nodes as Record<string, any>
+    const mine = joined ? joined.placement.baseY + joined.shape.frame.ridgeZ : null
+    return touchingSegments(roofCtx, node.id).map((t) => {
+      const seg = all[t.id]
+      const roof = seg?.parentId ? all[seg.parentId] : undefined
+      return {
+        ...t,
+        name: (seg?.name as string | undefined) ?? (roof?.name as string | undefined) ?? 'Roof section',
+        same: mine != null && Math.abs(mine - t.ridgeY) < 0.02,
+      }
+    })
+  }, [nodes, roofCtx, node, joined])
+  // Windows a new dormer could sit on (not ones already followed).
+  const pickableWindows = useMemo(() => {
+    if (!node) return []
+    const taken = new Set(
+      (((node as any).dormers as { windowId?: string }[] | undefined) ?? []).map((d) => d.windowId),
+    )
+    return windowsUnderSegment(nodes as Record<string, AnyNode>, roofCtx, node.id).filter(
+      (w) => !taken.has(w.id),
+    )
+  }, [nodes, roofCtx, node])
+  const startWindowPick = useCallback(() => {
+    if (!node) return
+    const all = nodes as Record<string, any>
+    const roof = node.parentId ? all[node.parentId] : undefined
+    const roofLevelId: string | null = roof?.parentId ?? null
+    useDormerPick.getState().start(node.id, roofLevelId)
+    // The windows are usually on the floor above the roof's level: go to
+    // it when they're all on one floor, so they can be clicked in the plan.
+    const levelOf = (wid: string) => {
+      const w = all[wid]
+      const wall = w ? all[w.wallId ?? w.parentId] : undefined
+      return (wall?.parentId as string | undefined) ?? null
+    }
+    const lv = new Set(pickableWindows.map((w) => levelOf(w.id)))
+    const only = lv.size === 1 ? [...lv][0] : null
+    setSelection((only ? { levelId: only, selectedIds: [] } : { selectedIds: [] }) as any)
+  }, [node, nodes, pickableWindows, setSelection])
   const followableWindows = useMemo(
     () =>
       node
@@ -768,6 +813,31 @@ export function RoofSegmentPanel() {
         )
       })()}
 
+      {touching.length > 0 ? (
+        <PanelSection title="Match height">
+          <div className="px-1 pt-1 pb-1 text-[10px] leading-tight text-neutral-500">
+            Each section keeps its own height. Sections at the same ridge
+            height fuse into one roof. Match puts this ridge exactly on a
+            touching section's.
+          </div>
+          <div className="flex flex-col gap-1 px-1 pb-1">
+            {touching.map((t) => (
+              <ActionButton
+                disabled={t.same}
+                key={t.id}
+                label={`${t.same ? '✓ Level with' : 'Match'} ${t.name} (ridge ${t.ridgeY.toFixed(2)} m)`}
+                onClick={() => {
+                  const h = roofHeightForRidge(roofCtx, node!.id, t.ridgeY)
+                  if (h == null || !(h > 0.05)) return
+                  // Own height, no Pitch/Level override left to fight it.
+                  handleUpdate({ roofHeight: h, ridgeMatch: undefined } as any)
+                }}
+              />
+            ))}
+          </div>
+        </PanelSection>
+      ) : null}
+
       {joined?.joinedTo ? (
         <PanelSection title="Joins another roof">
           <div className="px-1 pt-1 pb-1 text-[10px] leading-tight text-neutral-500">
@@ -999,9 +1069,20 @@ export function RoofSegmentPanel() {
                 </div>
               )
             })}
+            {/* Two ways in: pick the window it sits on (the usual case: a
+                window reaching into the roof), or place one by hand. */}
             <div className="flex gap-1.5 px-1 pt-2 pb-1">
-              <ActionButton label="+ Add Dormer" onClick={addDormer} />
+              {pickableWindows.length > 0 ? (
+                <ActionButton label="+ Dormer on a window" onClick={startWindowPick} />
+              ) : null}
+              <ActionButton label="+ Dormer by hand" onClick={addDormer} />
             </div>
+            {pickableWindows.length === 0 ? (
+              <div className="px-1 pb-1 text-[10px] leading-tight text-neutral-500">
+                No window reaches up into this roof, so there's none to
+                put a dormer on. Place one by hand.
+              </div>
+            ) : null}
           </PanelSection>
         )
       })()}

@@ -71,7 +71,13 @@ export { ItemSystem } from './systems/item/item-system'
 export { getRoofContext, RoofSystem } from './systems/roof/roof-system'
 export { openingCoveredByRoof, RoofWallClipSystem } from './systems/roof/roof-wall-clip-system'
 export { type RoofExportMesh, roofMeshesForExport } from './systems/roof/roof-export'
-export { resolveRoofContext, type RidgeMatch, windowsUnderSegment } from './systems/roof/roof-scene'
+export {
+  resolveRoofContext,
+  type RidgeMatch,
+  roofHeightForRidge,
+  touchingSegments,
+  windowsUnderSegment,
+} from './systems/roof/roof-scene'
 export { SlabSystem } from './systems/slab/slab-system'
 export {
   DEFAULT_WALL_HEIGHT,

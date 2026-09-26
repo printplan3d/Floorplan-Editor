@@ -19,6 +19,7 @@ import {
 import { initSFXBus } from '../../lib/sfx-bus'
 import useEditor from '../../store/use-editor'
 import { CeilingSystem } from '../systems/ceiling/ceiling-system'
+import { DormerWindowPicker } from '../systems/roof/dormer-window-picker'
 import { RoofEditSystem } from '../systems/roof/roof-edit-system'
 import { AutoRoomDetector } from '../systems/zone/auto-room-detector'
 import { ZoneLabelEditorSystem } from '../systems/zone/zone-label-editor-system'
@@ -577,6 +578,7 @@ export default function Editor({
           )}
           {!(isPreviewMode || isLoading) && needs3D && <ZoneLabelEditorSystem />}
           {!(isPreviewMode || isLoading) && <AutoRoomDetector />}
+          <DormerWindowPicker />
         </ErrorBoundary>
       </div>
     </PresetsProvider>

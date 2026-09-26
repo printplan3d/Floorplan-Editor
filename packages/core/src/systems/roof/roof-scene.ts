@@ -30,6 +30,8 @@ import {
   type DormerOverride,
   type RealWallSpan,
   type ClipVolume,
+  type RoofSeam,
+  type RoofSeamHalf,
   shellVolumeLocal,
   ridgeAngleRad,
   resolveShellShape,
@@ -55,9 +57,17 @@ const WALL_ON_EDGE = 0.5
 /** Continuation seams stay open only if both roofs' eaves agree this well;
  *  otherwise each side gets a closed step wall. */
 const SEAM_PROFILE_TOL = 0.2
-/** Auto ridge matching snaps ridges that are this close; further apart
- *  they keep their own heights. */
-const LEVEL_SNAP_M = 0.15
+/** Sections keep their own heights (operator 2026-09-26: "all sections
+ *  should be independent"). Only ridges already this close count as the
+ *  same height: they are levelled exactly and fuse. The panel's Match
+ *  height button puts a section's ridge exactly on a neighbour's. */
+const LEVEL_SNAP_M = 0.02
+/** Two footprint edges this close (and this near parallel) are one seam. */
+const SEAM_GAP_M = 0.3
+const SEAM_PARALLEL_COS = Math.cos((8 * Math.PI) / 180)
+/** A ridge must cross a seam at least this steeply for it to be that
+ *  roof's end (not an eave running alongside it). */
+const SEAM_RIDGE_SIN = Math.sin((20 * Math.PI) / 180)
 
 export type RidgeMatch = 'level' | 'pitch' | 'independent'
 
@@ -237,6 +247,24 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     if (s) r.shape = s
   }
 
+  // Pass 1a: seams. Two roofs drawn as sections that meet along a shared
+  // edge, each ridge running into it (wings meeting at an angle, with no
+  // overlap): both run on to the edge and stop dead there, so they fuse
+  // into one roof with a valley and a hip on the seam (operator 2026-09-26).
+  const seamNbrs = new Map<ResolvedSegment, ResolvedSegment[]>()
+  const seamed = new Set<string>()
+  for (let bi = 1; bi < ordered.length; bi++) {
+    const B = ordered[bi]!
+    for (let ai = 0; ai < bi; ai++) {
+      const A = ordered[ai]!
+      if (A.placement.levelId !== B.placement.levelId) continue
+      if (!_seamPair(A, B, rebuild)) continue
+      seamed.add(`${A.placement.seg.id}|${B.placement.seg.id}`)
+      seamNbrs.set(A, [...(seamNbrs.get(A) ?? []), B])
+      seamNbrs.set(B, [...(seamNbrs.get(B) ?? []), A])
+    }
+  }
+
   // Pass 1: junctions. Each later (secondary) segment joins at most one
   // earlier (primary) one per end.
   for (let bi = 1; bi < ordered.length; bi++) {
@@ -244,7 +272,14 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     for (let ai = 0; ai < bi; ai++) {
       const A = ordered[ai]!
       if (A.placement.levelId !== B.placement.levelId) continue
+      if (seamed.has(`${A.placement.seg.id}|${B.placement.seg.id}`)) continue
+      const before = B.joinedTo
       _joinPair(A, B, rebuild)
+      // Order is highest ridge first, so a wing a few cm taller than the
+      // roof it runs into came first and never joined — Level then did
+      // nothing (operator 2026-09-26: "I cannot make them even"). If the
+      // earlier one is the one asking to match, join it the other way.
+      if (B.joinedTo === before && _wantsMatch(A, B)) _joinPair(B, A, rebuild)
     }
   }
 
@@ -274,12 +309,25 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     }
   }
 
+  // Seam step walls: each seam learns the neighbour's roof height along it
+  // (shapes are final now), so a wall closes only where this roof is higher.
+  for (const [r, nbrs] of seamNbrs) {
+    const seams = r.opts.seams ?? []
+    const next = seams.map((m, i) => {
+      const o = nbrs[i]
+      return o ? _seamProfiles(r, o, m) : m
+    })
+    r.opts = { ...r.opts, seams: next }
+    rebuild(r)
+  }
+
   // Pass 4: meeting roofs read as ONE roof. Each segment drops whatever of
   // it lies inside a neighbour on the same level (shapes are final now).
   for (const r of segs.values()) {
     const vols: ClipVolume[] = []
     for (const o of segs.values()) {
       if (o === r || o.placement.levelId !== r.placement.levelId) continue
+      if (seamNbrs.get(r)?.includes(o)) continue
       if (!_footprintsOverlap(r, o)) continue
       vols.push(_volumeInto(o, r))
     }
@@ -337,11 +385,10 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
   const walkDir: V2 = buriedIsLo ? [-rb.dir[0], -rb.dir[1]] : rb.dir
 
   // Ridge matching.
-  // Auto: LEVEL only snaps ridges that are already (nearly) level — a
-  // drawing slip, like the operator's 0.134 m step. Anything further apart
-  // is the operator's choice of heights: forcing it made changing one
-  // roof's height drag its neighbours (operator 2026-09-26). 'level' in
-  // the panel still forces it.
+  // Auto: LEVEL only for ridges already at the same height (within
+  // LEVEL_SNAP_M). Anything else is the operator's choice of heights:
+  // forcing it made changing one roof's height drag its neighbours
+  // (operator 2026-09-26). 'level' in the panel still forces it.
   const nearlyLevel =
     Math.abs(ridgeWorld(pb, B.shape).y - ra.y) <= LEVEL_SNAP_M &&
     spanOf(B.shape) >= LEVEL_MATCH_MIN_SPAN_RATIO * spanOf(A.shape)
@@ -349,7 +396,8 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
     ((B.placement.seg as { ridgeMatch?: RidgeMatch }).ridgeMatch as RidgeMatch | undefined) ??
     (nearlyLevel ? 'level' : 'independent')
   if (mode === 'level') {
-    B.opts = { ...B.opts, ridgeRiseOverride: ra.y - pb.baseY }
+    // Rise is measured from the segment's wall top (baseZ), not its base.
+    B.opts = { ...B.opts, ridgeRiseOverride: ra.y - pb.baseY - B.shape.baseZ }
   } else if (mode === 'pitch') {
     const f = A.shape.frame
     B.opts = { ...B.opts, uniformTanOverride: (f.tanOf[f.eSideLo]! + f.tanOf[f.eSideHi]!) / 2 }
@@ -417,6 +465,300 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
       B.opts = buriedIsLo ? { ...B.opts, endLo: 'abut' } : { ...B.opts, endHi: 'abut' }
       rebuild(B)
     }
+  }
+}
+
+/**
+ * If A and B share a footprint edge that both ridges run into, and their
+ * ridges are at the same height (or the panel asks for Level / Pitch),
+ * fuse them there. On each side of the ridges the two slope planes meet
+ * along a line (a hip on the outside of the bend, a valley on the inside);
+ * each roof runs on to that line and stops, so the surface is continuous
+ * even where the drawn edge isn't exactly where the slopes meet.
+ * Returns whether a seam was made.
+ */
+function _seamPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: ResolvedSegment) => void): boolean {
+  // The one with a Level / Pitch choice in its panel follows the other.
+  if (!_ridgeMatchOf(B) && _ridgeMatchOf(A)) return _seamPair(B, A, rebuild)
+  const ra = ridgeWorld(A.placement, A.shape)
+  const rb = ridgeWorld(B.placement, B.shape)
+  if (Math.abs(ra.dir[0] * rb.dir[1] - ra.dir[1] * rb.dir[0]) < PARALLEL_SIN) return false
+
+  const unit = (p: V2, q: V2): V2 => {
+    const L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1
+    return [(q[0] - p[0]) / L, (q[1] - p[1]) / L]
+  }
+  const edges = (r: ResolvedSegment) => {
+    const w = r.shape.footprint.map(([x, z]) => toWorld(r.placement, x, z))
+    return w.map((p, i) => [p, w[(i + 1) % w.length]!] as [V2, V2])
+  }
+  // Does the ridge line cross edge p-q steeply, within the edge?
+  const ridgeCrosses = (rd: { a: V2; dir: V2 }, p: V2, q: V2) => {
+    const d = unit(p, q)
+    const den = rd.dir[0] * d[1] - rd.dir[1] * d[0]
+    if (Math.abs(den) < SEAM_RIDGE_SIN) return false
+    const L = Math.hypot(q[0] - p[0], q[1] - p[1])
+    // p + d*s = rd.a + rd.dir*t  ->  s
+    const s = ((rd.a[0] - p[0]) * rd.dir[1] - (rd.a[1] - p[1]) * rd.dir[0]) / -den
+    return s >= -0.05 * L && s <= 1.05 * L
+  }
+
+  let best: { ea: [V2, V2]; eb: [V2, V2]; overlap: number } | null = null
+  for (const ea of edges(A)) {
+    const dA = unit(ea[0], ea[1])
+    const LA = Math.hypot(ea[1][0] - ea[0][0], ea[1][1] - ea[0][1])
+    for (const eb of edges(B)) {
+      const dB = unit(eb[0], eb[1])
+      if (dA[0] * dB[0] + dA[1] * dB[1] > -SEAM_PARALLEL_COS) continue // both CCW: opposite
+      const off = (q: V2) => (q[0] - ea[0][0]) * dA[1] - (q[1] - ea[0][1]) * dA[0]
+      if (Math.abs(off(eb[0])) > SEAM_GAP_M || Math.abs(off(eb[1])) > SEAM_GAP_M) continue
+      const along = (q: V2) => (q[0] - ea[0][0]) * dA[0] + (q[1] - ea[0][1]) * dA[1]
+      const s0 = Math.max(0, Math.min(along(eb[0]), along(eb[1])))
+      const s1 = Math.min(LA, Math.max(along(eb[0]), along(eb[1])))
+      const LB = Math.hypot(eb[1][0] - eb[0][0], eb[1][1] - eb[0][1])
+      const overlap = s1 - s0
+      if (overlap < Math.max(1, 0.5 * Math.min(LA, LB))) continue
+      if (!ridgeCrosses(ra, ea[0], ea[1]) || !ridgeCrosses(rb, eb[0], eb[1])) continue
+      if (!best || overlap > best.overlap) best = { ea, eb, overlap }
+    }
+  }
+  if (!best) return false
+
+  // Same height only (or the panel's explicit choice): B follows A.
+  const nearlyLevel = Math.abs(rb.y - ra.y) <= LEVEL_SNAP_M
+  const mode: RidgeMatch =
+    ((B.placement.seg as { ridgeMatch?: RidgeMatch }).ridgeMatch as RidgeMatch | undefined) ??
+    (nearlyLevel ? 'level' : 'independent')
+  if (mode === 'independent') return false
+
+  // The drawn common line: through the middle of the two edges.
+  const dA = unit(best.ea[0], best.ea[1])
+  const dB = unit(best.eb[0], best.eb[1])
+  const d = unit([0, 0], [dA[0] - dB[0], dA[1] - dB[1]])
+  const mid: V2 = [
+    (best.ea[0][0] + best.ea[1][0] + best.eb[0][0] + best.eb[1][0]) / 4,
+    (best.ea[0][1] + best.ea[1][1] + best.eb[0][1] + best.eb[1][1]) / 4,
+  ]
+  const nA: V2 = [d[1], -d[0]] // outward from A (CCW)
+  const tOn = (q: V2) => (q[0] - mid[0]) * d[0] + (q[1] - mid[1]) * d[1]
+  const ptOn = (t: number): V2 => [mid[0] + d[0] * t, mid[1] + d[1] * t]
+  const ts = [best.ea[0], best.ea[1], best.eb[0], best.eb[1]].map(tOn)
+  const E: V2[] = [ptOn(Math.min(...ts)), ptOn(Math.max(...ts))]
+
+  // Open the end each ridge runs into, match the ridge.
+  const endOf = (r: ResolvedSegment, rd: { a: V2; dir: V2 }): 'Lo' | 'Hi' => {
+    const den = rd.dir[0] * d[1] - rd.dir[1] * d[0]
+    const t = ((mid[0] - rd.a[0]) * d[1] - (mid[1] - rd.a[1]) * d[0]) / den
+    const u = localU(r.placement, r.shape, rd.a[0] + rd.dir[0] * t, rd.a[1] + rd.dir[1] * t)
+    const f = r.shape.frame
+    return Math.abs(u - f.uMax) < Math.abs(u - f.uMin) ? 'Hi' : 'Lo'
+  }
+  const endA = endOf(A, ra)
+  const endB = endOf(B, rb)
+  A.opts = { ...A.opts, [`end${endA}`]: 'junction' }
+  B.opts = { ...B.opts, [`end${endB}`]: 'junction' }
+  if (mode === 'level') {
+    B.opts = { ...B.opts, ridgeRiseOverride: ra.y - B.placement.baseY - B.shape.baseZ }
+  } else if (mode === 'pitch') {
+    const f = A.shape.frame
+    B.opts = { ...B.opts, uniformTanOverride: (f.tanOf[f.eSideLo]! + f.tanOf[f.eSideHi]!) / 2 }
+  }
+  rebuild(A)
+  rebuild(B)
+  const RA = ridgeWorld(A.placement, A.shape)
+  const RB = ridgeWorld(B.placement, B.shape)
+
+  // Where the ridges cross.
+  const den = RA.dir[0] * RB.dir[1] - RA.dir[1] * RB.dir[0]
+  const tR = ((RB.a[0] - RA.a[0]) * RB.dir[1] - (RB.a[1] - RA.a[1]) * RB.dir[0]) / den
+  const R: V2 = [RA.a[0] + RA.dir[0] * tR, RA.a[1] + RA.dir[1] * tR]
+
+  // A roof's slope plane on one side of its ridge, as S(q) = S0 + g·(q - R).
+  const plane = (r: ResolvedSegment, lo: boolean) => {
+    const f = r.shape.frame
+    const S = (X: number, Z: number) => {
+      const [x, z] = toLocal(r.placement, X, Z)
+      const v = f.ridgeAlongX ? z : x
+      return lo
+        ? r.placement.baseY + f.eaveOf[f.eSideLo]! + f.tanOf[f.eSideLo]! * (v - f.vMin)
+        : r.placement.baseY + f.eaveOf[f.eSideHi]! + f.tanOf[f.eSideHi]! * (f.vMax - v)
+    }
+    const S0 = S(R[0], R[1])
+    return { S0, g: [S(R[0] + 1, R[1]) - S0, S(R[0], R[1] + 1) - S0] as V2 }
+  }
+  const vOf = (r: ResolvedSegment, q: V2) => {
+    const [x, z] = toLocal(r.placement, q[0], q[1])
+    return r.shape.frame.ridgeAlongX ? z : x
+  }
+  const farA: V2 = endA === 'Hi' ? RA.a : RA.b // A's other ridge end: deep in A
+  const seamLen = Math.hypot(E[1]![0] - E[0]![0], E[1]![1] - E[0]![1])
+
+  const halvesA: RoofSeamHalf[] = []
+  const halvesB: RoofSeamHalf[] = []
+  const reachA: V2[] = []
+  const reachB: V2[] = []
+  for (const e of E) {
+    const loA = vOf(A, e) < A.shape.frame.vMid
+    const loB = vOf(B, e) < B.shape.frame.vMid
+    const pa = plane(A, loA)
+    const pb = plane(B, loB)
+    // Meeting line: (gA - gB)·(q - R) = S0B - S0A.
+    const G: V2 = [pa.g[0] - pb.g[0], pa.g[1] - pb.g[1]]
+    const GG = G[0] * G[0] + G[1] * G[1]
+    let p0: V2 | null = null
+    let ng: V2 = [0, 0]
+    if (GG > 1e-9) {
+      const k = (pb.S0 - pa.S0) / GG
+      p0 = [R[0] + G[0] * k, R[1] + G[1] * k]
+      const L = Math.sqrt(GG)
+      ng = [G[0] / L, G[1] / L]
+      // Sensible only if it runs near the ridge crossing and the drawn end.
+      const dE = Math.abs(ng[0] * (e[0] - p0[0]) + ng[1] * (e[1] - p0[1]))
+      if (Math.hypot(p0[0] - R[0], p0[1] - R[1]) > 0.3 || dE > Math.max(1, 0.3 * seamLen)) p0 = null
+    }
+    if (!p0) {
+      // Fall back to the drawn edge (step walls close any mismatch).
+      p0 = mid
+      ng = nA
+    }
+    // Toward B: A's far ridge end must be on the negative side.
+    if (ng[0] * (farA[0] - p0[0]) + ng[1] * (farA[1] - p0[1]) > 0) ng = [-ng[0], -ng[1]]
+    const dl: V2 = [-ng[1], ng[0]]
+    const foot = (q: V2): V2 => {
+      const t = (q[0] - p0![0]) * dl[0] + (q[1] - p0![1]) * dl[1]
+      return [p0![0] + dl[0] * t, p0![1] + dl[1] * t]
+    }
+    const from = foot(R)
+    const to = foot(e)
+    // Side of each ridge this half is on.
+    const side = (rd: { dir: V2 }): V2 => {
+      const n: V2 = [-rd.dir[1], rd.dir[0]]
+      return n[0] * (e[0] - R[0]) + n[1] * (e[1] - R[1]) >= 0 ? n : [-n[0], -n[1]]
+    }
+    const sA = side(RA)
+    const sB = side(RB)
+    const local = (r: ResolvedSegment, q: V2) => toLocal(r.placement, q[0], q[1])
+    const rot = (r: ResolvedSegment, n: V2): V2 => [
+      r.placement.cos * n[0] - r.placement.sin * n[1],
+      r.placement.sin * n[0] + r.placement.cos * n[1],
+    ]
+    halvesA.push({ p: local(A, p0), n: rot(A, ng), r: local(A, R), s: rot(A, sA), from: local(A, from), to: local(A, to) })
+    halvesB.push({
+      p: local(B, p0),
+      n: rot(B, [-ng[0], -ng[1]]),
+      r: local(B, R),
+      s: rot(B, sB),
+      from: local(B, from),
+      to: local(B, to),
+    })
+    // How far each roof must reach along its ridge to meet this line: to
+    // where the line crosses its eave (plus overhang) on this side.
+    for (const [r, lo, reach] of [
+      [A, loA, reachA],
+      [B, loB, reachB],
+    ] as const) {
+      const f = r.shape.frame
+      const oh = f.overhang
+      const vEdge = lo ? f.vMin - oh : f.vMax + oh
+      const [px, pz] = local(r, p0)
+      const [dx, dz] = rot(r, dl)
+      const pv = f.ridgeAlongX ? pz : px
+      const dv = f.ridgeAlongX ? dz : dx
+      if (Math.abs(dv) < 1e-6) continue
+      const t = (vEdge - pv) / dv
+      reach.push([px + dx * t, pz + dz * t])
+    }
+  }
+
+  // Run each roof on far enough to meet the lines (its end there is open).
+  const extend = (r: ResolvedSegment, end: 'Lo' | 'Hi', pts: V2[]) => {
+    if (!pts.length) return
+    const f = r.shape.frame
+    const us = pts.map(([x, z]) => (f.ridgeAlongX ? x : z))
+    if (end === 'Hi') {
+      const u = Math.max(...us) + 0.05
+      if (u > f.uMax) r.opts = { ...r.opts, truncateHi: u }
+    } else {
+      const u = Math.min(...us) - 0.05
+      if (u < f.uMin) r.opts = { ...r.opts, truncateLo: u }
+    }
+  }
+  extend(A, endA, reachA)
+  extend(B, endB, reachB)
+
+  const seamFor = (r: ResolvedSegment, e: [V2, V2], n: V2, halves: RoofSeamHalf[]): RoofSeam => {
+    let p = ptOn(tOn(e[0]))
+    let q = ptOn(tOn(e[1]))
+    if ((q[1] - p[1]) * n[0] - (q[0] - p[0]) * n[1] < 0) [p, q] = [q, p]
+    const pl = r.placement
+    return {
+      a: toLocal(pl, p[0], p[1]),
+      b: toLocal(pl, q[0], q[1]),
+      n: [pl.cos * n[0] - pl.sin * n[1], pl.sin * n[0] + pl.cos * n[1]],
+      halves,
+    }
+  }
+  A.opts = { ...A.opts, seams: [...(A.opts.seams ?? []), seamFor(A, best.ea, nA, halvesA)] }
+  B.opts = { ...B.opts, seams: [...(B.opts.seams ?? []), seamFor(B, best.eb, [-nA[0], -nA[1]], halvesB)] }
+  rebuild(A)
+  rebuild(B)
+  B.joinedTo = A.placement.seg.id
+  B.ridgeMatchApplied = mode
+  return true
+}
+
+function _ridgeMatchOf(r: ResolvedSegment): RidgeMatch | undefined {
+  return (r.placement.seg as { ridgeMatch?: RidgeMatch }).ridgeMatch
+}
+
+/** Should P follow Q's ridge: P asks for Level / Pitch, or they are
+ *  already at the same height. */
+function _wantsMatch(P: ResolvedSegment, Q: ResolvedSegment): boolean {
+  const m = _ridgeMatchOf(P)
+  if (m === 'level' || m === 'pitch') return true
+  if (m === 'independent') return false
+  return Math.abs(ridgeWorld(P.placement, P.shape).y - ridgeWorld(Q.placement, Q.shape).y) <= LEVEL_SNAP_M
+}
+
+/**
+ * Roof sections touching this one on the same level, with their ridge
+ * heights (world, as built), for the panel's Match height buttons.
+ */
+export function touchingSegments(ctx: RoofContext, segId: string): { id: string; ridgeY: number }[] {
+  const r = ctx.segments.get(segId)
+  if (!r) return []
+  const out: { id: string; ridgeY: number }[] = []
+  for (const [id, o] of ctx.segments) {
+    if (o === r || o.placement.levelId !== r.placement.levelId) continue
+    if (!_footprintsOverlap(r, o)) continue
+    out.push({ id, ridgeY: ridgeWorld(o.placement, o.shape).y })
+  }
+  return out
+}
+
+/** The roofHeight that puts this section's ridge at world height y. */
+export function roofHeightForRidge(ctx: RoofContext, segId: string, y: number): number | null {
+  const r = ctx.segments.get(segId)
+  if (!r) return null
+  return y - r.placement.baseY - r.shape.baseZ
+}
+
+/** The neighbour's roof height along each half of seam m of r (r's local Y). */
+function _seamProfiles(r: ResolvedSegment, o: ResolvedSegment, m: RoofSeam): RoofSeam {
+  return {
+    ...m,
+    halves: m.halves.map((h) => {
+      const L = Math.hypot(h.to[0] - h.from[0], h.to[1] - h.from[1])
+      const steps = Math.max(1, Math.ceil(L / 0.1))
+      const profile: { t: number; y: number }[] = []
+      for (let k = 0; k <= steps; k++) {
+        const t = k / steps
+        const [X, Z] = toWorld(r.placement, h.from[0] + (h.to[0] - h.from[0]) * t, h.from[1] + (h.to[1] - h.from[1]) * t)
+        const hh = heightWorld(o.placement, o.shape, X, Z)
+        profile.push({ t, y: hh == null ? -1e6 : hh - r.placement.baseY })
+      }
+      return { ...h, profile }
+    }),
   }
 }
 
