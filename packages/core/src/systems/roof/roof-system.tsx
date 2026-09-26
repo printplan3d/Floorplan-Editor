@@ -8,7 +8,7 @@ import type { AnyNode, AnyNodeId, RoofNode, RoofSegmentNode } from '../../schema
 import type { RoofType } from '../../schema/nodes/roof-segment'
 import useScene from '../../store/use-scene'
 import { type RoofContext, resolveRoofContext } from './roof-scene'
-import { generateShellSegmentGeometry } from './shell-preview'
+import { generateShellSegmentGeometry, ridgeAngleRad } from './shell-preview'
 
 // ── Scene-level roof context (junctions, real walls, dormers on windows) ──
 //
@@ -317,7 +317,8 @@ function updateMergedRoofGeometry(
     // merged mesh's world position stays at the roof group origin.
     _tmpMatrix.compose(
       _tmpPosition.set(child.position[0], child.position[1], child.position[2]),
-      _tmpQuaternion.setFromAxisAngle(_yAxis, child.rotation),
+      // + the ridge angle: shell geometry is built in the ridge's frame.
+      _tmpQuaternion.setFromAxisAngle(_yAxis, child.rotation + ridgeAngleRad(child)),
       _scale,
     )
     g.applyMatrix4(_tmpMatrix)
@@ -765,7 +766,12 @@ export function generateRoofSegmentGeometry(node: RoofSegmentNode): THREE.Buffer
   // legacy face-generator so the operator still sees SOMETHING while
   // Phase 5 lands the general-polygon skeleton.
   const shellGeom = generateShellSegmentGeometry(node)
-  if (shellGeom) return shellGeom
+  if (shellGeom) {
+    // Built in the ridge's frame; hand it back in the segment's.
+    const ra = ridgeAngleRad(node)
+    if (ra) shellGeom.rotateY(ra)
+    return shellGeom
+  }
 
   const brushes = getRoofSegmentBrushes(node)
   if (!brushes) {

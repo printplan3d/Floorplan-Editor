@@ -4690,6 +4690,7 @@ export function FloorplanPanel() {
       roofType: string;
       material: string;
       ridgeAxis: "auto" | "east-west" | "north-south";
+      ridgeAngleDeg?: number;
       polygon?: [number, number][];
     }> = [];
     if (!levelId) return rects;
@@ -4721,6 +4722,8 @@ export function FloorplanPanel() {
             Array.isArray(seg.polygon) && seg.polygon.length >= 3
               ? (seg.polygon as [number, number][])
               : undefined,
+          ridgeAngleDeg:
+            typeof seg.ridgeAngleDeg === "number" ? seg.ridgeAngleDeg : undefined,
         });
       }
     }
@@ -11858,6 +11861,25 @@ export function FloorplanPanel() {
                           A ridge along the world east-west axis is a
                           horizontal line here; along north-south, vertical. */}
                       {(() => {
+                        // A ridge at an angle: a line through the centre at
+                        // that angle (three.js rotation-y sense; points are
+                        // drawn negated here, which a line through the
+                        // origin doesn't notice).
+                        if (typeof r.ridgeAngleDeg === "number" && r.ridgeAngleDeg !== 0) {
+                          const a = (r.ridgeAngleDeg * Math.PI) / 180;
+                          const L = Math.max(w, d) / 2;
+                          return (
+                            <line
+                              x1={-L * Math.cos(a)}
+                              y1={L * Math.sin(a)}
+                              x2={L * Math.cos(a)}
+                              y2={-L * Math.sin(a)}
+                              stroke={isSel ? "#b45309" : "#8a5a20"}
+                              strokeWidth={0.06}
+                              strokeDasharray="0.15 0.15"
+                            />
+                          );
+                        }
                         const axis =
                           r.ridgeAxis === "east-west" ||
                           r.ridgeAxis === "north-south"

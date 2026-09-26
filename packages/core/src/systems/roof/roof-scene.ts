@@ -31,6 +31,7 @@ import {
   type RealWallSpan,
   type ClipVolume,
   shellVolumeLocal,
+  ridgeAngleRad,
   resolveShellShape,
   type ShellBuildOptions,
   type ShellShape,
@@ -144,7 +145,8 @@ export function collectPlacements(nodes: Nodes): SegmentPlacement[] {
     const sp = (seg.position ?? [0, 0, 0]) as number[]
     const ra = (roof as { rotation?: number }).rotation ?? 0
     const sa = seg.rotation ?? 0
-    const theta = ra + sa
+    // The ridge angle turns the frame the roof is built in (shell-preview).
+    const theta = ra + sa + ridgeAngleRad(seg)
     const rc = Math.cos(ra)
     const rs = Math.sin(ra)
     out.push({

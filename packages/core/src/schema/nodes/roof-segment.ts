@@ -28,6 +28,11 @@ export const RoofSegmentNode = BaseNode.extend({
   // to whichever axis is currently longer. "auto" keeps the old
   // width>=depth heuristic for anything the user hasn't touched.
   ridgeAxis: z.enum(['auto', 'east-west', 'north-south']).default('auto'),
+  // Ridge at any angle (degrees from the segment's own east-west axis),
+  // with the footprint left where it was drawn (operator 2026-09-26: a
+  // diagonal house). Unset = ridgeAxis. The roof is built in the ridge's
+  // frame on the footprint's bounding rectangle there.
+  ridgeAngleDeg: z.number().optional(),
   // Material (drives the manifest slot the viewer swaps in)
   material: RoofMaterial.default('slate'),
   // Footprint dimensions — width/depth define a rectangle. Ignored when

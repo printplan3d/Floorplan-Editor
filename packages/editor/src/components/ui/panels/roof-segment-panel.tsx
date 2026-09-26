@@ -56,6 +56,38 @@ const DORMER_TYPE_OPTIONS: { label: string; value: DormerType }[] = [
   { label: 'Hip', value: 'hip' },
 ]
 
+/** Ridge angle (degrees, three.js rotation-y sense, -90..90) that runs the
+ *  ridge along the footprint's longest edge — for a diagonal house. */
+function alongLongestEdgeDeg(node: any): number {
+  const poly: [number, number][] =
+    Array.isArray(node.polygon) && node.polygon.length >= 3
+      ? node.polygon
+      : [
+          [-node.width / 2, -node.depth / 2],
+          [node.width / 2, -node.depth / 2],
+          [node.width / 2, node.depth / 2],
+          [-node.width / 2, node.depth / 2],
+        ]
+  let best = 0
+  let bestLen = -1
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]!
+    const b = poly[(i + 1) % poly.length]!
+    const dx = b[0] - a[0]
+    const dz = b[1] - a[1]
+    const len = Math.hypot(dx, dz)
+    if (len > bestLen) {
+      bestLen = len
+      // rotateY(1, 0, t) = (cos t, -sin t) must point along (dx, dz).
+      best = Math.atan2(-dz, dx)
+    }
+  }
+  let deg = (best * 180) / Math.PI
+  while (deg > 90) deg -= 180
+  while (deg < -90) deg += 180
+  return Math.round(deg)
+}
+
 /** What a shed dormer's roof pitch is when the operator hasn't set one:
  *  a third of its parent slope's pitch (shell-preview's default), degrees.
  *  Approximate for junction-adjusted wings; the geometry is authoritative. */
@@ -411,7 +443,7 @@ export function RoofSegmentPanel() {
 
       <PanelSection title="Ridge Direction">
         <SegmentedControl
-          onChange={(v) => handleUpdate({ ridgeAxis: v })}
+          onChange={(v) => handleUpdate({ ridgeAxis: v, ridgeAngleDeg: undefined } as any)}
           options={RIDGE_AXIS_OPTIONS}
           value={
             node.ridgeAxis === 'east-west' || node.ridgeAxis === 'north-south'
@@ -419,6 +451,29 @@ export function RoofSegmentPanel() {
               : 'east-west'
           }
         />
+        {/* Ridge at any angle; the footprint stays where it was drawn. */}
+        <SliderControl
+          label="Ridge angle"
+          max={90}
+          min={-90}
+          onChange={(nv) => handleUpdate({ ridgeAngleDeg: nv } as any)}
+          precision={0}
+          step={1}
+          unit="°"
+          value={
+            typeof (node as any).ridgeAngleDeg === 'number'
+              ? (node as any).ridgeAngleDeg
+              : node.ridgeAxis === 'north-south'
+                ? 90
+                : 0
+          }
+        />
+        <div className="flex gap-1.5 px-1 pt-1 pb-1">
+          <ActionButton
+            label="Align to footprint"
+            onClick={() => handleUpdate({ ridgeAngleDeg: alongLongestEdgeDeg(node) } as any)}
+          />
+        </div>
       </PanelSection>
 
       {(() => {

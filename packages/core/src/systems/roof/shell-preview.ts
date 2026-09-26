@@ -258,6 +258,18 @@ export type ShellShape = {
 // ─── Public entry points ──────────────────────────────────────────
 
 /**
+ * The segment's ridge angle (radians, three.js rotation-y sense), or 0.
+ * Non-zero means the roof is built in a frame turned by this angle — the
+ * ridge along that frame's x — with the footprint left where it was drawn.
+ * roof-scene adds it to the placement rotation and roof-system to the
+ * segment's, so every consumer sees one consistent frame.
+ */
+export function ridgeAngleRad(node: RoofSegmentNode): number {
+  const d = (node as unknown as { ridgeAngleDeg?: number }).ridgeAngleDeg
+  return typeof d === 'number' && Number.isFinite(d) && Math.abs(d) > 1e-6 ? (d * Math.PI) / 180 : 0
+}
+
+/**
  * Resolve everything about a segment's roof once. Both the geometry and the
  * height field read this, so they can never disagree.
  */
@@ -267,8 +279,15 @@ export function resolveShellShape(
 ): ShellShape | null {
   const kind = node.roofType
   if (kind === 'gambrel' || kind === 'dutch' || kind === 'mansard') return null
-  const raw = _resolvePolygon(node)
+  let raw = _resolvePolygon(node)
   if (raw.length !== 4) return null
+  // Into the ridge's frame (inverse of three's rotation-y by the angle).
+  const ra = ridgeAngleRad(node)
+  if (ra) {
+    const c = Math.cos(ra)
+    const s = Math.sin(ra)
+    raw = raw.map(([x, z]) => [x * c - z * s, x * s + z * c] as V2)
+  }
 
   const xs = raw.map((p) => p[0])
   const zs = raw.map((p) => p[1])
@@ -600,7 +619,8 @@ function _resolveEdgeStyles(node: RoofSegmentNode, polygon: V2[]): ('hip' | 'gab
   if (node.roofType === 'shed') return ['hip', 'gable', 'gable', 'gable']
   // Gable. Edges: 0 = min-Z (along X), 1 = max-X, 2 = max-Z, 3 = min-X.
   // Ridge east-west -> gable ends on E and W (1, 3); north-south -> on 0, 2.
-  const axis = node.ridgeAxis
+  // With a ridge angle the frame is turned so the ridge runs along its x.
+  const axis = ridgeAngleRad(node) ? 'east-west' : node.ridgeAxis
   const ew = axis === 'east-west' || (axis !== 'north-south' && node.width >= node.depth)
   return ew ? ['hip', 'gable', 'hip', 'gable'] : ['gable', 'hip', 'gable', 'hip']
 }
