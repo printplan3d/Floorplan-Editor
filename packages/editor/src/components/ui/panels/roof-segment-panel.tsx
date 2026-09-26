@@ -302,7 +302,17 @@ export function RoofSegmentPanel() {
   )
   const joined = node ? roofCtx.segments.get(node.id) : undefined
   const followableWindows = useMemo(
-    () => (node ? windowsUnderSegment(nodes as Record<string, AnyNode>, roofCtx, node.id) : []),
+    () =>
+      node
+        ? windowsUnderSegment(
+            nodes as Record<string, AnyNode>,
+            roofCtx,
+            node.id,
+            (((node as any).dormers as { windowId?: string }[] | undefined) ?? [])
+              .map((d) => d.windowId)
+              .filter((id): id is string => !!id),
+          )
+        : [],
     [nodes, roofCtx, node],
   )
 

@@ -744,11 +744,19 @@ export function windowsUnderSegment(
   nodes: Nodes,
   ctx: RoofContext,
   segId: string,
+  /** Windows to list even if they stay below the roof (e.g. one a dormer
+   *  already follows), so the picker never shows a blank. */
+  keepIds: string[] = [],
 ): { id: string; label: string }[] {
   const r = ctx.segments.get(segId)
   if (!r) return []
   const p = r.placement
   const s = r.shape
+  // Only windows that reach INTO the roof need a dormer: their head is above
+  // the storey wall top the roof sits on (operator 2026-09-26 — a roof on L0
+  // covers L1, so it's L1's windows; L0's are below it and already visible).
+  const roofBase = p.baseY + p.floorY
+  const levels = ctx.levels
   const out: { id: string; label: string; key: number }[] = []
   for (const n of Object.values(nodes)) {
     if (!n || n.type !== 'window') continue
@@ -761,11 +769,16 @@ export function windowsUnderSegment(
     const cx = wall.start[0] + ((wall.end[0] - wall.start[0]) / wl) * along
     const cz = wall.start[1] + ((wall.end[1] - wall.start[1]) / wl) * along
     if (!insideFootprint(p, s, cx, cz, 0.5)) continue
+    const lv = wall.parentId ? levels.get(wall.parentId) : undefined
+    const w2 = win as unknown as { position?: number[]; height?: number }
+    const head = (lv ? lv.elev : 0) + (w2.position?.[1] ?? 1) + (w2.height ?? 1.2) / 2
+    const below = head <= roofBase + 0.05
+    if (below && !keepIds.includes(win.id)) continue
     const lvl = wall.parentId ? (nodes[wall.parentId] as { level?: number } | undefined)?.level : undefined
     const [lx, lz] = toLocal(p, cx, cz)
     out.push({
       id: win.id,
-      label: `${win.name ?? 'Window'}${lvl != null ? ` · L${lvl}` : ''} · ${Math.round(((win as { width?: number }).width ?? 0) * 100)} cm`,
+      label: `${win.name ?? 'Window'}${lvl != null ? ` · L${lvl}` : ''} · ${Math.round(((win as { width?: number }).width ?? 0) * 100)} cm${below ? ' (below the roof)' : ''}`,
       key: s.frame.ridgeAlongX ? lx : lz,
     })
   }
