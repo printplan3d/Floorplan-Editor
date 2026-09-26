@@ -1093,15 +1093,18 @@ function _dormerWindowOverrides(
     const f = s.frame
     const tanP = Math.max(0.01, f.tanOf[bestEdge]!)
     const zFront = f.eaveOf[bestEdge]! + tanP * inward
-    // Its own window, sized from the followed one unless set in the panel;
-    // the front is tall enough for it plus the headroom.
+    // Its own window, sized from the followed one unless set in the panel.
+    // The dormer's size comes from the FOLLOWED window and the headroom
+    // only: editing the dormer's window just changes the window, never the
+    // dormer (operator 2026-09-26: "if I increase sill or window height the
+    // whole dormer moves").
     const dw = d.window ?? {}
     const winW = num(dw.w, win.width ?? 1)
     const winH = num(dw.h, win.height ?? 1.2)
     const sill = num(dw.sill, 0.15)
     void headWorld
     void zFront
-    const need = sill + winH + headroom
+    const need = 0.15 + (win.height ?? 1.2) + headroom
     let ridgeHeight: number
     if (d.type === 'shed') ridgeHeight = need
     else ridgeHeight = need >= halfW * tanP ? need + halfW * tanP : 2 * need

@@ -1525,6 +1525,9 @@ function _unionDormers(base: THREE.BufferGeometry, shape: ShellShape): THREE.Buf
       acc.geometry.dispose()
       acc = next
       glass.push({ verts: w.glass, slot: SLOT_GLASS })
+      // Both windings: seen from outside whatever the material's side.
+      glass.push({ verts: w.backing, slot: SLOT_FASCIA })
+      glass.push({ verts: [...w.backing].reverse(), slot: SLOT_FASCIA })
     } catch (e) {
       console.warn('shell-preview: dormer window cut failed', e)
     }
@@ -1781,7 +1784,9 @@ const DORMER_WIN_MIN = 0.3
  * solid to subtract and the glass quad (outward-facing) at its back, or
  * null when the front is too small for a window.
  */
-function _dormerWindow(d: ResolvedDormer): { recess: THREE.BufferGeometry; glass: V3[] } | null {
+function _dormerWindow(
+  d: ResolvedDormer,
+): { recess: THREE.BufferGeometry; glass: V3[]; backing: V3[] } | null {
   const req = d.win ?? {}
   // Width: requested (default DORMER_WIN_W), keeping DORMER_WIN_SIDE of wall
   // each side.
@@ -1825,7 +1830,12 @@ function _dormerWindow(d: ResolvedDormer): { recess: THREE.BufferGeometry; glass
   let pane: V3[] = [c(-halfW, gd, sill), c(halfW, gd, sill), c(halfW, gd, head), c(-halfW, gd, head)]
   const n = _faceNormal(pane)
   if (n[0] * -d.inwardUnit[0] + n[2] * -d.inwardUnit[1] < 0) pane = pane.reverse()
-  return { recess, glass: pane }
+  // An opaque dark panel just behind the glass: the window reads as a
+  // window, and nothing inside the roof (wall tops, the space under the
+  // dormer) shows through it (operator 2026-09-26: "two planes inside").
+  const bd = gd + 0.02
+  const backing: V3[] = pane.map((p) => [p[0] + d.inwardUnit[0] * (bd - gd), p[1], p[2] + d.inwardUnit[1] * (bd - gd)])
+  return { recess, glass: pane, backing }
 }
 
 /** Faces of a convex closed solid -> geometry with every face turned to
