@@ -131,6 +131,10 @@ export const RoofSegmentNode = BaseNode.extend({
         // Move or resize the window and the dormer follows. footOnParent,
         // cheekWidth and ridgeHeight are ignored while this is set.
         windowId: z.string().optional(),
+        // Shed dormers: the pitch of the dormer's own roof, degrees. Unset =
+        // a third of the main slope's pitch. Always kept shallower than the
+        // main slope (it must meet it).
+        pitchDeg: z.number().optional(),
       }),
     )
     .optional(),

@@ -56,6 +56,21 @@ const DORMER_TYPE_OPTIONS: { label: string; value: DormerType }[] = [
   { label: 'Hip', value: 'hip' },
 ]
 
+/** What a shed dormer's roof pitch is when the operator hasn't set one:
+ *  a third of its parent slope's pitch (shell-preview's default), degrees.
+ *  Approximate for junction-adjusted wings; the geometry is authoritative. */
+function defaultShedPitchDeg(node: any, parentFaceId: number): number {
+  const ew =
+    node.ridgeAxis === 'east-west' ||
+    (node.ridgeAxis !== 'north-south' && (node.width ?? 0) >= (node.depth ?? 0))
+  const sloped = ew ? [0, 2] : [1, 3]
+  const e = sloped[Math.min(Math.max(0, parentFaceId | 0), 1)]!
+  const half = (ew ? node.depth : node.width) / 2
+  const w = Array.isArray(node.edgeWeights) ? node.edgeWeights[e] : undefined
+  const tan = typeof w === 'number' && w > 0 ? w : (node.roofHeight ?? 2.5) / Math.max(0.1, half)
+  return Math.round((Math.atan(tan / 3) * 180) / Math.PI)
+}
+
 function newDormerDefaults(seg: RoofSegmentNode): any {
   return {
     id: `dorm_${Math.random().toString(36).slice(2, 10)}`,
@@ -869,6 +884,18 @@ export function RoofSegmentPanel() {
                     unit="m"
                     value={d.cheekWidth ?? 1.2}
                   />
+                  {d.type === 'shed' ? (
+                    <SliderControl
+                      label="Roof pitch"
+                      max={40}
+                      min={1}
+                      onChange={(nv) => updateDormer(idx, { pitchDeg: nv })}
+                      precision={0}
+                      step={1}
+                      unit="°"
+                      value={d.pitchDeg ?? defaultShedPitchDeg(node, d.parentFaceId ?? 0)}
+                    />
+                  ) : null}
                   {/* The dormer's own window (every dormer has one). Sizes
                       are clamped to fit the dormer front when built; sill is
                       measured up from where the front meets the slope. */}

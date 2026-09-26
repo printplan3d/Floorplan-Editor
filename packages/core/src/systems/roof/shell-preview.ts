@@ -172,6 +172,8 @@ type DormerSpec = {
   ridgeHeight: number
   cheekWidth: number
   windowId?: string
+  /** Shed only: the dormer roof's pitch in degrees (unset = main / 3). */
+  pitchDeg?: number
   /** The dormer's own window (free dormers): width, height, and sill above
    *  where the front meets the main slope. Absent = defaults. */
   window?: { w?: number; h?: number; sill?: number }
@@ -990,7 +992,18 @@ function _resolveDormer(
 
   const tanParent = Math.max(MIN_EDGE_WEIGHT, f.tanOf[idx]!)
   const eaveParent = f.eaveOf[idx]!
-  const tanShed = tanParent / 3
+  // Shed roof pitch: the operator's, or a third of the main slope's. It
+  // must stay shallower than the main slope (3 degrees at least), or the
+  // main roof never climbs back over it.
+  const mainDeg = (Math.atan(tanParent) * 180) / Math.PI
+  const shedDeg =
+    typeof spec.pitchDeg === 'number' && Number.isFinite(spec.pitchDeg)
+      ? Math.min(Math.max(spec.pitchDeg, 1), mainDeg - 3)
+      : null
+  const tanShed = Math.min(
+    tanParent * 0.9,
+    shedDeg != null && shedDeg > 0 ? Math.tan((shedDeg * Math.PI) / 180) : tanParent / 3,
+  )
 
   // Run from this edge in to the ridge: the half-span for a side edge, the
   // hip inset for a hip end.

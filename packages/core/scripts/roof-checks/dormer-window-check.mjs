@@ -139,6 +139,23 @@ for (const [label, win, want] of [
     `${label}: ${r2(got.w)} x ${r2(got.h)} inside a ${r2(2 * d.halfW)} m front, head ${r2(Math.max(...ys) - d.rZ)} m under the roof`)
 }
 
+// ── Shed roof pitch from the dormer panel ──
+P('\nshed roof pitch (main roof is 30 degrees)')
+for (const [asked, want] of [[5, 5], [20, 20], [45, 27]]) {
+  const plan = buildPlan({ extra: { rseg_7ywyzq: { depth: 4.499, edgeWeights: [0.577, 0.577, 0.577, 0.249],
+    dormers: [{ id: 'd', type: 'shed', parentFaceId: 0, ridgeHeight: 1.5, cheekWidth: 2.6, footOnParent: [[0.335, 0.275], [0.565, 0.425]], pitchDeg: asked }] } } })
+  const ctx = resolveRoofContext(plan)
+  const r = ctx.segments.get('rseg_7ywyzq'), d = r.shape.dormers[0], pl = r.placement, f = r.shape.frame
+  const got = (Math.atan(d.tanShed) * 180) / Math.PI
+  const W = (dd) => { const x = d.anchor[0] + dd * d.inwardUnit[0], z = d.anchor[1] + dd * d.inwardUnit[1]
+    return [pl.tx + pl.cos * x + pl.sin * z, pl.tz - pl.sin * x + pl.cos * z] }
+  let worst = 0, prev = null
+  for (let dd = 0; dd <= d.cheekD; dd += 0.05) { const h = ctx.heightAt(...W(dd)); if (prev != null) worst = Math.max(worst, prev - h); prev = h }
+  const buriedY = d.zFront + d.tanParent * (d.cheekD - 0.15)
+  ok(Math.abs(got - want) < 0.05 && worst < 1e-6 && buriedY < f.ridgeZ - 0.1,
+    `asked ${asked} deg -> ${got.toFixed(1)} deg; drains forward; meets the main roof ${r2(f.ridgeZ - buriedY)} m under the ridge`)
+}
+
 const withWin = buildPlan({ dormerWindow: 'window_lh3r' })
 const rw = resolveRoofContext(withWin).segments.get('rseg_7ywyzq')
 P('\ndormer following window lh3r')
