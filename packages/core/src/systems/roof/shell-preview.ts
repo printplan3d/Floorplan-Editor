@@ -1246,13 +1246,26 @@ function _dormerRoofSlab(d: ResolvedDormer, top: V3[]): THREE.BufferGeometry | n
   if (Math.abs(n[1]) < 1e-6) return null
   const p0 = top[0]!
   const yOn = (x: number, z: number) => p0[1] - (n[0] * (x - p0[0]) + n[2] * (z - p0[2])) / n[1]
+  // A hip's front corner belongs to the front plane AND a side plane. Push
+  // the front out by the run that drops the same height as the side eave's
+  // overhang, so the corner lands on both planes and the slabs meet along
+  // the hip line (independent offsets left a step: "weird shape",
+  // operator 2026-09-26). Gable/shed fronts carry no second plane there.
+  let frontOH = DORMER_FRONT_OH
+  if (d.type === 'hip') {
+    const rise = d.rZ - d.zEaveD
+    const d0 = Math.min(d.cheekD * 0.9, rise / d.tanParent)
+    const tanSide = rise / Math.max(1e-6, d.halfW)
+    const tanFront = rise / Math.max(1e-6, d0)
+    frontOH = (DORMER_EAVE_OH * tanSide) / Math.max(1e-6, tanFront)
+  }
   const moved: V3[] = top.map((p) => {
     const rx = p[0] - d.anchor[0]
     const rz = p[2] - d.anchor[1]
     let w = rx * d.eaveUnit[0] + rz * d.eaveUnit[1]
     let dd = rx * d.inwardUnit[0] + rz * d.inwardUnit[1]
     if (Math.abs(Math.abs(w) - d.halfW) < 1e-6) w += Math.sign(w) * DORMER_EAVE_OH
-    if (Math.abs(dd) < 1e-6) dd = -DORMER_FRONT_OH
+    if (Math.abs(dd) < 1e-6) dd = -frontOH
     const x = d.anchor[0] + w * d.eaveUnit[0] + dd * d.inwardUnit[0]
     const z = d.anchor[1] + w * d.eaveUnit[1] + dd * d.inwardUnit[1]
     return [x, yOn(x, z), z]
