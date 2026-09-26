@@ -2,7 +2,7 @@
 // the level-1 room not split by gable walls, the wall infill reaching down to
 // the storey wall top, and continuation masses sharing their side lines.
 import { resolveRoofContext } from '../../dist/systems/roof/roof-scene.js'
-import { generateShellSegmentGeometry, shellHeightAtLocal } from '../../dist/systems/roof/shell-preview.js'
+import { generateShellSegmentGeometry, shellHeightAtLocal, shellVolumeLocal } from '../../dist/systems/roof/shell-preview.js'
 import { buildPlan } from './plan-fixture.mjs'
 console.log = () => {}
 const warns = []
@@ -86,6 +86,32 @@ ok(buried(ctx, tris) === 0, `no roof face buried inside another roof (${buried(c
   const [a, b] = [side(n), side(s)]
   ok(Math.abs(a[0] - b[0]) < 1e-3 && Math.abs(a[1] - b[1]) < 1e-3, `side lines shared: north x=[${a.map(r2)}] south x=[${b.map(r2)}]`)
   ok(Math.abs((a[0] + a[1]) / 2 - (b[0] + b[1]) / 2) < 1e-3, 'ridges on one line (no kink)')
+}
+
+// Faces of one roof inside ANOTHER roof's overhang (its slopes carried out
+// to the fascia) — e.g. the south gable's barge board running down through
+// the bay roof. Centroid test against the neighbour's overhang volume, 2 cm
+// inside every half-space.
+function inOverhang(ctx, tris) {
+  let n = 0
+  const hits = {}
+  for (const [a, b, c, id] of tris) {
+    const m = [0, 1, 2].map((k) => (a[k] + b[k] + c[k]) / 3)
+    for (const [oid, o] of ctx.segments) {
+      if (oid === id || o.placement.levelId !== ctx.segments.get(id).placement.levelId) continue
+      const pl = o.placement
+      const [x, z] = local(pl, m[0], m[2])
+      const q = [x, m[1] - pl.baseY, z]
+      const inside = shellVolumeLocal(o.shape, true).every((h) =>
+        h.n[0] * (q[0] - h.p[0]) + h.n[1] * (q[1] - h.p[1]) + h.n[2] * (q[2] - h.p[2]) > 0.02)
+      if (inside) { n++; hits[`${id} in ${oid}`] = (hits[`${id} in ${oid}`] ?? 0) + 1; break }
+    }
+  }
+  return { n, hits }
+}
+{
+  const r = inOverhang(ctx, tris)
+  ok(r.n === 0, `no roof face inside a neighbour's overhang (${r.n} found ${JSON.stringify(r.hits)})`)
 }
 
 // ── Perpendicular gables (T/L) ──

@@ -172,6 +172,9 @@ type DormerSpec = {
   ridgeHeight: number
   cheekWidth: number
   windowId?: string
+  /** The dormer's own window (free dormers): width, height, and sill above
+   *  where the front meets the main slope. Absent = defaults. */
+  window?: { w?: number; h?: number; sill?: number }
 }
 
 type ResolvedDormer = {
@@ -195,6 +198,8 @@ type ResolvedDormer = {
   zFront: number
   /** Built over a real window: that window is its front, so no own glass. */
   followsWindow: boolean
+  /** Requested window size for a free dormer (clamped to fit when built). */
+  win?: { w?: number; h?: number; sill?: number }
 }
 
 type RoofFrame = {
@@ -281,14 +286,20 @@ export function resolveShellShape(
     if (opts.truncateLo != null) zMin = clampLo(opts.truncateLo, zMax)
     if (opts.truncateHi != null) zMax = clampHi(opts.truncateHi, zMin)
   }
-  // Continuation: share the neighbour's side lines.
-  if (opts.sideLo != null && opts.sideHi != null && opts.sideHi - opts.sideLo > 0.4) {
-    if (ridgeAlongX) {
-      zMin = opts.sideLo
-      zMax = opts.sideHi
-    } else {
-      xMin = opts.sideLo
-      xMax = opts.sideHi
+  // Side (eave) lines moved by a neighbour: both on a continuation (share
+  // its cross-section), one where a wing's eave is pulled back to a main
+  // roof's end. Never narrower than 0.4 m.
+  {
+    const lo = opts.sideLo ?? (ridgeAlongX ? zMin : xMin)
+    const hi = opts.sideHi ?? (ridgeAlongX ? zMax : xMax)
+    if (hi - lo > 0.4) {
+      if (ridgeAlongX) {
+        zMin = lo
+        zMax = hi
+      } else {
+        xMin = lo
+        xMax = hi
+      }
     }
   }
   const polygon: V2[] = [
@@ -466,16 +477,24 @@ function _area(poly: V3[]): number {
  * inside, so a shared seam wall drops out of both roofs); the slopes are
  * strict, so a coplanar slope never cancels itself out.
  */
-export function shellVolumeLocal(shape: ShellShape): ClipVolume {
+export function shellVolumeLocal(shape: ShellShape, withOverhang = false): ClipVolume {
   const f = shape.frame
   const poly = shape.polygon
   const vol: ClipVolume = []
+  // withOverhang: the volume reaches out to the fascia on every edge that
+  // overhangs (hip / gable), under the slopes carried on out there. Used
+  // when clipping NEIGHBOURS: another roof's rake or eave must stop at this
+  // roof, not run on through its overhang (operator 2026-09-26: the south
+  // gable's barge board ran straight down through the bay roof). Seams
+  // (junction / abut) have no overhang and stay put.
+  const oh = withOverhang ? f.overhang : 0
   for (let i = 0; i < 4; i++) {
     const a = poly[i]!
     const b = poly[(i + 1) % 4]!
     const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
     const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L] // inward (CCW in x/z as used by the infill)
-    vol.push({ n: [m[0], 0, m[1]], p: [a[0], 0, a[1]], eps: 0.01 })
+    const out = shape.styles[i] === 'hip' || shape.styles[i] === 'gable' ? oh : 0
+    vol.push({ n: [m[0], 0, m[1]], p: [a[0] - m[0] * out, 0, a[1] - m[1] * out], eps: 0.01 })
     const sloped = i === f.eSideLo || i === f.eSideHi || shape.styles[i] === 'hip'
     if (sloped) {
       // y <= eave_i + tan_i * d  ->  tan_i*d - y + eave_i >= 0
@@ -1019,6 +1038,7 @@ function _resolveDormer(
     forwardCover: ov ? inward + 0.05 : 0.05,
     zFront,
     followsWindow: !!ov,
+    win: spec.window,
   }
 }
 
@@ -1326,9 +1346,13 @@ function _dropFaces(geom: THREE.BufferGeometry, pred: (a: V3, b: V3, c: V3) => b
 
 /** Recess reveal depth and the wall kept around a dormer window. */
 const DORMER_WIN_DEPTH = 0.08
-const DORMER_WIN_SIDE = 0.2
+const DORMER_WIN_SIDE = 0.15
 const DORMER_WIN_SILL = 0.15
-const DORMER_WIN_HEAD = 0.1
+/** Below the dormer roof plane: the trim slab's underside (0.09) + margin. */
+const DORMER_WIN_HEAD = 0.15
+/** Default window when the operator hasn't sized it (clamped to fit). */
+const DORMER_WIN_W = 1.2
+const DORMER_WIN_H = 1.0
 const DORMER_WIN_MIN = 0.3
 
 /**
@@ -1339,10 +1363,23 @@ const DORMER_WIN_MIN = 0.3
  * null when the front is too small for a window.
  */
 function _dormerWindow(d: ResolvedDormer): { recess: THREE.BufferGeometry; glass: V3[] } | null {
-  const top = d.type === 'shed' ? d.rZ : d.zEaveD
-  const sill = d.zFront + DORMER_WIN_SILL
-  const head = top - DORMER_WIN_HEAD
-  const halfW = d.halfW - DORMER_WIN_SIDE
+  const req = d.win ?? {}
+  // Width: requested (default DORMER_WIN_W), keeping DORMER_WIN_SIDE of wall
+  // each side.
+  const maxHalf = d.halfW - DORMER_WIN_SIDE
+  const halfW = Math.min(maxHalf, Math.max(DORMER_WIN_MIN, req.w ?? DORMER_WIN_W) / 2)
+  // Top of the front at the window's side edges, less a margin that clears
+  // the trim slab's underside. A gable front rises into its triangle.
+  const rise = d.rZ - d.zEaveD
+  const topAtEdge =
+    d.type === 'shed'
+      ? d.rZ
+      : d.type === 'gable'
+        ? d.zEaveD + rise * Math.max(0, 1 - halfW / d.halfW)
+        : d.zEaveD
+  const head0 = topAtEdge - DORMER_WIN_HEAD
+  const sill = d.zFront + Math.max(0.05, req.sill ?? DORMER_WIN_SILL)
+  const head = Math.min(head0, sill + Math.max(DORMER_WIN_MIN, req.h ?? DORMER_WIN_H))
   if (head - sill < DORMER_WIN_MIN || halfW * 2 < DORMER_WIN_MIN) return null
   const at = (offW: number, offD: number, y: number): V3 => [
     d.anchor[0] + offW * d.eaveUnit[0] + offD * d.inwardUnit[0],

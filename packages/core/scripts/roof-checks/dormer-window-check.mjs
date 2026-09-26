@@ -120,6 +120,25 @@ for (const type of ['gable', 'shed', 'hip']) {
   ok(worst < 1e-6, `${type}: front ${r2(hs[0])} -> back ${r2(hs[hs.length - 1])}, never downhill (worst drop ${r2(worst)} m)`)
 }
 
+// ── The operator sizes the window from the dormer panel ──
+P('\nwindow size from the dormer panel')
+for (const [label, win, want] of [
+  ['custom 0.8 x 0.6, sill 0.3', { w: 0.8, h: 0.6, sill: 0.3 }, { w: 0.8, h: 0.6, sill: 0.3 }],
+  ['oversized 9 x 9 -> clamped to the front', { w: 9, h: 9 }, null],
+]) {
+  const plan = buildPlan({ extra: { rseg_7ywyzq: { depth: 4.499, edgeWeights: [0.577, 0.577, 0.577, 0.249],
+    dormers: [{ id: 'd', type: 'shed', parentFaceId: 0, ridgeHeight: 1.5, cheekWidth: 2.6, footOnParent: [[0.335, 0.275], [0.565, 0.425]], window: win }] } } })
+  const r = resolveRoofContext(plan).segments.get('rseg_7ywyzq'), d = r.shape.dormers[0]
+  const tris = glassOf(generateShellSegmentGeometry(r.placement.seg, r.opts))
+  const ys = tris.flat().map((p) => p[1])
+  const ws = tris.flat().map((p) => (p[0] - d.anchor[0]) * d.eaveUnit[0] + (p[2] - d.anchor[1]) * d.eaveUnit[1])
+  const got = { w: Math.max(...ws) - Math.min(...ws), h: Math.max(...ys) - Math.min(...ys), sill: Math.min(...ys) - d.zFront }
+  if (want) ok(Math.abs(got.w - want.w) < 1e-3 && Math.abs(got.h - want.h) < 1e-3 && Math.abs(got.sill - want.sill) < 1e-3,
+    `${label}: got ${r2(got.w)} x ${r2(got.h)}, sill ${r2(got.sill)}`)
+  else ok(got.w <= 2 * d.halfW - 0.3 + 1e-6 && Math.max(...ys) <= d.rZ - 0.15 + 1e-6,
+    `${label}: ${r2(got.w)} x ${r2(got.h)} inside a ${r2(2 * d.halfW)} m front, head ${r2(Math.max(...ys) - d.rZ)} m under the roof`)
+}
+
 const withWin = buildPlan({ dormerWindow: 'window_lh3r' })
 const rw = resolveRoofContext(withWin).segments.get('rseg_7ywyzq')
 P('\ndormer following window lh3r')

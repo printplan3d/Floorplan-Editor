@@ -869,6 +869,39 @@ export function RoofSegmentPanel() {
                     unit="m"
                     value={d.cheekWidth ?? 1.2}
                   />
+                  {/* The dormer's own window (every dormer has one). Sizes
+                      are clamped to fit the dormer front when built; sill is
+                      measured up from where the front meets the slope. */}
+                  <SliderControl
+                    label="Window width"
+                    max={3}
+                    min={0.4}
+                    onChange={(nv) => updateDormer(idx, { window: { ...(d.window ?? {}), w: nv } })}
+                    precision={2}
+                    step={0.05}
+                    unit="m"
+                    value={d.window?.w ?? 1.2}
+                  />
+                  <SliderControl
+                    label="Window height"
+                    max={2}
+                    min={0.3}
+                    onChange={(nv) => updateDormer(idx, { window: { ...(d.window ?? {}), h: nv } })}
+                    precision={2}
+                    step={0.05}
+                    unit="m"
+                    value={d.window?.h ?? 1.0}
+                  />
+                  <SliderControl
+                    label="Window sill"
+                    max={1}
+                    min={0.05}
+                    onChange={(nv) => updateDormer(idx, { window: { ...(d.window ?? {}), sill: nv } })}
+                    precision={2}
+                    step={0.05}
+                    unit="m"
+                    value={d.window?.sill ?? 0.15}
+                  />
                   </>
                   )}
                 </div>

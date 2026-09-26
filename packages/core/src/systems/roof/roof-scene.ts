@@ -300,7 +300,7 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
   const pa = A.placement
   const pb = B.placement
   const ra = ridgeWorld(pa, A.shape)
-  const rb = ridgeWorld(pb, B.shape)
+  let rb = ridgeWorld(pb, B.shape)
 
   // Which of B's ends sits inside A? (Only ends not already joined.)
   const bInside = (w: V2) => insideFootprint(pa, A.shape, w[0], w[1], 0.3)
@@ -311,11 +311,25 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
 
   const buriedIsLo = loIn
   // Walk from B's OUTER end toward (and past) the buried end.
-  const outer = buriedIsLo ? rb.b : rb.a
-  const walkDir: V2 = buriedIsLo ? [-rb.dir[0], -rb.dir[1]] : rb.dir
 
   const cross = Math.abs(ra.dir[0] * rb.dir[1] - ra.dir[1] * rb.dir[0])
   const parallel = cross < PARALLEL_SIN
+
+  // Main roof wins at its ends. A crossing wing whose eave runs past A's
+  // gable / hip end by up to END_TRIM_MAX is pulled back to that end line,
+  // so A's rake and barge board run down clean over the corner (operator
+  // 2026-09-26: the bay roof poked 0.12 m past the south gable, under its
+  // rake). Done before the join walk: the wing's ridge re-centres.
+  if (!parallel) {
+    const trim = _endTrim(A, B)
+    if (trim) {
+      B.opts = { ...B.opts, ...trim }
+      rebuild(B)
+      rb = ridgeWorld(pb, B.shape)
+    }
+  }
+  const outer = buriedIsLo ? rb.b : rb.a
+  const walkDir: V2 = buriedIsLo ? [-rb.dir[0], -rb.dir[1]] : rb.dir
 
   // Ridge matching.
   const mode: RidgeMatch =
@@ -393,6 +407,45 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
   }
 }
 
+/** How far past a main roof's end a crossing wing's eave may run and still
+ *  be pulled back to it. */
+const END_TRIM_MAX = 0.5
+
+/**
+ * For a wing B crossing main roof A: if one of B's eave lines runs past
+ * one of A's gable/hip end lines (outside A, by at most END_TRIM_MAX), the
+ * side override that pulls it back onto that line. B's eaves are parallel
+ * to A's ends when their ridges cross.
+ */
+function _endTrim(A: ResolvedSegment, B: ResolvedSegment): { sideLo?: number; sideHi?: number } | null {
+  const fa = A.shape.frame
+  const fb = B.shape.frame
+  const vOf = (w: V2) => {
+    const [x, z] = toLocal(B.placement, w[0], w[1])
+    return fb.ridgeAlongX ? z : x
+  }
+  const at = (u: number) => (fa.ridgeAlongX ? toWorld(A.placement, u, fa.vMid) : toWorld(A.placement, fa.vMid, u))
+  const vCentreA = vOf(at((fa.uMin + fa.uMax) / 2))
+  const out: { sideLo?: number; sideHi?: number } = {}
+  for (const [u, e] of [
+    [fa.uMin, fa.eEndLo],
+    [fa.uMax, fa.eEndHi],
+  ] as const) {
+    const st = A.shape.styles[e]
+    if (st !== 'gable' && st !== 'hip') continue
+    const vEnd = vOf(at(u))
+    if (vEnd < vCentreA) {
+      // A lies toward +v from this end: B's low eave may run past it.
+      const over = vEnd - fb.vMin
+      if (over > 1e-3 && over <= END_TRIM_MAX) out.sideLo = vEnd
+    } else {
+      const over = fb.vMax - vEnd
+      if (over > 1e-3 && over <= END_TRIM_MAX) out.sideHi = vEnd
+    }
+  }
+  return out.sideLo != null || out.sideHi != null ? out : null
+}
+
 /** A's side (eave) lines expressed in B's local across-ridge coordinate,
  *  if each is within CONTINUATION_LATERAL of B's own. */
 function _sideSnap(A: ResolvedSegment, B: ResolvedSegment): [number, number] | null {
@@ -441,7 +494,7 @@ function _footprintsOverlap(a: ResolvedSegment, b: ResolvedSegment): boolean {
 function _volumeInto(o: ResolvedSegment, r: ResolvedSegment): ClipVolume {
   const po = o.placement
   const pr = r.placement
-  return shellVolumeLocal(o.shape).map((h) => {
+  return shellVolumeLocal(o.shape, true).map((h) => {
     // point: o-local -> world -> r-local
     const [wx, wz] = toWorld(po, h.p[0], h.p[2])
     const [lx, lz] = toLocal(pr, wx, wz)
