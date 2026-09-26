@@ -417,7 +417,10 @@ const END_TRIM_MAX = 0.5
  * side override that pulls it back onto that line. B's eaves are parallel
  * to A's ends when their ridges cross.
  */
-function _endTrim(A: ResolvedSegment, B: ResolvedSegment): { sideLo?: number; sideHi?: number } | null {
+function _endTrim(
+  A: ResolvedSegment,
+  B: ResolvedSegment,
+): { sideLo?: number; sideHi?: number; sideLoFlush?: boolean; sideHiFlush?: boolean } | null {
   const fa = A.shape.frame
   const fb = B.shape.frame
   const vOf = (w: V2) => {
@@ -426,7 +429,9 @@ function _endTrim(A: ResolvedSegment, B: ResolvedSegment): { sideLo?: number; si
   }
   const at = (u: number) => (fa.ridgeAlongX ? toWorld(A.placement, u, fa.vMid) : toWorld(A.placement, fa.vMid, u))
   const vCentreA = vOf(at((fa.uMin + fa.uMax) / 2))
-  const out: { sideLo?: number; sideHi?: number } = {}
+  // The pulled-back eave also loses its overhang: it stops dead on A's end
+  // line, under A's rake, instead of hanging 0.3 m past it.
+  const out: { sideLo?: number; sideHi?: number; sideLoFlush?: boolean; sideHiFlush?: boolean } = {}
   for (const [u, e] of [
     [fa.uMin, fa.eEndLo],
     [fa.uMax, fa.eEndHi],
@@ -437,10 +442,16 @@ function _endTrim(A: ResolvedSegment, B: ResolvedSegment): { sideLo?: number; si
     if (vEnd < vCentreA) {
       // A lies toward +v from this end: B's low eave may run past it.
       const over = vEnd - fb.vMin
-      if (over > 1e-3 && over <= END_TRIM_MAX) out.sideLo = vEnd
+      if (over > 1e-3 && over <= END_TRIM_MAX) {
+        out.sideLo = vEnd
+        out.sideLoFlush = true
+      }
     } else {
       const over = fb.vMax - vEnd
-      if (over > 1e-3 && over <= END_TRIM_MAX) out.sideHi = vEnd
+      if (over > 1e-3 && over <= END_TRIM_MAX) {
+        out.sideHi = vEnd
+        out.sideHiFlush = true
+      }
     }
   }
   return out.sideLo != null || out.sideHi != null ? out : null

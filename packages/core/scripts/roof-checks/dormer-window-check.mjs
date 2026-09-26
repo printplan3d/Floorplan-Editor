@@ -156,6 +156,22 @@ for (const [asked, want] of [[5, 5], [20, 20], [45, 27]]) {
     `asked ${asked} deg -> ${got.toFixed(1)} deg; drains forward; meets the main roof ${r2(f.ridgeZ - buriedY)} m under the ridge`)
 }
 
+// ── The dormer stays where it is when you change its pitch or type ──
+P('\ndormer position vs shed pitch and type')
+{
+  const front = (type, pitchDeg) => {
+    const plan = buildPlan({ extra: { rseg_7ywyzq: { depth: 4.499, edgeWeights: [0.577, 0.577, 0.577, 0.249],
+      dormers: [{ id: 'd', type, parentFaceId: 0, ridgeHeight: 1.5, cheekWidth: 2.6, footOnParent: [[0.335, 0.275], [0.565, 0.425]], ...(pitchDeg != null ? { pitchDeg } : {}) }] } } })
+    const r = resolveRoofContext(plan).segments.get('rseg_7ywyzq'), d = r.shape.dormers[0], pl = r.placement
+    return [pl.tx + pl.cos * d.anchor[0] + pl.sin * d.anchor[1], pl.tz - pl.sin * d.anchor[0] + pl.cos * d.anchor[1]]
+  }
+  const ref = front('gable')
+  const cases = [['shed 5', front('shed', 5)], ['shed 11', front('shed', 11)], ['shed 20', front('shed', 20)], ['shed default', front('shed')], ['hip', front('hip')]]
+  const worst = Math.max(...cases.map(([, p]) => Math.hypot(p[0] - ref[0], p[1] - ref[1])))
+  ok(worst < 1e-6, `front stays at (${r2(ref[0])}, ${r2(ref[1])}) for ${cases.map(([k]) => k).join(', ')} (worst move ${worst.toFixed(4)} m)`)
+  ok(Math.abs(ref[0] - -4.64) < 0.01 && Math.abs(ref[1] - -3.22) < 0.01, `gable where it was before (-4.64, -3.22)`)
+}
+
 const withWin = buildPlan({ dormerWindow: 'window_lh3r' })
 const rw = resolveRoofContext(withWin).segments.get('rseg_7ywyzq')
 P('\ndormer following window lh3r')

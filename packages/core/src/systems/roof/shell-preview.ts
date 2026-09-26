@@ -146,6 +146,10 @@ export type ShellBuildOptions = {
   /** Omit the flat interior ceiling. Set when walls stand under this roof
    *  on the level above: the cap would slice straight through that floor. */
   noInteriorCap?: boolean
+  /** No overhang on that side's eave: it stops dead on its line (a wing
+   *  pulled back to a main roof's gable end). */
+  sideLoFlush?: boolean
+  sideHiFlush?: boolean
   dormerOverrides?: Record<string, DormerOverride>
   /** Local Y the wall infill starts from (the storey wall top). 0 unless the
    *  segment is lifted above the storey by its own Y offset — then negative,
@@ -241,6 +245,9 @@ export type ShellShape = {
   frame: RoofFrame
   realWalls: RealWallSpan[]
   noInteriorCap: boolean
+  /** Sides whose eave has no overhang (see ShellBuildOptions.sideLoFlush). */
+  flushLo: boolean
+  flushHi: boolean
   /** Down-facing ceiling polygons under the slopes (set by the builder). */
   undersides?: V3[][]
   infillFloor: number
@@ -341,6 +348,8 @@ export function resolveShellShape(
     frame,
     realWalls,
     noInteriorCap: !!opts.noInteriorCap,
+    flushLo: !!opts.sideLoFlush,
+    flushHi: !!opts.sideHiFlush,
     infillFloor: Math.min(0, Number.isFinite(opts.infillFloor) ? opts.infillFloor! : 0),
     clipVolumes: opts.clipVolumes ?? [],
     dormers: [],
@@ -495,7 +504,8 @@ export function shellVolumeLocal(shape: ShellShape, withOverhang = false): ClipV
     const b = poly[(i + 1) % 4]!
     const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
     const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L] // inward (CCW in x/z as used by the infill)
-    const out = shape.styles[i] === 'hip' || shape.styles[i] === 'gable' ? oh : 0
+    const flush = (i === f.eSideLo && shape.flushLo) || (i === f.eSideHi && shape.flushHi)
+    const out = !flush && (shape.styles[i] === 'hip' || shape.styles[i] === 'gable') ? oh : 0
     vol.push({ n: [m[0], 0, m[1]], p: [a[0] - m[0] * out, 0, a[1] - m[1] * out], eps: 0.01 })
     const sloped = i === f.eSideLo || i === f.eSideHi || shape.styles[i] === 'hip'
     if (sloped) {
@@ -765,8 +775,10 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
 
   const eLo = eaveOf[f.eSideLo]!
   const eHi = eaveOf[f.eSideHi]!
-  const eLoO = eLo - tanOf[f.eSideLo]! * oh
-  const eHiO = eHi - tanOf[f.eSideHi]! * oh
+  const ohLo = shape.flushLo ? 0 : oh
+  const ohHi = shape.flushHi ? 0 : oh
+  const eLoO = eLo - tanOf[f.eSideLo]! * ohLo
+  const eHiO = eHi - tanOf[f.eSideHi]! * ohHi
   const F = oh > 1e-3 ? FASCIA_M : 0
 
   // Ridge u-extent. Gable ends run the ridge PAST the wall by the overhang
@@ -781,8 +793,8 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   // must stop dead so nothing pokes into or out of the neighbouring roof.
   const uLoO = noOverhangEnd(styleLo) ? uMin : uMin - oh
   const uHiO = noOverhangEnd(styleHi) ? uMax : uMax + oh
-  const vLoO = vMin - oh
-  const vHiO = vMax + oh
+  const vLoO = vMin - ohLo
+  const vHiO = vMax + ohHi
   const E_ll = P(uLoO, eLoO, vLoO)
   const E_hl = P(uHiO, eLoO, vLoO)
   const E_hh = P(uHiO, eHiO, vHiO)
@@ -802,8 +814,8 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   if (F > 0) {
     add([down(E_ll), down(E_hl), E_hl, E_ll], SLOT_FASCIA)
     add([down(E_hh), down(E_lh), E_lh, E_hh], SLOT_FASCIA)
-    add([P(uLoO, eLoO - F, vMin), P(uHiO, eLoO - F, vMin), down(E_hl), down(E_ll)], SLOT_SOFFIT)
-    add([P(uHiO, eHiO - F, vMax), P(uLoO, eHiO - F, vMax), down(E_lh), down(E_hh)], SLOT_SOFFIT)
+    if (ohLo > 1e-3) add([P(uLoO, eLoO - F, vMin), P(uHiO, eLoO - F, vMin), down(E_hl), down(E_ll)], SLOT_SOFFIT)
+    if (ohHi > 1e-3) add([P(uHiO, eHiO - F, vMax), P(uLoO, eHiO - F, vMax), down(E_lh), down(E_hh)], SLOT_SOFFIT)
   }
 
   // Overhang dressing at the ends. The vertical end walls themselves are
@@ -988,6 +1000,7 @@ function _resolveDormer(
   const vMid = 0.5 * (spec.footOnParent[0][1] + spec.footOnParent[1][1])
   const cheekWidth = Math.max(0.3, ov ? ov.cheekWidth : spec.cheekWidth)
   let rh = Math.max(0.2, ov ? ov.ridgeHeight : spec.ridgeHeight)
+  const rhAsked = rh
   const halfW = cheekWidth / 2
 
   const tanParent = Math.max(MIN_EDGE_WEIGHT, f.tanOf[idx]!)
@@ -1020,12 +1033,18 @@ function _resolveDormer(
   // the far slope (a 1.5 m shed on a 30 degree, 4 m half-span did): cap its
   // height so it is.
   const gain = spec.type === 'shed' ? tanParent - tanShed : tanParent
-  rh = Math.min(rh, Math.max(0.2, (run - 0.3) * gain))
+  // Free dormers: V maps across a range set by the slope and the asked
+  // height only (the gable rule) — NOT the type or the shed pitch, so
+  // switching type or dragging the shed's pitch never slides the dormer
+  // along the roof (operator 2026-09-26). Window-following dormers: the
+  // window's wall decides.
+  const refBury = Math.min(rhAsked, Math.max(0.2, (run - 0.3) * tanParent)) / tanParent
+  const refRun = Math.max(0, run - refBury)
+  const inward = ov ? Math.max(0, ov.inward) : Math.min(Math.max(vMid, 0), 1) * refRun
+  // Then keep it clear of the ridge FROM WHERE IT STANDS: a steep shed pitch
+  // lowers the front instead of moving the dormer.
+  rh = Math.min(rh, Math.max(0.2, (run - 0.3 - inward) * gain))
   const runToBury = rh / gain
-  // Free dormers: V maps across the usable run so the ridge stays under the
-  // main ridge. Window-following dormers: the window's wall decides.
-  const maxInward = Math.max(0, run - runToBury)
-  const inward = ov ? Math.max(0, ov.inward) : Math.min(Math.max(vMid, 0), 1) * maxInward
 
   const anchor: V2 = [
     p0[0] + uMid * ex + inwardUnit[0] * inward,
