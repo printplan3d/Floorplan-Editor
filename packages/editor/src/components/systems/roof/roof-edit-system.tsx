@@ -1,69 +1,102 @@
-import { type AnyNodeId, type RoofNode, sceneRegistry, useScene } from '@ritn3d/core'
+import {
+  type AnyNodeId,
+  getRoofContext,
+  roofMeshesForExport,
+  sceneRegistry,
+  useScene,
+} from '@ritn3d/core'
 import { useViewer } from '@ritn3d/viewer'
 import { useEffect, useRef } from 'react'
+import * as THREE from 'three'
 
 /**
- * Imperatively toggles the Three.js visibility of roof objects based on the
- * editor selection — without causing React re-renders in RoofRenderer.
+ * Highlights the selected roof in the 3D view.
  *
- * When a roof (or one of its segments) is selected:
- *   - merged-roof mesh is hidden
- *   - segments-wrapper group is shown (individual segments visible for editing)
- *   - all children are marked dirty so RoofSystem rebuilds their geometry
+ * This used to swap a selected roof into "edit mode": hide its merged mesh
+ * and show per-segment meshes rebuilt on demand. Those were built without
+ * the roof context (joins, trimming, neighbour clipping), so a selected roof
+ * looked different, and any segment whose rebuild didn't run simply
+ * vanished until another roof was selected (operator 2026-09-26: "some
+ * roofs disappear when I select them"). The move tool still switches to
+ * segment meshes on its own while dragging, and restores them after.
  *
- * When deselected:
- *   - merged-roof mesh is shown
- *   - segments-wrapper group is hidden
+ * Now the merged roof — the one already drawn correctly — stays up, and the
+ * selected segment(s) get a translucent orange overlay built from exactly
+ * the same geometry (roofMeshesForExport, world space), so the highlight
+ * always matches what is shown. Selecting a whole roof highlights all of
+ * its segments.
  */
+const HIGHLIGHT = new THREE.MeshBasicMaterial({
+  color: 0xff8a1f,
+  transparent: true,
+  opacity: 0.38,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
+})
+
 export const RoofEditSystem = () => {
   const selectedIds = useViewer((s) => s.selection.selectedIds)
-  const prevActiveRoofIds = useRef(new Set<string>())
+  const nodes = useScene((s) => s.nodes)
+  const shown = useRef<THREE.Mesh[]>([])
 
   useEffect(() => {
-    const nodes = useScene.getState().nodes
+    for (const m of shown.current) {
+      m.parent?.remove(m)
+      m.geometry.dispose()
+    }
+    shown.current = []
 
-    // Collect which roof nodes should be in "edit mode"
-    const activeRoofIds = new Set<string>()
+    const segIds = new Set<string>()
     for (const id of selectedIds) {
       const node = nodes[id as AnyNodeId]
       if (!node) continue
       if (node.type === 'roof') {
-        activeRoofIds.add(id)
-      } else if (node.type === 'roof-segment' && node.parentId) {
-        activeRoofIds.add(node.parentId)
+        for (const c of node.children ?? []) segIds.add(c as string)
+      } else if (node.type === 'roof-segment') {
+        segIds.add(id)
       }
     }
+    if (!segIds.size) return
 
-    // Update all roofs that are currently active OR were previously active
-    const roofIdsToUpdate = new Set([...activeRoofIds, ...prevActiveRoofIds.current])
-
-    for (const roofId of roofIdsToUpdate) {
-      const group = sceneRegistry.nodes.get(roofId)
-      if (!group) continue
-
-      const mergedMesh = group.getObjectByName('merged-roof')
-      const segmentsWrapper = group.getObjectByName('segments-wrapper')
-      const isActive = activeRoofIds.has(roofId)
-
-      if (mergedMesh) mergedMesh.visible = !isActive
-      if (segmentsWrapper) segmentsWrapper.visible = isActive
-
-      const roofNode = nodes[roofId as AnyNodeId] as RoofNode | undefined
-      if (roofNode?.children?.length) {
-        const wasActive = prevActiveRoofIds.current.has(roofId)
-        if (isActive !== wasActive) {
-          // Entering edit mode: rebuild individual segment geometries
-          // Exiting edit mode: sync transforms + rebuild merged mesh
-          const { markDirty } = useScene.getState()
-          for (const childId of roofNode.children) {
-            markDirty(childId as AnyNodeId)
-          }
-        }
-      }
+    let meshes: ReturnType<typeof roofMeshesForExport>
+    try {
+      meshes = roofMeshesForExport(nodes as never, getRoofContext(nodes as never), segIds)
+    } catch (e) {
+      console.warn('roof highlight: could not build', e)
+      return
     }
+    for (const [segId, m] of meshes) {
+      const seg = nodes[segId as AnyNodeId]
+      const roofGroup = seg?.parentId ? sceneRegistry.nodes.get(seg.parentId) : undefined
+      if (!roofGroup) continue
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.Float32BufferAttribute(m.vertices, 3))
+      g.setIndex(m.faces)
+      const mesh = new THREE.Mesh(g, HIGHLIGHT)
+      mesh.name = 'roof-selection-highlight'
+      mesh.raycast = () => {}
+      mesh.renderOrder = 10
+      // World-space geometry into the roof group's frame (levels move groups).
+      roofGroup.updateWorldMatrix(true, false)
+      mesh.applyMatrix4(new THREE.Matrix4().copy(roofGroup.matrixWorld).invert())
+      roofGroup.add(mesh)
+      shown.current.push(mesh)
+    }
+  }, [selectedIds, nodes])
 
-    prevActiveRoofIds.current = activeRoofIds
-  }, [selectedIds])
+  useEffect(
+    () => () => {
+      for (const m of shown.current) {
+        m.parent?.remove(m)
+        m.geometry.dispose()
+      }
+      shown.current = []
+    },
+    [],
+  )
 
   return null
 }

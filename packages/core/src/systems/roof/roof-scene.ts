@@ -55,6 +55,9 @@ const WALL_ON_EDGE = 0.5
 /** Continuation seams stay open only if both roofs' eaves agree this well;
  *  otherwise each side gets a closed step wall. */
 const SEAM_PROFILE_TOL = 0.2
+/** Auto ridge matching snaps ridges that are this close; further apart
+ *  they keep their own heights. */
+const LEVEL_SNAP_M = 0.15
 
 export type RidgeMatch = 'level' | 'pitch' | 'independent'
 
@@ -334,9 +337,17 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
   const walkDir: V2 = buriedIsLo ? [-rb.dir[0], -rb.dir[1]] : rb.dir
 
   // Ridge matching.
+  // Auto: LEVEL only snaps ridges that are already (nearly) level — a
+  // drawing slip, like the operator's 0.134 m step. Anything further apart
+  // is the operator's choice of heights: forcing it made changing one
+  // roof's height drag its neighbours (operator 2026-09-26). 'level' in
+  // the panel still forces it.
+  const nearlyLevel =
+    Math.abs(ridgeWorld(pb, B.shape).y - ra.y) <= LEVEL_SNAP_M &&
+    spanOf(B.shape) >= LEVEL_MATCH_MIN_SPAN_RATIO * spanOf(A.shape)
   const mode: RidgeMatch =
     ((B.placement.seg as { ridgeMatch?: RidgeMatch }).ridgeMatch as RidgeMatch | undefined) ??
-    (spanOf(B.shape) >= LEVEL_MATCH_MIN_SPAN_RATIO * spanOf(A.shape) ? 'level' : 'independent')
+    (nearlyLevel ? 'level' : 'independent')
   if (mode === 'level') {
     B.opts = { ...B.opts, ridgeRiseOverride: ra.y - pb.baseY }
   } else if (mode === 'pitch') {
@@ -674,11 +685,35 @@ function _dormerWindowOverrides(
         bestU = ((lx - q0[0]) * eu[0] + (lz - q0[1]) * eu[1]) / el
       }
     }
+    // No eave parallel to the window's wall (a diagonal wall, a window on a
+    // gable end): still follow it — nearest sloped edge, centred on the
+    // window, front at the window's distance in from that eave (operator
+    // 2026-09-26: "I select a window and it's not following it").
+    const parallel = bestEdge >= 0
+    if (!parallel) {
+      for (const e of shellSlopedEdges(s)) {
+        const [q0, q1] = shellEdgeLocal(s, e)
+        const ex = q1[0] - q0[0]
+        const ez = q1[1] - q0[1]
+        const el = Math.hypot(ex, ez)
+        if (el < 1e-6) continue
+        const eu: V2 = [ex / el, ez / el]
+        const inward = (lx - q0[0]) * -eu[1] + (lz - q0[1]) * eu[0]
+        const dist = Math.abs(inward)
+        if (dist < Math.abs(bestDist) || bestEdge < 0) {
+          bestDist = inward
+          bestEdge = e
+          bestU = ((lx - q0[0]) * eu[0] + (lz - q0[1]) * eu[1]) / el
+        }
+      }
+    }
     if (bestEdge < 0) continue
 
     // Front face on the wall's INNER face, so the real wall — with its window
     // opening — stands in front and forms the dormer's face.
-    const inward = Math.max(0, bestDist + (wall.thickness ?? 0.15) / 2 + 0.01)
+    const inward = parallel
+      ? Math.max(0, bestDist + (wall.thickness ?? 0.15) / 2 + 0.01)
+      : Math.max(0, bestDist)
     const cheekWidth = (win.width ?? 1) + 0.5
     const halfW = cheekWidth / 2
     const f = s.frame

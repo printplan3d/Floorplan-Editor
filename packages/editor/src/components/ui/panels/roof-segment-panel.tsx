@@ -921,7 +921,7 @@ export function RoofSegmentPanel() {
                   />
                   <SliderControl
                     label="Ridge height"
-                    max={2.5}
+                    max={5}
                     min={0.3}
                     onChange={(nv) => updateDormer(idx, { ridgeHeight: nv })}
                     precision={2}
@@ -931,7 +931,7 @@ export function RoofSegmentPanel() {
                   />
                   <SliderControl
                     label="Cheek width"
-                    max={4}
+                    max={12}
                     min={0.6}
                     onChange={(nv) => updateDormer(idx, { cheekWidth: nv })}
                     precision={2}

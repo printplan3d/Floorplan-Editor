@@ -245,6 +245,10 @@ export type ShellShape = {
   frame: RoofFrame
   realWalls: RealWallSpan[]
   noInteriorCap: boolean
+  /** Slanted edges of a 4-point footprint (ridge frame, CCW, outward unit
+   *  normal). The roof is built on the footprint's rectangle and cut back
+   *  to these. Empty when the footprint IS its rectangle. */
+  footprintCuts: { a: V2; b: V2; n: V2 }[]
   /** Sides whose eave has no overhang (see ShellBuildOptions.sideLoFlush). */
   flushLo: boolean
   flushHi: boolean
@@ -297,6 +301,7 @@ export function resolveShellShape(
   let zMax = Math.max(...zs)
   if (!(xMax > xMin && zMax > zMin)) return null
 
+  const footprintCuts = _footprintCuts(raw, xMin, xMax, zMin, zMax)
   const baseStyles = _resolveEdgeStyles(node, raw)
   // Fix the ridge orientation from the UNtruncated footprint — truncating a
   // hip along its ridge must not be able to flip it.
@@ -372,6 +377,7 @@ export function resolveShellShape(
     infillFloor: Math.min(0, Number.isFinite(opts.infillFloor) ? opts.infillFloor! : 0),
     clipVolumes: opts.clipVolumes ?? [],
     dormers: [],
+    footprintCuts,
   }
   shape.dormers = _resolveDormers(node)
     .map((d) => _resolveDormer(d, shape, opts.dormerOverrides?.[d.id]))
@@ -409,6 +415,23 @@ export function generateShellSegmentGeometry(
       geom.dispose()
       geom = ensureGroupCoverage(merged)
     }
+  }
+  if (shape.footprintCuts.length > 0) {
+    // A 4-point footprint that isn't a rectangle (operator 2026-09-26: "some
+    // four-point roofs are still shown as a rectangle"): cut the rectangle
+    // roof back to each slanted edge (plus the overhang), then close it — a
+    // wall on the edge line up to the roof, a fascia along the cut.
+    const oh = shape.frame.overhang
+    const vols: ClipVolume[] = shape.footprintCuts.map((c) => [
+      { n: [c.n[0], 0, c.n[1]], p: [c.a[0] + c.n[0] * oh, 0, c.a[1] + c.n[1] * oh], eps: 0 },
+    ])
+    const cut = _subtractVolumes(geom, vols)
+    geom.dispose()
+    const closing = _footprintClosing(shape)
+    geom = closing.length
+      ? ensureGroupCoverage(_appendGeometry(ensureGroupCoverage(cut), _facesToGeometry(closing)))
+      : ensureGroupCoverage(cut)
+    cut.dispose()
   }
   if (shape.clipVolumes.length > 0) {
     const cut = _subtractVolumes(geom, shape.clipVolumes)
@@ -535,6 +558,9 @@ export function shellVolumeLocal(shape: ShellShape, withOverhang = false): ClipV
       vol.push({ n: [(t * m[0]) / k, -1 / k, (t * m[1]) / k], p: [a[0], e, a[1]], eps: -0.005 })
     }
   }
+  for (const c of shape.footprintCuts) {
+    vol.push({ n: [-c.n[0], 0, -c.n[1]], p: [c.a[0] + c.n[0] * oh, 0, c.a[1] + c.n[1] * oh], eps: 0.01 })
+  }
   vol.push({ n: [0, 1, 0], p: [0, shape.infillFloor, 0], eps: 0.01 })
   return vol
 }
@@ -565,13 +591,133 @@ export function shellHeightAtLocal(shape: ShellShape, x: number, z: number): num
     )
     if (shape.styles[f.eEndLo] === 'hip') h = Math.min(h, f.meanEave + f.tanOf[f.eEndLo]! * (u - f.uMin))
     if (shape.styles[f.eEndHi] === 'hip') h = Math.min(h, f.meanEave + f.tanOf[f.eEndHi]! * (f.uMax - u))
-    best = h
+    const outside = shape.footprintCuts.some(
+      (c) => c.n[0] * (x - c.a[0]) + c.n[1] * (z - c.a[1]) > COVER_BUFFER,
+    )
+    if (!outside) best = h
   }
   for (const d of shape.dormers) {
     const dh = _dormerHeightAt(d, x, z)
     if (dh != null && (best == null || dh > best)) best = dh
   }
   return best
+}
+
+/**
+ * The slanted edges of a 4-point footprint, in the ridge frame: every edge
+ * that doesn't lie on its bounding rectangle. Empty for a rectangle, and
+ * for a concave quad (cut half-spaces are only valid on convex ones).
+ */
+function _footprintCuts(raw: V2[], xMin: number, xMax: number, zMin: number, zMax: number): { a: V2; b: V2; n: V2 }[] {
+  if (raw.length !== 4) return []
+  let area = 0
+  for (let i = 0; i < 4; i++) {
+    const p = raw[i]!
+    const q = raw[(i + 1) % 4]!
+    area += p[0] * q[1] - q[0] * p[1]
+  }
+  const poly = area > 0 ? raw : [...raw].reverse()
+  // Convex?
+  let sign = 0
+  for (let i = 0; i < 4; i++) {
+    const a = poly[i]!
+    const b = poly[(i + 1) % 4]!
+    const c = poly[(i + 2) % 4]!
+    const cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+    if (Math.abs(cr) < 1e-9) continue
+    if (sign === 0) sign = Math.sign(cr)
+    else if (Math.sign(cr) !== sign) return []
+  }
+  const T = 0.01
+  const onSide = (a: V2, b: V2) =>
+    (Math.abs(a[0] - xMin) < T && Math.abs(b[0] - xMin) < T) ||
+    (Math.abs(a[0] - xMax) < T && Math.abs(b[0] - xMax) < T) ||
+    (Math.abs(a[1] - zMin) < T && Math.abs(b[1] - zMin) < T) ||
+    (Math.abs(a[1] - zMax) < T && Math.abs(b[1] - zMax) < T)
+  const out: { a: V2; b: V2; n: V2 }[] = []
+  for (let i = 0; i < 4; i++) {
+    const a = poly[i]!
+    const b = poly[(i + 1) % 4]!
+    if (onSide(a, b)) continue
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1])
+    if (L < 1e-6) continue
+    // CCW polygon in (x, z): the inward normal is (-dz, dx); outward is its negation.
+    const n: V2 = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L]
+    out.push({ a, b, n })
+  }
+  return out
+}
+
+/** The main slope surface (no dormers), local Y, at any local point. */
+function _slopeY(shape: ShellShape, x: number, z: number): number {
+  const f = shape.frame
+  const u = f.ridgeAlongX ? x : z
+  const v = f.ridgeAlongX ? z : x
+  let h = Math.min(
+    f.eaveOf[f.eSideLo]! + f.tanOf[f.eSideLo]! * (v - f.vMin),
+    f.eaveOf[f.eSideHi]! + f.tanOf[f.eSideHi]! * (f.vMax - v),
+  )
+  if (shape.styles[f.eEndLo] === 'hip') h = Math.min(h, f.meanEave + f.tanOf[f.eEndLo]! * (u - f.uMin))
+  if (shape.styles[f.eEndHi] === 'hip') h = Math.min(h, f.meanEave + f.tanOf[f.eEndHi]! * (f.uMax - u))
+  return h
+}
+
+/**
+ * Faces that close a roof cut back to a slanted footprint edge: the wall on
+ * the edge line from the storey wall top up to the roof (the region under a
+ * concave roof line is convex, so one polygon), and a fascia band along the
+ * cut line an overhang further out.
+ */
+function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
+  const faces: { verts: V3[]; slot: number }[] = []
+  const y0 = shape.infillFloor
+  const oh = shape.frame.overhang
+  const F = oh > 1e-3 ? FASCIA_M : 0
+  const f = shape.frame
+  for (const c of shape.footprintCuts) {
+    // Sample the roof line along the edge, exact at the ridge crossing.
+    const ts = new Set<number>([0, 1])
+    const L = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1])
+    const steps = Math.max(1, Math.ceil(L / 0.1))
+    for (let k = 1; k < steps; k++) ts.add(k / steps)
+    const va = f.ridgeAlongX ? c.a[1] : c.a[0]
+    const vb = f.ridgeAlongX ? c.b[1] : c.b[0]
+    if ((va - f.vMid) * (vb - f.vMid) < 0) ts.add((f.vMid - va) / (vb - va))
+    const t = [...ts].sort((p, q) => p - q)
+    const at = (tt: number, off: number): [number, number] => [
+      c.a[0] + (c.b[0] - c.a[0]) * tt + c.n[0] * off,
+      c.a[1] + (c.b[1] - c.a[1]) * tt + c.n[1] * off,
+    ]
+    // Wall: bottom a -> b, then the roof line back b -> a.
+    const wall: V3[] = [
+      [c.a[0], y0, c.a[1]],
+      [c.b[0], y0, c.b[1]],
+    ]
+    for (let k = t.length - 1; k >= 0; k--) {
+      const [x, z] = at(t[k]!, 0)
+      wall.push([x, Math.max(y0, _slopeY(shape, x, z)), z])
+    }
+    faces.push({ verts: wall, slot: SLOT_WALL_EXTERIOR })
+    // Fascia along the cut line.
+    if (F > 0) {
+      for (let k = 0; k < t.length - 1; k++) {
+        const [x0, z0] = at(t[k]!, oh)
+        const [x1, z1] = at(t[k + 1]!, oh)
+        const y0t = _slopeY(shape, x0, z0)
+        const y1t = _slopeY(shape, x1, z1)
+        faces.push({
+          verts: [
+            [x0, y0t - F, z0],
+            [x1, y1t - F, z1],
+            [x1, y1t, z1],
+            [x0, y0t, z0],
+          ],
+          slot: SLOT_FASCIA,
+        })
+      }
+    }
+  }
+  return faces
 }
 
 /** Start/end corners of a polygon edge in local XZ. */

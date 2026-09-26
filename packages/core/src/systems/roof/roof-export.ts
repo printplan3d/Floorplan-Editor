@@ -23,9 +23,11 @@ const round = (v: number) => Math.round(v * 1000) / 1000
 export function roofMeshesForExport(
   nodes: Record<string, AnyNode>,
   ctx: RoofContext = getRoofContext(nodes),
+  only?: Set<string>,
 ): Map<string, RoofExportMesh> {
   const out = new Map<string, RoofExportMesh>()
   for (const [segId, r] of ctx.segments) {
+    if (only && !only.has(segId)) continue
     const g = generateShellSegmentGeometry(r.placement.seg as RoofSegmentNode, r.opts)
     if (!g) continue
     const pos = g.getAttribute('position')
