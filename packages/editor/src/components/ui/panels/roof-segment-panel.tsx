@@ -775,9 +775,11 @@ export function RoofSegmentPanel() {
         const n = edgeCount(node)
         const currentWeights = ((node as any).edgeWeights as number[] | undefined) ?? []
         const built = joined?.shape
+        // A shed's high side is its wall (the builder's mirrored half).
+        const shedHigh = (i: number) => node.roofType === 'shed' && !!built && i === built.frame.eSideHi
         const sloped = (i: number) =>
           built
-            ? i === built.frame.eSideLo || i === built.frame.eSideHi || built.styles[i] === 'hip'
+            ? !shedHigh(i) && (i === built.frame.eSideLo || i === built.frame.eSideHi || built.styles[i] === 'hip')
             : true
         const tanOf = (i: number): number => {
           const t = built?.frame.tanOf[i]
@@ -817,7 +819,7 @@ export function RoofSegmentPanel() {
                   key={i}
                 >
                   <span>{edgeLabel(i, n)}</span>
-                  <span>{built?.styles[i] === 'gable' ? 'gable end, no slope' : 'joins another roof, no slope'}</span>
+                  <span>{shedHigh(i) ? 'high wall, no slope' : built?.styles[i] === 'gable' ? 'gable end, no slope' : 'joins another roof, no slope'}</span>
                 </div>
               ),
             )}

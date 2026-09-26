@@ -359,7 +359,15 @@ export function resolveShellShape(
       }),
   )
   const footprint = _ccw(raw)
-  const baseStyles = _resolveEdgeStyles(node, raw)
+  // A shed (mono-pitch) is built as HALF a gable: the footprint is doubled
+  // past its high side, built as a gable with the ridge on the high wall
+  // line, and cut back there (a footprint cut: the high wall, fascia and
+  // overhang come with it). Its low side is edge 0. Before 2026-09-26 it
+  // was built as a gable with a near-vertical "slope" on the high side,
+  // which ran 150 m into the ground.
+  const explicitEdges = (node as unknown as { edges?: unknown[] }).edges
+  const shed = kind === 'shed' && !(Array.isArray(explicitEdges) && explicitEdges.length === raw.length)
+  const baseStyles: ('hip' | 'gable')[] = shed ? ['hip', 'gable', 'hip', 'gable'] : _resolveEdgeStyles(node, raw)
   // Fix the ridge orientation from the UNtruncated footprint — truncating a
   // hip along its ridge must not be able to flip it.
   const gX = baseStyles[1] === 'gable' || baseStyles[3] === 'gable'
@@ -391,6 +399,11 @@ export function resolveShellShape(
         xMax = hi
       }
     }
+  }
+  if (shed && ridgeAlongX) {
+    const high = zMax
+    zMax = high + (high - zMin)
+    footprintCuts.push({ a: [xMax, high], b: [xMin, high], n: [0, 1] })
   }
   const polygon: V2[] = [
     [xMin, zMin],
