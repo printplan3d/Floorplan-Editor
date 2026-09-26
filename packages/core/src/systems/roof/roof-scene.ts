@@ -291,7 +291,7 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
   // level above, drop the flat interior ceiling that would slice that floor.
   const walls = Object.values(nodes).filter((n): n is WallNode => !!n && n.type === 'wall')
   for (const r of segs.values()) {
-    const spans = _realWallSpans(r, walls, levels)
+    const spans = _realWallSpans(r, walls, levels, [...segs.values()])
     const upper = _hasUpperWalls(r, walls, levels)
     if (spans.length || upper) {
       r.opts = {
@@ -974,12 +974,31 @@ function _realWallSpans(
   r: ResolvedSegment,
   walls: WallNode[],
   levels: Map<string, { elev: number; height: number }>,
+  all: ResolvedSegment[] = [],
 ): RealWallSpan[] {
   const p = r.placement
+  // How high a real wall actually stands at a point: its own top, or lower
+  // where a roof trims it. A wall just past this roof's edge can stand
+  // under a LOWER neighbour and be cut down to it; counting its full height
+  // left an open slot between the two roofs (operator 2026-09-27: up to
+  // 1.4 m where two stepped east sections meet).
+  const roofOver = (X: number, Z: number): number | null => {
+    let best: number | null = null
+    for (const o of all) {
+      const h = heightWorld(o.placement, o.shape, X, Z, false)
+      if (h != null && (best == null || h > best)) best = h
+    }
+    return best
+  }
   const s = r.shape
   const out: RealWallSpan[] = []
   for (let e = 0; e < 4; e++) {
-    if (s.styles[e] === 'junction') continue
+    // A junction is open; an abut end steps down onto (or up from) another
+    // roof, so its closing wall is always built full height and the
+    // neighbour trims away what falls inside it. Leaving it to a real wall
+    // set back from the end line opened a slot down to the lower roof
+    // (operator 2026-09-27, the stepped east sections).
+    if (s.styles[e] === 'junction' || s.styles[e] === 'abut') continue
     const [l0, l1] = shellEdgeLocal(s, e)
     const a = toWorld(p, l0[0], l0[1])
     const b = toWorld(p, l1[0], l1[1])
@@ -1000,13 +1019,23 @@ function _realWallSpans(
       const inset = (mx - a[0]) * inN[0] + (mz - a[1]) * inN[1]
       if (inset < -0.15 || inset > WALL_ON_EDGE) continue
       const lv = w.parentId ? levels.get(w.parentId) : undefined
-      const topLocal = (lv ? lv.elev : 0) + (w.height ?? 2.7) - p.baseY
-      if (topLocal <= 0.05) continue // below the roof base: not in the infill zone
+      const wallTop = (lv ? lv.elev : 0) + (w.height ?? 2.7)
       const t0 = ((ws[0] - a[0]) * d[0] + (ws[1] - a[1]) * d[1]) / L
       const t1 = ((we[0] - a[0]) * d[0] + (we[1] - a[1]) * d[1]) / L
       const lo = Math.max(0, Math.min(t0, t1))
       const hi = Math.min(1, Math.max(t0, t1))
       if (hi - lo < 0.02) continue
+      // Lowest the wall actually stands along this stretch (on the wall's line).
+      let top = wallTop
+      for (let k = 0; k <= 8; k++) {
+        const t = lo + ((hi - lo) * k) / 8
+        const X = a[0] + d[0] * t * L + inN[0] * inset
+        const Z = a[1] + d[1] * t * L + inN[1] * inset
+        const h = roofOver(X, Z)
+        if (h != null && h < top) top = h
+      }
+      const topLocal = top - p.baseY
+      if (topLocal <= 0.05) continue // below the roof base: not in the infill zone
       out.push({ edge: e, t0: lo, t1: hi, top: topLocal, inset: Math.max(0, inset) })
     }
   }

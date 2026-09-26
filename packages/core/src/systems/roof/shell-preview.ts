@@ -1269,6 +1269,43 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
           ]
     const along = (p: V3) => (p[0] - pi[0]) * dir[0] + (p[2] - pi[1]) * dir[1]
     const eaveAt = (t: number) => yi + (yj - yi) * t
+    // An abut end steps onto another roof. Its closing wall also has to
+    // close the eave overhangs, or a higher eave next to a lower one leaves
+    // an open notch out there (operator 2026-09-27: 2.6 m at the stepped
+    // east sections, one with a 24 deg south slope). Carried on out along
+    // the end line to each side's overhang, under the slope line; the
+    // neighbour trims away what falls inside its own roof.
+    if (st === 'abut') {
+      for (const [k, sgn] of [
+        [i, -1],
+        [j, 1],
+      ] as const) {
+        const loSide = ridgeAlongX ? k <= 1 : k === 0 || k === 3
+        const o = loSide ? ohLo : ohHi
+        if (o < 1e-3) continue
+        const pk = poly[k]!
+        const yk = Math.max(y0, cornerY[k]!)
+        const pe: V2 = [pk[0] + dir[0] * sgn * o, pk[1] + dir[1] * sgn * o]
+        const ye = Math.max(y0, cornerY[k]! - f.cornerTan[k]! * o)
+        if (yk - y0 <= 1e-3) continue
+        add(
+          sgn > 0
+            ? [
+                [pk[0], y0, pk[1]],
+                [pe[0], y0, pe[1]],
+                [pe[0], ye, pe[1]],
+                [pk[0], yk, pk[1]],
+              ]
+            : [
+                [pe[0], y0, pe[1]],
+                [pk[0], y0, pk[1]],
+                [pk[0], yk, pk[1]],
+                [pe[0], ye, pe[1]],
+              ],
+          SLOT_WALL_EXTERIOR,
+        )
+      }
+    }
     const runs = _edgeRuns(shape.realWalls.filter((w) => w.edge === i))
     for (let k = 0; k < runs.length; k++) {
       const r = runs[k]!
