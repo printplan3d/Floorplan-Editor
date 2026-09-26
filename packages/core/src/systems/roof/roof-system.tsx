@@ -240,14 +240,14 @@ export const RoofSystem = () => {
         continue
       }
       const group = sceneRegistry.nodes.get(id) as THREE.Group
-      if (group) {
-        const mergedMesh = group.getObjectByName('merged-roof') as THREE.Mesh | undefined
-        if (mergedMesh?.visible !== false) {
-          // Only rebuild when visible — RoofEditSystem re-triggers via markDirty on edit mode exit
-          updateMergedRoofGeometry(node as RoofNode, group, nodes)
-          roofsProcessed++
-        }
-      }
+      const mergedMesh = group?.getObjectByName('merged-roof') as THREE.Mesh | undefined
+      // Not mounted yet (an upper level's roofs register after the first
+      // frames) or hidden: keep it queued and try again next frame. Dropping
+      // it left the roof empty until something else changed (operator
+      // 2026-09-27: "Level 1 roof didn't show up in preview").
+      if (!group || !mergedMesh || mergedMesh.visible === false) continue
+      updateMergedRoofGeometry(node as RoofNode, group, nodes)
+      roofsProcessed++
       pendingRoofUpdates.delete(id)
     }
   }, 5) // Priority 5: run after all other systems have settled
