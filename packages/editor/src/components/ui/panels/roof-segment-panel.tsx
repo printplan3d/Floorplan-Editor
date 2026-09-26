@@ -975,11 +975,63 @@ export function RoofSegmentPanel() {
                     </select>
                   </label>
                   {d.windowId ? (
-                    <div className="px-1 pt-1 text-[10px] leading-tight text-neutral-500">
-                      Placed and sized from the window: its front sits on
-                      the window's wall. Move or resize the window and
-                      this dormer follows.
-                    </div>
+                    <>
+                      <div className="px-1 pt-1 text-[10px] leading-tight text-neutral-500">
+                        Placed and sized from the window: its front sits on
+                        the window's wall. Move or resize the window and
+                        this dormer follows. Adjust the fit below.
+                      </div>
+                      <SliderControl
+                        label="Extra width"
+                        max={4}
+                        min={0}
+                        onChange={(nv) => updateDormer(idx, { fitWidth: nv })}
+                        precision={2}
+                        step={0.05}
+                        unit="m"
+                        value={d.fitWidth ?? 0.5}
+                      />
+                      <SliderControl
+                        label="Headroom"
+                        max={2}
+                        min={0.05}
+                        onChange={(nv) => updateDormer(idx, { fitHeadroom: nv })}
+                        precision={2}
+                        step={0.05}
+                        unit="m"
+                        value={d.fitHeadroom ?? 0.15}
+                      />
+                      <SliderControl
+                        label="Shift along eave"
+                        max={2}
+                        min={-2}
+                        onChange={(nv) => updateDormer(idx, { fitOffset: nv })}
+                        precision={2}
+                        step={0.05}
+                        unit="m"
+                        value={d.fitOffset ?? 0}
+                      />
+                      {d.type === 'shed' ? (
+                        <SliderControl
+                          label="Roof pitch"
+                          max={40}
+                          min={1}
+                          onChange={(nv) => updateDormer(idx, { pitchDeg: nv })}
+                          precision={0}
+                          step={1}
+                          unit="°"
+                          value={d.pitchDeg ?? defaultShedPitchDeg(node, d.parentFaceId ?? 0)}
+                        />
+                      ) : null}
+                      <div className="flex gap-1.5 px-1 pt-1">
+                        <ActionButton
+                          label="Reset fit"
+                          onClick={() =>
+                            updateDormer(idx, { fitWidth: undefined, fitHeadroom: undefined, fitOffset: undefined })
+                          }
+                        />
+                      </div>
+                    </>
                   ) : (
                   <>
                   <MetricControl

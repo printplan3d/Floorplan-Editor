@@ -140,6 +140,13 @@ export const RoofSegmentNode = BaseNode.extend({
         // a third of the main slope's pitch. Always kept shallower than the
         // main slope (it must meet it).
         pitchDeg: z.number().optional(),
+        // A dormer that follows a window (windowId) is placed and sized from
+        // it; these adjust that fit. Extra width beyond the window (m, total,
+        // default 0.5), headroom above the window head (m, default 0.15),
+        // and a sideways nudge along the eave (m, default 0).
+        fitWidth: z.number().optional(),
+        fitHeadroom: z.number().optional(),
+        fitOffset: z.number().optional(),
       }),
     )
     .optional(),

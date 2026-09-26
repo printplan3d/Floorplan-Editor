@@ -979,8 +979,18 @@ function _dormerWindowOverrides(
   nodes: Nodes,
   levels: Map<string, { elev: number; height: number }>,
 ): Record<string, DormerOverride> | null {
-  const raw = (r.placement.seg as { dormers?: { id: string; windowId?: string; type?: string; cheekWidth?: number }[] })
-    .dormers
+  const raw = (
+    r.placement.seg as {
+      dormers?: {
+        id: string
+        windowId?: string
+        type?: string
+        fitWidth?: number
+        fitHeadroom?: number
+        fitOffset?: number
+      }[]
+    }
+  ).dormers
   if (!Array.isArray(raw)) return null
   const out: Record<string, DormerOverride> = {}
   const p = r.placement
@@ -1056,13 +1066,21 @@ function _dormerWindowOverrides(
     const inward = parallel
       ? Math.max(0, bestDist + (wall.thickness ?? 0.15) / 2 + 0.01)
       : Math.max(0, bestDist)
-    const cheekWidth = (win.width ?? 1) + 0.5
+    // Fit to the window, adjustable in the panel.
+    const num = (v: unknown, dflt: number) => (typeof v === 'number' && Number.isFinite(v) ? v : dflt)
+    const cheekWidth = Math.max(0.4, (win.width ?? 1) + Math.max(0, num(d.fitWidth, 0.5)))
+    const headroom = Math.max(0.02, num(d.fitHeadroom, 0.15))
+    {
+      const [q0, q1] = shellEdgeLocal(s, bestEdge)
+      const el = Math.hypot(q1[0] - q0[0], q1[1] - q0[1]) || 1
+      bestU += num(d.fitOffset, 0) / el
+    }
     const halfW = cheekWidth / 2
     const f = s.frame
     const tanP = Math.max(0.01, f.tanOf[bestEdge]!)
     const zFront = f.eaveOf[bestEdge]! + tanP * inward
     const headLocal = headWorld - p.baseY
-    const need = headLocal + 0.15 - zFront // cheek top must clear the window head
+    const need = headLocal + headroom - zFront // cheek top must clear the window head
     let ridgeHeight: number
     if (d.type === 'shed') ridgeHeight = need
     else ridgeHeight = need >= halfW * tanP ? need + halfW * tanP : 2 * need
