@@ -40,6 +40,10 @@ clipEvaluator.useGroups = false
 clipEvaluator.attributes = ['position', 'normal']
 
 const SAMPLE_STEP = 0.05
+/** Walls the roof dips below by less than this are left alone: a sub-2 cm
+ *  trim is invisible, and it makes near-coplanar faces for the CSG (a
+ *  ground-floor wall under an eave at the same height is exactly that). */
+const TRIM_MIN_M = 0.02
 /** How far past each wall face the roof is sampled. */
 const SIDE_MARGIN = 0.05
 
@@ -146,7 +150,7 @@ export function clipWallGeometry(
   for (let i = 0; i < n; i++) {
     const x = x0 + ((x1 - x0) * i) / (n - 1)
     const sec: Section = { l: [x, W], c: [x, 0], r: [x, -W], yl: at(x, W), yc: at(x, 0), yr: at(x, -W) }
-    if (x >= 0 && x <= len && Math.min(sec.yl, sec.yc, sec.yr) < top - 0.005) needs = true
+    if (x >= 0 && x <= len && Math.min(sec.yl, sec.yc, sec.yr) < top - TRIM_MIN_M) needs = true
     sections.push(sec)
   }
   if (!needs) return null
@@ -163,6 +167,24 @@ function _intersect(src: THREE.BufferGeometry, prism: THREE.BufferGeometry, id: 
     const res = clipEvaluator.evaluate(a, b, INTERSECTION) as Brush
     prism.dispose()
     const g = res.geometry
+    // A trimmed wall can only ever be SMALLER than the wall. When the CSG
+    // misclassifies (seen 2026-09-26 on a diagonal wall of plan c39200da),
+    // it hands back part of the trimming prism instead — a 150 m column
+    // through the house. Keep the untrimmed wall rather than that.
+    src.computeBoundingBox()
+    g.computeBoundingBox()
+    const sb = src.boundingBox!
+    const gb = g.boundingBox!
+    const M = 0.01
+    if (
+      g.getAttribute('position')?.count &&
+      (gb.min.x < sb.min.x - M || gb.min.y < sb.min.y - M || gb.min.z < sb.min.z - M ||
+        gb.max.x > sb.max.x + M || gb.max.y > sb.max.y + M || gb.max.z > sb.max.z + M)
+    ) {
+      console.warn('roof-wall-clip: trim came back larger than the wall; kept untrimmed', id)
+      g.dispose()
+      return null
+    }
     g.computeVertexNormals()
     return g
   } catch (e) {
@@ -249,7 +271,7 @@ function _clipArcWall(
       yc: roofAt(here[0], here[1]),
       yr: roofAt(R[0], R[1]),
     }
-    if (line[i]!.onWall && Math.min(sec.yl, sec.yc, sec.yr) < top - 0.005) needs = true
+    if (line[i]!.onWall && Math.min(sec.yl, sec.yc, sec.yr) < top - TRIM_MIN_M) needs = true
     sections.push(sec)
   }
   if (!needs || sections.length < 2) return null
