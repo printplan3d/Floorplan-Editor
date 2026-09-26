@@ -101,6 +101,9 @@ export type RoofContext = {
   levels: Map<string, { elev: number; height: number }>
   /** Highest roof surface above world (x, z), or null if nothing covers it. */
   heightAt: (x: number, z: number) => number | null
+  /** The same without dormers: where walls stop (a dormer is a closed box
+   *  on the roof with its own front and window). */
+  wallHeightAt: (x: number, z: number) => number | null
 }
 
 // ─── Levels ───────────────────────────────────────────────────────
@@ -197,9 +200,9 @@ function insideFootprint(p: SegmentPlacement, s: ShellShape, X: number, Z: numbe
   return u >= f.uMin - tol && u <= f.uMax + tol && v >= f.vMin - tol && v <= f.vMax + tol
 }
 
-function heightWorld(p: SegmentPlacement, s: ShellShape, X: number, Z: number): number | null {
+function heightWorld(p: SegmentPlacement, s: ShellShape, X: number, Z: number, withDormers = true): number | null {
   const [x, z] = toLocal(p, X, Z)
-  const h = shellHeightAtLocal(s, x, z)
+  const h = shellHeightAtLocal(s, x, z, withDormers)
   return h == null ? null : p.baseY + h
 }
 
@@ -346,7 +349,15 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     }
     return best
   }
-  return { segments: segs, levels, heightAt }
+  const wallHeightAt = (X: number, Z: number): number | null => {
+    let best: number | null = null
+    for (const r of all) {
+      const h = heightWorld(r.placement, r.shape, X, Z, false)
+      if (h != null && (best == null || h > best)) best = h
+    }
+    return best
+  }
+  return { segments: segs, levels, heightAt, wallHeightAt }
 }
 
 function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: ResolvedSegment) => void) {
@@ -988,6 +999,7 @@ function _dormerWindowOverrides(
         fitWidth?: number
         fitHeadroom?: number
         fitOffset?: number
+        window?: { w?: number; h?: number; sill?: number }
       }[]
     }
   ).dormers
@@ -1063,8 +1075,10 @@ function _dormerWindowOverrides(
 
     // Front face on the wall's INNER face, so the real wall — with its window
     // opening — stands in front and forms the dormer's face.
+    // Front flush with the wall's OUTER face: the dormer has its own front
+    // and window (like a free one), standing on the wall line.
     const inward = parallel
-      ? Math.max(0, bestDist + (wall.thickness ?? 0.15) / 2 + 0.01)
+      ? Math.max(0, bestDist - (wall.thickness ?? 0.15) / 2)
       : Math.max(0, bestDist)
     // Fit to the window, adjustable in the panel.
     const num = (v: unknown, dflt: number) => (typeof v === 'number' && Number.isFinite(v) ? v : dflt)
@@ -1079,13 +1093,27 @@ function _dormerWindowOverrides(
     const f = s.frame
     const tanP = Math.max(0.01, f.tanOf[bestEdge]!)
     const zFront = f.eaveOf[bestEdge]! + tanP * inward
-    const headLocal = headWorld - p.baseY
-    const need = headLocal + headroom - zFront // cheek top must clear the window head
+    // Its own window, sized from the followed one unless set in the panel;
+    // the front is tall enough for it plus the headroom.
+    const dw = d.window ?? {}
+    const winW = num(dw.w, win.width ?? 1)
+    const winH = num(dw.h, win.height ?? 1.2)
+    const sill = num(dw.sill, 0.15)
+    void headWorld
+    void zFront
+    const need = sill + winH + headroom
     let ridgeHeight: number
     if (d.type === 'shed') ridgeHeight = need
     else ridgeHeight = need >= halfW * tanP ? need + halfW * tanP : 2 * need
     ridgeHeight = Math.max(0.5, ridgeHeight)
-    out[d.id] = { edgeIdx: bestEdge, uMid: Math.min(Math.max(bestU, 0), 1), inward, cheekWidth, ridgeHeight }
+    out[d.id] = {
+      edgeIdx: bestEdge,
+      uMid: Math.min(Math.max(bestU, 0), 1),
+      inward,
+      cheekWidth,
+      ridgeHeight,
+      win: { w: winW, h: winH, sill },
+    }
   }
   return Object.keys(out).length ? out : null
 }

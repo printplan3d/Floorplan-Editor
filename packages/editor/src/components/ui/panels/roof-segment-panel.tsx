@@ -977,63 +977,113 @@ export function RoofSegmentPanel() {
                     </select>
                   </label>
                   {d.windowId ? (
-                    <>
-                      <div className="px-1 pt-1 text-[10px] leading-tight text-neutral-500">
-                        Placed and sized from the window: its front sits on
-                        the window's wall. Move or resize the window and
-                        this dormer follows. Adjust the fit below.
-                      </div>
-                      <SliderControl
-                        label="Extra width"
-                        max={4}
-                        min={0}
-                        onChange={(nv) => updateDormer(idx, { fitWidth: nv })}
-                        precision={2}
-                        step={0.05}
-                        unit="m"
-                        value={d.fitWidth ?? 0.5}
-                      />
-                      <SliderControl
-                        label="Headroom"
-                        max={2}
-                        min={0.05}
-                        onChange={(nv) => updateDormer(idx, { fitHeadroom: nv })}
-                        precision={2}
-                        step={0.05}
-                        unit="m"
-                        value={d.fitHeadroom ?? 0.15}
-                      />
-                      <SliderControl
-                        label="Shift along eave"
-                        max={2}
-                        min={-2}
-                        onChange={(nv) => updateDormer(idx, { fitOffset: nv })}
-                        precision={2}
-                        step={0.05}
-                        unit="m"
-                        value={d.fitOffset ?? 0}
-                      />
-                      {d.type === 'shed' ? (
-                        <SliderControl
-                          label="Roof pitch"
-                          max={40}
-                          min={1}
-                          onChange={(nv) => updateDormer(idx, { pitchDeg: nv })}
-                          precision={0}
-                          step={1}
-                          unit="°"
-                          value={d.pitchDeg ?? defaultShedPitchDeg(node, d.parentFaceId ?? 0)}
-                        />
-                      ) : null}
-                      <div className="flex gap-1.5 px-1 pt-1">
-                        <ActionButton
-                          label="Reset fit"
-                          onClick={() =>
-                            updateDormer(idx, { fitWidth: undefined, fitHeadroom: undefined, fitOffset: undefined })
-                          }
-                        />
-                      </div>
-                    </>
+                    (() => {
+                      // Built like a hand-placed dormer (own front and
+                      // window), but stands on the followed window's wall,
+                      // centred on it, sized from it. The real window is
+                      // replaced by the dormer's.
+                      const fw = (nodes as Record<string, any>)[d.windowId] ?? {}
+                      const realW = typeof fw.width === 'number' ? fw.width : 1
+                      const realH = typeof fw.height === 'number' ? fw.height : 1.2
+                      const winW = d.window?.w ?? realW
+                      const winH = d.window?.h ?? realH
+                      const setWin = (patch: any) =>
+                        updateDormer(idx, { window: { ...(d.window ?? {}), ...patch } })
+                      return (
+                        <>
+                          <div className="px-1 pt-1 text-[10px] leading-tight text-neutral-500">
+                            Stands on the window's wall, centred on it, and
+                            takes its place with its own window. Move the
+                            window and the dormer follows.
+                          </div>
+                          <SliderControl
+                            label="Cheek width"
+                            max={12}
+                            min={0.6}
+                            onChange={(nv) => updateDormer(idx, { fitWidth: Math.max(0, nv - realW) })}
+                            precision={2}
+                            step={0.05}
+                            unit="m"
+                            value={realW + (d.fitWidth ?? 0.5)}
+                          />
+                          <SliderControl
+                            label="Headroom"
+                            max={2}
+                            min={0.05}
+                            onChange={(nv) => updateDormer(idx, { fitHeadroom: nv })}
+                            precision={2}
+                            step={0.05}
+                            unit="m"
+                            value={d.fitHeadroom ?? 0.15}
+                          />
+                          <SliderControl
+                            label="Shift along eave"
+                            max={2}
+                            min={-2}
+                            onChange={(nv) => updateDormer(idx, { fitOffset: nv })}
+                            precision={2}
+                            step={0.05}
+                            unit="m"
+                            value={d.fitOffset ?? 0}
+                          />
+                          {d.type === 'shed' ? (
+                            <SliderControl
+                              label="Roof pitch"
+                              max={40}
+                              min={1}
+                              onChange={(nv) => updateDormer(idx, { pitchDeg: nv })}
+                              precision={0}
+                              step={1}
+                              unit="°"
+                              value={d.pitchDeg ?? defaultShedPitchDeg(node, d.parentFaceId ?? 0)}
+                            />
+                          ) : null}
+                          <SliderControl
+                            label="Window width"
+                            max={3}
+                            min={0.3}
+                            onChange={(nv) => setWin({ w: nv })}
+                            precision={2}
+                            step={0.05}
+                            unit="m"
+                            value={winW}
+                          />
+                          <SliderControl
+                            label="Window height"
+                            max={2.5}
+                            min={0.3}
+                            onChange={(nv) => setWin({ h: nv })}
+                            precision={2}
+                            step={0.05}
+                            unit="m"
+                            value={winH}
+                          />
+                          <SliderControl
+                            label="Window sill"
+                            max={1}
+                            min={0.05}
+                            onChange={(nv) => setWin({ sill: nv })}
+                            precision={2}
+                            step={0.05}
+                            unit="m"
+                            value={d.window?.sill ?? 0.15}
+                          />
+                          <div className="flex gap-1.5 px-1 pt-1">
+                            <ActionButton
+                              label="Reset to window"
+                              onClick={() =>
+                                updateDormer(idx, {
+                                  fitWidth: undefined,
+                                  fitHeadroom: undefined,
+                                  fitOffset: undefined,
+                                  window: undefined,
+                                })
+                              }
+                            />
+                          </div>
+                        </>
+                      )
+                    })()
                   ) : (
                   <>
                   <MetricControl

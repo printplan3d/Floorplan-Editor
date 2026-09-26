@@ -3,6 +3,7 @@
 // back. A dormer built over a real window gets none (that window is it).
 import { resolveRoofContext } from '../../dist/systems/roof/roof-scene.js'
 import { generateShellSegmentGeometry, SLOT_GLASS } from '../../dist/systems/roof/shell-preview.js'
+import { openingCoveredByRoof } from '../../dist/systems/roof/roof-wall-clip-system.js'
 import { buildPlan } from './plan-fixture.mjs'
 console.log = () => {}
 const warns = []
@@ -196,6 +197,28 @@ P('\nshed pitch pivots about the back line')
 const withWin = buildPlan({ dormerWindow: 'window_lh3r' })
 const rw = resolveRoofContext(withWin).segments.get('rseg_7ywyzq')
 P('\ndormer following window lh3r')
-ok(glassOf(generateShellSegmentGeometry(rw.placement.seg, rw.opts)).length === 0, 'no extra glass (the real window is its front)')
+// Since 2026-09-26 a window-following dormer is built like a free one
+// (own front and window, full controls) and replaces the real window.
+ok(glassOf(generateShellSegmentGeometry(rw.placement.seg, rw.opts)).length > 0, 'has its own window glass')
+{
+  const ctxW = resolveRoofContext(withWin)
+  ok(openingCoveredByRoof(withWin.window_lh3r, withWin, ctxW), 'the real window it follows is hidden (replaced)')
+  // Walls stop at the main roof: nothing stands up inside the dormer.
+  const d = rw.shape.dormers[0], pl = rw.placement
+  const mid = [d.anchor[0] + d.inwardUnit[0] * 0.5, d.anchor[1] + d.inwardUnit[1] * 0.5]
+  const X = pl.tx + pl.cos * mid[0] + pl.sin * mid[1], Z = pl.tz - pl.sin * mid[0] + pl.cos * mid[1]
+  ok(ctxW.wallHeightAt(X, Z) < ctxW.heightAt(X, Z) - 0.2, `walls under it stop at the main roof (${ctxW.wallHeightAt(X, Z).toFixed(2)} vs dormer ${ctxW.heightAt(X, Z).toFixed(2)})`)
+  // Shed following a window: pitch pivots about the back line too.
+  const shedW = (pitchDeg) => {
+    const p = buildPlan({ dormerWindow: 'window_lh3r' })
+    Object.assign(p.rseg_7ywyzq.dormers[0], { type: 'shed', pitchDeg })
+    const r = resolveRoofContext(p).segments.get('rseg_7ywyzq'), dd = r.shape.dormers[0]
+    const depth = dd.cheekD - 0.15
+    return { depth, back: dd.zFront + dd.tanParent * depth, eave: dd.rZ }
+  }
+  const a = shedW(8), b2 = shedW(16)
+  ok(Math.abs(a.depth - b2.depth) < 1e-6 && Math.abs(a.back - b2.back) < 1e-6 && b2.eave < a.eave,
+    `window shed: back fixed (${a.back.toFixed(2)}), front drops ${a.eave.toFixed(2)} -> ${b2.eave.toFixed(2)} from 8 to 16 deg`)
+}
 
 P(`\n${fails === 0 ? 'ALL PASS' : `${fails} FAIL(S)`} | warnings: ${warns.length ? warns.join(' | ') : 'none'}`)

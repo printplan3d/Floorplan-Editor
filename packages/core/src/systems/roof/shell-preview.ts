@@ -122,6 +122,8 @@ export type DormerOverride = {
   inward: number
   cheekWidth: number
   ridgeHeight: number
+  /** The dormer's window (defaults from the followed window). */
+  win?: { w?: number; h?: number; sill?: number }
 }
 
 export type ShellBuildOptions = {
@@ -662,7 +664,14 @@ export function shellVolumeLocal(shape: ShellShape, withOverhang = false): ClipV
  * segment doesn't cover it. Dormers count: the result is the higher of the
  * main slope and any dormer standing there.
  */
-export function shellHeightAtLocal(shape: ShellShape, x: number, z: number): number | null {
+export function shellHeightAtLocal(
+  shape: ShellShape,
+  x: number,
+  z: number,
+  /** false: the main roof only (walls stop there; a dormer is a closed box
+   *  on top with its own front and window). */
+  withDormers = true,
+): number | null {
   const f = shape.frame
   const u = f.ridgeAlongX ? x : z
   const v = f.ridgeAlongX ? z : x
@@ -693,7 +702,7 @@ export function shellHeightAtLocal(shape: ShellShape, x: number, z: number): num
       )
     if (!outside) best = h
   }
-  for (const d of shape.dormers) {
+  for (const d of withDormers ? shape.dormers : []) {
     const dh = _dormerHeightAt(d, x, z)
     if (dh != null && (best == null || dh > best)) best = dh
   }
@@ -1389,8 +1398,8 @@ function _resolveDormer(
   // Then keep it clear of the ridge FROM WHERE IT STANDS: a steep shed pitch
   // lowers the front instead of moving the dormer.
   let runToBury: number
-  if (spec.type === 'shed' && !ov) {
-    // A free shed pivots about its BACK line (operator 2026-09-26: "the end
+  if (spec.type === 'shed') {
+    // A shed pivots about its BACK line (operator 2026-09-26: "the end
     // on the roof stays fixed, the other end moves up and down as I change
     // the pitch"). Its depth is set once — by the asked height at the
     // default pitch (main / 3), so an unchanged shed looks as before — and
@@ -1425,11 +1434,19 @@ function _resolveDormer(
     zBase: zFront - Math.max(0.6, rh),
     tanParent,
     tanShed,
-    forwardCover: ov ? inward + 0.05 : 0.05,
+    forwardCover: 0.05,
     zFront,
     followsWindow: !!ov,
-    win: spec.window,
+    // Its own window, like a free dormer: sized from the followed window
+    // unless the panel set it.
+    win: { ...(ov?.win ?? {}), ..._definedOnly(spec.window) },
   }
+}
+
+function _definedOnly<T extends object>(o: T | undefined): Partial<T> {
+  const out: Partial<T> = {}
+  for (const [k, v] of Object.entries(o ?? {})) if (typeof v === 'number' && Number.isFinite(v)) (out as any)[k] = v
+  return out
 }
 
 /** Dormer roof height at local (x, z), or null outside it. */
@@ -1498,7 +1515,6 @@ function _unionDormers(base: THREE.BufferGeometry, shape: ShellShape): THREE.Buf
   // Plain faces appended after the CSG: dormer glass and dormer ceilings.
   const glass: { verts: V3[]; slot: number }[] = []
   for (const d of shape.dormers) {
-    if (d.followsWindow) continue
     const w = _dormerWindow(d)
     if (!w) continue
     const cut = new Brush(w.recess, dummyMats)

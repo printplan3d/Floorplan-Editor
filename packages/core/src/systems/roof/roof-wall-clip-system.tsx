@@ -142,7 +142,7 @@ export function clipWallGeometry(
   const n = Math.min(MAX_SAMPLES, Math.max(2, Math.ceil((x1 - x0) / SAMPLE_STEP) + 1))
   const at = (x: number, z: number) => {
     // wall-local (x, z) -> world, then the roof there
-    const h = ctx.heightAt(sx + dx * x - dz * z, sz + dz * x + dx * z)
+    const h = ctx.wallHeightAt(sx + dx * x - dz * z, sz + dz * x + dx * z)
     return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY)
   }
   const sections: Section[] = []
@@ -246,7 +246,7 @@ function _clipArcWall(
   }
 
   const roofAt = (X: number, Z: number) => {
-    const h = ctx.heightAt(X, Z)
+    const h = ctx.wallHeightAt(X, Z)
     return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY)
   }
   const sections: Section[] = []
@@ -348,13 +348,21 @@ export function openingCoveredByRoof(
 ): boolean {
   const wall = nodes[node.wallId ?? node.parentId ?? ''] as WallNode | undefined
   if (!wall || wall.type !== 'wall') return false
+  // A window a dormer follows is replaced by the dormer's own window.
+  const id = (node as { id?: string }).id
+  if (id) {
+    for (const [, r] of ctx.segments) {
+      const ds = (r.placement.seg as { dormers?: { windowId?: string }[] }).dormers
+      if (ds?.some((d) => d.windowId === id)) return true
+    }
+  }
   // Opening position is arc length along the wall (chord length if straight).
   const bulge = wall.bulge ?? 0
   const len = arcLength(wall.start, wall.end, bulge)
   if (len < 1e-6) return false
   const along = node.position?.[0] ?? 0
   const { point } = pointAndTangentAtT(wall.start, wall.end, bulge, along / len)
-  const h = ctx.heightAt(point[0], point[1])
+  const h = ctx.wallHeightAt(point[0], point[1])
   if (h == null) return false
   const lv = wall.parentId ? ctx.levels.get(wall.parentId) : undefined
   const cy = (lv ? lv.elev : 0) + (node.position?.[1] ?? 1)
