@@ -51,5 +51,12 @@ export async function loadAssetUrl(url: string): Promise<string | null> {
   }
 
   // Legacy data URLs are returned as is
-  return url
+  if (url.startsWith('data:')) return url
+
+  // Anything else (e.g. the webapp's `idb:<key>` guide reference when its
+  // bytes are not in this browser) is not loadable. Handing it to a Three.js
+  // loader threw and took the whole 3D scene down (operator 2026-09-26:
+  // "The editor scene failed to render" on Preview). Resolve to nothing.
+  console.warn(`Unresolvable asset URL, skipped: ${url.slice(0, 40)}`)
+  return null
 }

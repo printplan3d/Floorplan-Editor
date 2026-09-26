@@ -5,6 +5,7 @@ import { DoubleSide, type Group, type Texture, TextureLoader } from 'three'
 import { float, texture } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import { useAssetUrl } from '../../../hooks/use-asset-url'
+import { ErrorBoundary } from '../../error-boundary'
 import useViewer from '../../../store/use-viewer'
 
 export const GuideRenderer = ({ node }: { node: GuideNode }) => {
@@ -22,9 +23,13 @@ export const GuideRenderer = ({ node }: { node: GuideNode }) => {
       visible={showGuides}
     >
       {resolvedUrl && (
-        <Suspense>
-          <GuidePlane opacity={node.opacity} scale={node.scale} url={resolvedUrl} />
-        </Suspense>
+        // A tracing image that fails to load (a dead blob:, a missing
+        // file) hides this guide; it must never take the scene down.
+        <ErrorBoundary fallback={null} key={resolvedUrl}>
+          <Suspense>
+            <GuidePlane opacity={node.opacity} scale={node.scale} url={resolvedUrl} />
+          </Suspense>
+        </ErrorBoundary>
       )}
     </group>
   )
