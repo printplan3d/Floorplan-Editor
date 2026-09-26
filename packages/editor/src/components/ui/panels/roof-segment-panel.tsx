@@ -966,7 +966,7 @@ export function RoofSegmentPanel() {
                       onChange={(e) =>
                         updateDormer(idx, { windowId: e.target.value || undefined })
                       }
-                      value={d.windowId ?? ''}
+                      value={d.windowId && (nodes as Record<string, any>)[d.windowId]?.type === 'window' ? d.windowId : ''}
                     >
                       <option value="">None — place by hand</option>
                       {followableWindows.map((w) => (
@@ -976,7 +976,13 @@ export function RoofSegmentPanel() {
                       ))}
                     </select>
                   </label>
-                  {d.windowId ? (
+                  {d.windowId && (nodes as Record<string, any>)[d.windowId]?.type !== 'window' ? (
+                    <div className="px-1 pt-1 text-[10px] leading-tight text-amber-400">
+                      The window this dormer followed no longer exists, so it
+                      is placed by hand for now. Pick the window again above.
+                    </div>
+                  ) : null}
+                  {d.windowId && (nodes as Record<string, any>)[d.windowId]?.type === 'window' ? (
                     (() => {
                       // Built like a hand-placed dormer (own front and
                       // window), but stands on the followed window's wall,

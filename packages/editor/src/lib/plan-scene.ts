@@ -182,6 +182,9 @@ export interface CanonicalRoof {
   // ends have different lengths). At least three vertices required to
   // be honoured on load.
   polygon?: [number, number][];
+  // Ridge at any angle (degrees, the editor's ridgeAngleDeg). Absent = the
+  // ridge_axis. Added 2026-09-27: it used to be dropped on every cloud save.
+  ridge_angle_deg?: number;
   // Shell-rebuild fields — all optional, backend pipeline accepts
   // additively. See ROOF_REBUILD_PLAN.md §"Data model — additions to
   // roof_masses" for semantics.
@@ -498,6 +501,10 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
           ...(typeof (seg as any).ridgeMatch === "string"
             ? { ridge_match: (seg as any).ridgeMatch }
             : {}),
+          ...(typeof (seg as any).ridgeAngleDeg === "number" &&
+          Number.isFinite((seg as any).ridgeAngleDeg)
+            ? { ridge_angle_deg: (seg as any).ridgeAngleDeg }
+            : {}),
           ...(Array.isArray((seg as any).facesOverride) && (seg as any).facesOverride.length
             ? { faces_override: (seg as any).facesOverride }
             : {}),
@@ -738,6 +745,10 @@ export function canonicalToSceneGraph(
     wall.children.push(door.id);
   }
 
+  // Saved window id -> the window node's id here. A dormer that follows a
+  // window refers to it by id, so ids must survive a cloud round trip
+  // (operator 2026-09-27: every reload broke every dormer's window link).
+  const windowIdMap = new Map<string, string>();
   for (const win of canonical.windows ?? []) {
     const wall = wallIdMap.get(win.wall_id);
     if (!wall) continue;
@@ -747,6 +758,11 @@ export function canonicalToSceneGraph(
     const cols = Math.max(1, win.pane_columns ?? 1);
     const rowsN = Math.max(1, win.pane_rows ?? 1);
     const window: any = WindowNode.parse({
+      /* Keep the id when it is one of ours (the schema enforces the prefix;
+         a mobile-shaped id would throw), as for zones below. */
+      ...(typeof (win as any).id === "string" && (win as any).id.startsWith("window_")
+        ? { id: (win as any).id }
+        : {}),
       parentId: wall.id,
       wallId: wall.id,
       position: [(win.position_along_wall ?? 0.5) * len, sill + height / 2, 0],
@@ -775,6 +791,7 @@ export function canonicalToSceneGraph(
     });
     nodes[window.id] = window;
     wall.children.push(window.id);
+    if (typeof (win as any).id === "string") windowIdMap.set((win as any).id, window.id);
   }
 
   for (const r of canonical.rooms ?? []) {
@@ -936,7 +953,16 @@ export function canonicalToSceneGraph(
           ? { facesOverride: s.faces_override }
           : {}),
         ...(Array.isArray(s.dormers) && s.dormers.length
-          ? { dormers: s.dormers }
+          ? {
+              dormers: s.dormers.map((d: any) =>
+                d && typeof d.windowId === "string" && windowIdMap.has(d.windowId)
+                  ? { ...d, windowId: windowIdMap.get(d.windowId) }
+                  : d,
+              ),
+            }
+          : {}),
+        ...(typeof s.ridge_angle_deg === "number" && Number.isFinite(s.ridge_angle_deg)
+          ? { ridgeAngleDeg: s.ridge_angle_deg }
           : {}),
         ...(typeof s.roof_override_mesh === "string" && s.roof_override_mesh
           ? { roofOverrideMesh: s.roof_override_mesh }
