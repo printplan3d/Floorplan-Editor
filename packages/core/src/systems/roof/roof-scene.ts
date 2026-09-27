@@ -329,7 +329,19 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
   for (const r of segs.values()) {
     const vols: ClipVolume[] = []
     for (const o of segs.values()) {
-      if (o === r || o.placement.levelId !== r.placement.levelId) continue
+      if (o === r) continue
+      // A roof on a HIGHER level stands on its own storey's walls: the room
+      // under it is not roof space. Cut this roof away inside that room,
+      // from the room's floor up to its roof, so a box poking out of this
+      // roof reads like a big dormer (operator 2026-09-27: the main roof ran
+      // straight on through the Level 1 room under the shed — "two planes
+      // inside the window").
+      if (_levelAbove(o, r, levels) && _footprintsOverlap(r, o)) {
+        const room = _roomInto(o, r, levels)
+        if (room) vols.push(room)
+        continue
+      }
+      if (o.placement.levelId !== r.placement.levelId) continue
       if (seamNbrs.get(r)?.includes(o)) continue
       // A gable's rake overhang doesn't run out over a lower neighbouring
       // roof: cut back to the gable wall where the neighbour is (operator
@@ -337,7 +349,11 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
       // it read as a gap between the two gables).
       if (_footprintsOverlap(r, o, r.shape.frame.overhang + 0.1)) vols.push(..._rakesOver(o, r))
       if (!_footprintsOverlap(r, o)) continue
-      vols.push(_volumeInto(o, r))
+      // o's rake cut back over r (see _rakesOver) no longer reaches over r:
+      // r must not be trimmed by it either, or neither roof covers that
+      // band (operator 2026-09-27: a slot you could see down through at
+      // the north gable).
+      vols.push(_volumeInto(o, r, true, _rakeEdgesOver(o, r)))
     }
     if (vols.length) {
       r.opts = { ...r.opts, clipVolumes: vols }
@@ -912,11 +928,72 @@ function _rakesOver(o: ResolvedSegment, r: ResolvedSegment): ClipVolume[] {
   return out
 }
 
+/** o's gable ends whose rake overhang stands over r's footprint (and so
+ *  is cut back by _rakesOver when o is built). */
+function _rakeEdgesOver(o: ResolvedSegment, r: ResolvedSegment): number[] {
+  const f = o.shape.frame
+  const oh = f.overhang
+  if (oh < 1e-3) return []
+  const rc = _cornersWorld(r)
+  const poly = o.shape.polygon
+  const out: number[] = []
+  for (const e of [f.eEndLo, f.eEndHi]) {
+    if (o.shape.styles[e] !== 'gable') continue
+    const a = poly[e]!
+    const b = poly[(e + 1) % 4]!
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L] // inward
+    const band: V2[] = [a, b, [b[0] - m[0] * oh, b[1] - m[1] * oh], [a[0] - m[0] * oh, a[1] - m[1] * oh]].map(
+      ([x, z]) => toWorld(o.placement, x!, z!),
+    )
+    if (_convexOverlap(band, rc)) out.push(e)
+  }
+  return out
+}
+
+/** Do two convex polygons (world XZ) overlap? Separating axis test. */
+function _convexOverlap(pa: V2[], pb: V2[]): boolean {
+  for (const poly of [pa, pb]) {
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i]!
+      const q = poly[(i + 1) % poly.length]!
+      const ax: V2 = [-(q[1] - p[1]), q[0] - p[0]]
+      const proj = (c: V2[]) => c.map((v) => v[0] * ax[0] + v[1] * ax[1])
+      const A = proj(pa)
+      const B = proj(pb)
+      const L = Math.hypot(ax[0], ax[1]) || 1
+      if (Math.max(...A) < Math.min(...B) + 0.01 * L || Math.max(...B) < Math.min(...A) + 0.01 * L) return false
+    }
+  }
+  return true
+}
+
+/** Is o on a level above r's? */
+function _levelAbove(o: ResolvedSegment, r: ResolvedSegment, levels: Map<string, { elev: number; height: number }>): boolean {
+  const lo = o.placement.levelId ? levels.get(o.placement.levelId) : undefined
+  const lr = r.placement.levelId ? levels.get(r.placement.levelId) : undefined
+  return !!lo && !!lr && lo.elev > lr.elev + 1e-3
+}
+
+/** The room under upper-level roof o (its footprint, from its level's floor
+ *  up to its roof), in r's local frame. */
+function _roomInto(
+  o: ResolvedSegment,
+  r: ResolvedSegment,
+  levels: Map<string, { elev: number; height: number }>,
+): ClipVolume | null {
+  const lv = o.placement.levelId ? levels.get(o.placement.levelId) : undefined
+  if (!lv) return null
+  const vol = _volumeInto(o, r, false).filter((h) => !(Math.abs(h.n[1] - 1) < 1e-9 && Math.hypot(h.n[0], h.n[2]) < 1e-9))
+  vol.push({ n: [0, 1, 0], p: [0, lv.elev - r.placement.baseY, 0], eps: 0.01 })
+  return vol
+}
+
 /** Neighbour `o`'s volume, re-expressed in `r`'s local frame. */
-function _volumeInto(o: ResolvedSegment, r: ResolvedSegment): ClipVolume {
+function _volumeInto(o: ResolvedSegment, r: ResolvedSegment, withOverhang = true, noOverhangEdges: number[] = []): ClipVolume {
   const po = o.placement
   const pr = r.placement
-  return shellVolumeLocal(o.shape, true).map((h) => {
+  return shellVolumeLocal(o.shape, withOverhang, noOverhangEdges).map((h) => {
     // point: o-local -> world -> r-local
     const [wx, wz] = toWorld(po, h.p[0], h.p[2])
     const [lx, lz] = toLocal(pr, wx, wz)

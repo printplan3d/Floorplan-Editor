@@ -625,7 +625,13 @@ function _area(poly: V3[]): number {
  * inside, so a shared seam wall drops out of both roofs); the slopes are
  * strict, so a coplanar slope never cancels itself out.
  */
-export function shellVolumeLocal(shape: ShellShape, withOverhang = false): ClipVolume {
+export function shellVolumeLocal(
+  shape: ShellShape,
+  withOverhang = false,
+  /** Edges whose overhang is cut away (a rake over a lower neighbour):
+   *  the volume stops at their wall line. */
+  noOverhangEdges: number[] = [],
+): ClipVolume {
   const f = shape.frame
   const poly = shape.polygon
   const vol: ClipVolume = []
@@ -642,7 +648,8 @@ export function shellVolumeLocal(shape: ShellShape, withOverhang = false): ClipV
     const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
     const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L] // inward (CCW in x/z as used by the infill)
     const flush = (i === f.eSideLo && shape.flushLo) || (i === f.eSideHi && shape.flushHi)
-    const out = !flush && (shape.styles[i] === 'hip' || shape.styles[i] === 'gable') ? oh : 0
+    const out =
+      !flush && !noOverhangEdges.includes(i) && (shape.styles[i] === 'hip' || shape.styles[i] === 'gable') ? oh : 0
     vol.push({ n: [m[0], 0, m[1]], p: [a[0] - m[0] * out, 0, a[1] - m[1] * out], eps: 0.01 })
     const sloped = i === f.eSideLo || i === f.eSideHi || shape.styles[i] === 'hip'
     if (sloped) {
