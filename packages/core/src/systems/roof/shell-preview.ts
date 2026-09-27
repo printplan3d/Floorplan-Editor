@@ -1421,6 +1421,32 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   // the inset real wall at each end of that stretch.
   const poly = shape.polygon
   const y0 = shape.infillFloor
+  // One plane per side. Where real walls along an edge are set in from the
+  // drawn outline, that edge's WHOLE generated wall moves onto their outer
+  // face -- not just the stretches over them, which left a 15 cm jog in
+  // the middle of the side (operator 2026-09-27: "still crack, it should be
+  // one wall", the L1 shed's east side).
+  const edgeShift = [0, 1, 2, 3].map((e) => {
+    const fs = _edgeRuns(shape.realWalls.filter((w) => w.edge === e))
+      .filter((r) => Number.isFinite(r.top) && r.face > 0.02)
+      .map((r) => r.face)
+    return fs.length ? Math.max(...fs) : 0
+  })
+  // Keep each side wall inside its neighbours' (moved) planes: no stub
+  // past a corner.
+  const insideOthers = (e: number, piece: V3[]): V3[] => {
+    let out = piece
+    for (const o of [(e + 3) % 4, (e + 1) % 4]) {
+      const sh = edgeShift[o]!
+      if (sh <= 0) continue
+      const a = poly[o]!
+      const b = poly[(o + 1) % 4]!
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+      const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L]
+      out = _clipHalf(out, (q) => (q[0] - a[0]) * m[0] + (q[2] - a[1]) * m[1] - sh + 1e-4)
+    }
+    return out
+  }
   for (let i = 0; i < 4; i++) {
     const st = shape.styles[i]!
     if (st === 'junction') continue
@@ -1440,6 +1466,18 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
     // roof trims it at its own slope). Otherwise a room that carries on past
     // this roof's edge was open between the two roofs (operator 2026-09-27,
     // the L1 shed's east side over the main roof).
+    const eShift = edgeShift[i]!
+    const moved = (piece: V3[], floor: number): V3[] => {
+      let out = piece
+      if (eShift > 0) {
+        out = out.map((p): V3 => {
+          const x = p[0] + inward[0] * eShift
+          const z = p[2] + inward[1] * eShift
+          return [x, p[1] > floor + 1e-6 ? Math.max(floor, _slopeY(shape, x, z)) : p[1], z]
+        })
+      }
+      return insideOthers(i, out)
+    }
     const downs = shape.infillDown.filter((d) => d.edge === i && d.y < y0)
     const yB = downs.length ? Math.min(...downs.map((d) => d.y)) : y0
     // Outline in edge order (outward-facing; checked by the facing audit).
@@ -1559,7 +1597,7 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
           let sub = _clipHalf(outline, (p) => along(p) - a0 * L)
           sub = _clipHalf(sub, (p) => a1 * L - along(p))
           sub = _clipHalf(sub, (p) => p[1] - (dn ? dn.y : y0))
-          add(sub, SLOT_WALL_EXTERIOR)
+          add(moved(sub, dn ? dn.y : y0), SLOT_WALL_EXTERIOR)
         }
         continue
       }
@@ -1573,18 +1611,12 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
       // wall" -- the L1 shed's outline is 22 cm wider than its walls, and
       // its side read as a stepped, cut-back wall). Its top follows the
       // slope at the new line; the strip outside becomes overhang.
-      const shift = covered && r.face > 0.02 ? r.face : 0
-      if (shift > 0) {
-        piece = piece.map((p): V3 => {
-          const x = p[0] + inward[0] * shift
-          const z = p[2] + inward[1] * shift
-          return [x, p[1] > floor + 1e-6 ? Math.max(floor, _slopeY(shape, x, z)) : p[1], z]
-        })
-      }
-      add(piece, SLOT_WALL_EXTERIOR)
+      const shift = eShift
+      add(moved(piece, floor), SLOT_WALL_EXTERIOR)
 
-      // Return faces where a covered stretch meets an uncovered one.
-      if (!covered || r.inset <= 0.02) continue
+      // Return faces where a covered stretch meets an uncovered one (none
+      // once the whole side is in one plane).
+      if (!covered || r.inset <= 0.02 || shift > 0) continue
 
       // The ledge: the generated wall above stands on the edge line, the
       // real wall below is inset, and the strip between them at the real
