@@ -11,7 +11,7 @@ import type * as THREE from 'three'
 import type { AnyNode, RoofSegmentNode } from '../../schema'
 import type { RoofContext } from './roof-scene'
 import { getRoofContext } from './roof-system'
-import { generateShellSegmentGeometry, SLOT_BACKING, SLOT_GLASS } from './shell-preview'
+import { generateShellSegmentGeometry, SLOT_BACKING, SLOT_FASCIA, SLOT_GLASS } from './shell-preview'
 
 /** One roof segment's final mesh in WORLD coordinates (three.js frame: X, Y
  *  up, Z), as flat arrays: vertices [x, y, z, ...] in metres rounded to the
@@ -23,6 +23,11 @@ export type RoofExportMesh = {
   glass: number[]
   /** Faces of the dark panels behind dormer glass. */
   backing: number[]
+  /** Fascia and barge-board faces. Upright, so the pipeline sorted them by
+   *  direction into the WHITE gable-wall object and they vanished against
+   *  the walls under them (operator 2026-09-27: "grey strips in review, no
+   *  fascia in the render"). */
+  fascia: number[]
   /** The same roof WITHOUT dormers: what walls are trimmed against (the
    *  preview's RoofContext.wallHeightAt). Absent when there are no dormers. */
   wallMesh?: { vertices: number[]; faces: number[] }
@@ -65,6 +70,7 @@ export function roofMeshesForExport(
     const faces: number[] = []
     const glass: number[] = []
     const backing: number[] = []
+    const fascia: number[] = []
     const slotOf = (k: number) => {
       for (const gr of g.groups) if (k >= gr.start && k < gr.start + gr.count) return gr.materialIndex ?? 0
       return 0
@@ -78,6 +84,7 @@ export function roofMeshesForExport(
       const slot = slotOf(k)
       if (slot === SLOT_GLASS) glass.push(faces.length / 3)
       else if (slot === SLOT_BACKING) backing.push(faces.length / 3)
+      else if (slot === SLOT_FASCIA) fascia.push(faces.length / 3)
       faces.push(a, b, c)
     }
     g.dispose()
@@ -104,7 +111,7 @@ export function roofMeshesForExport(
       }
       wg?.dispose()
     }
-    if (faces.length) out.set(segId, { vertices, faces, glass, backing, ...(wallMesh ? { wallMesh } : {}) })
+    if (faces.length) out.set(segId, { vertices, faces, glass, backing, fascia, ...(wallMesh ? { wallMesh } : {}) })
   }
   return out
 }

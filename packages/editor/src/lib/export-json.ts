@@ -50,6 +50,7 @@ const toPlanMesh = (m: {
   faces: number[];
   glass: number[];
   backing?: number[];
+  fascia?: number[];
   wallMesh?: { vertices: number[]; faces: number[] };
 }) => ({
   vertices: toPlanVerts(m.vertices),
@@ -58,6 +59,7 @@ const toPlanMesh = (m: {
   // Dark panels behind dormer glass, and the roof without dormers (what
   // walls are trimmed against) — see roofMeshesForExport.
   ...(m.backing?.length ? { backing: m.backing } : {}),
+  ...(m.fascia?.length ? { fascia: m.fascia } : {}),
   ...(m.wallMesh
     ? { wall_mesh: { vertices: toPlanVerts(m.wallMesh.vertices), faces: m.wallMesh.faces } }
     : {}),

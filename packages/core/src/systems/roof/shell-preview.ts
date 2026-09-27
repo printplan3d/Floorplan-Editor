@@ -87,7 +87,7 @@ function _remapToSlots(brush: Brush): void {
 const SLOT_WALL_EXTERIOR = 0
 const SLOT_SLATE_TOP = 1
 const SLOT_SOFFIT = 2
-const SLOT_FASCIA = 3
+export const SLOT_FASCIA = 3
 /** Dormer window glass. The render pipeline puts these faces in a glass
  *  object (roof/mesh.py); the preview gives them a glass material. */
 export const SLOT_GLASS = 4
