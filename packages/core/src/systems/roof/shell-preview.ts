@@ -1423,6 +1423,23 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
 
       // Return faces where a covered stretch meets an uncovered one.
       if (!covered || r.inset <= 0.02) continue
+
+      // The ledge: the generated wall above stands on the edge line, the
+      // real wall below is inset, and the strip between them at the real
+      // wall's top was open. From under the overhang it read as a slot into
+      // the roof (operator 2026-09-27: "GAP" beside the L1 shed).
+      {
+        const p0: V2 = [pi[0] + dir[0] * r.t0 * L, pi[1] + dir[1] * r.t0 * L]
+        const p1: V2 = [pi[0] + dir[0] * r.t1 * L, pi[1] + dir[1] * r.t1 * L]
+        let ledge: V3[] = [
+          [p0[0], floor, p0[1]],
+          [p1[0], floor, p1[1]],
+          [p1[0] + inward[0] * r.inset, floor, p1[1] + inward[1] * r.inset],
+          [p0[0] + inward[0] * r.inset, floor, p0[1] + inward[1] * r.inset],
+        ]
+        if (_faceNormal(ledge)[1] > 0) ledge = ledge.reverse()
+        add(ledge, SLOT_SOFFIT)
+      }
       const bounds: [number, EdgeRun | undefined, number][] = [
         [r.t0, runs[k - 1], 1],
         [r.t1, runs[k + 1], -1],

@@ -371,13 +371,21 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     }
     return best
   }
+  // Highest roof over the point, but a roof whose BODY (wall line) covers it
+  // wins over one that only reaches it with its overhang. The overhang is a
+  // thin slab, not a roof over a room: a wall under a higher roof's eave but
+  // below a lower roof's slope rose straight up through that slope to the
+  // soffit (operator 2026-09-27: a post and a gap beside the L1 shed).
   const wallHeightAt = (X: number, Z: number): number | null => {
-    let best: number | null = null
+    let body: number | null = null
+    let any: number | null = null
     for (const r of all) {
       const h = heightWorld(r.placement, r.shape, X, Z, false)
-      if (h != null && (best == null || h > best)) best = h
+      if (h == null) continue
+      if (any == null || h > any) any = h
+      if (insideFootprint(r.placement, r.shape, X, Z, 0.02) && (body == null || h > body)) body = h
     }
-    return best
+    return body ?? any
   }
   return { segments: segs, levels, heightAt, wallHeightAt }
 }
@@ -1156,8 +1164,13 @@ function _realWallSpans(
         if (h != null && h < top) top = h
       }
       const topLocal = top - p.baseY
-      if (topLocal <= 0.05) continue // below the roof base: not in the infill zone
-      out.push({ edge: e, t0: lo, t1: hi, top: topLocal, inset: Math.max(0, inset) })
+      // Below the roof base: not in the infill zone. Except a wall set in
+      // from the edge that tops out AT the base: the infill stands on the
+      // edge line, the wall inside it, and the strip between them needs its
+      // ledge (operator 2026-09-27: "GAP" beside the L1 shed, 15-22 cm).
+      const atBase = topLocal > -0.05 && inset > 0.02
+      if (topLocal <= 0.05 && !atBase) continue
+      out.push({ edge: e, t0: lo, t1: hi, top: Math.max(topLocal, 0), inset: Math.max(0, inset) })
     }
   }
   return out
