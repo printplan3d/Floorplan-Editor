@@ -943,10 +943,15 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
     const reach = Math.max(...shape.polygon.map((p) => c.n[0] * p[0] + c.n[1] * p[1]))
     if (Math.min(c.n[0] * c.a[0] + c.n[1] * c.a[1], c.n[0] * c.b[0] + c.n[1] * c.b[1]) > reach + 0.02) continue
     // A cut on a junction/abut end (the drawn outline is a few degrees off
-    // square there): that end has no overhang, and its closing is the abut
-    // gable or the neighbour's roof. A fascia "an overhang out" floated
-    // 0.3 m off the end, and a second wall z-fought the abut gable.
-    if (_cutOnTightEnd(shape, c)) continue
+    // square there). A junction lives inside the neighbour: nothing to
+    // close. An abut end has no overhang and the abut gable is its wall, so
+    // no second wall (it z-fought) -- but it keeps its barge board, flush
+    // under the slate edge instead of "an overhang out" where it floated
+    // 0.3 m off the end. Dropping it took the fascia off every such gable
+    // (operator 2026-09-27: "all roof sections lost fascia").
+    const tightEnd = _cutOnTightEnd(shape, c)
+    const tight = tightEnd?.style ?? null
+    if (tight === 'junction') continue
     // Sample the roof line along the edge, exact at the ridge crossing.
     const ts = new Set<number>([0, 1])
     const L = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1])
@@ -960,6 +965,17 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
       c.a[0] + (c.b[0] - c.a[0]) * tt + c.n[0] * off,
       c.a[1] + (c.b[1] - c.a[1]) * tt + c.n[1] * off,
     ]
+    // The abut end's board goes on the gable wall's own line (the drawn
+    // outline can sit several cm inside it, which hid the board behind the
+    // wall), 2 cm proud of it.
+    const fasciaAt = (tt: number): [number, number] => {
+      if (!tightEnd) return at(tt, oh)
+      const [x, z] = at(tt, 0)
+      const e = tightEnd.p
+      const m = tightEnd.m
+      const d = m[0] * (e[0] - x) + m[1] * (e[1] - z) + 0.02
+      return [x + m[0] * d, z + m[1] * d]
+    }
     // Wall: bottom a -> b, then the roof line back b -> a.
     const wall: V3[] = [
       [c.a[0], y0, c.a[1]],
@@ -969,12 +985,12 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
       const [x, z] = at(t[k]!, 0)
       wall.push([x, Math.max(y0, _slopeY(shape, x, z)), z])
     }
-    faces.push({ verts: wall, slot: SLOT_WALL_EXTERIOR })
+    if (!tight) faces.push({ verts: wall, slot: SLOT_WALL_EXTERIOR })
     // Fascia along the cut line.
     if (F > 0) {
       for (let k = 0; k < t.length - 1; k++) {
-        const [x0, z0] = at(t[k]!, oh)
-        const [x1, z1] = at(t[k + 1]!, oh)
+        const [x0, z0] = fasciaAt(t[k]!)
+        const [x1, z1] = fasciaAt(t[k + 1]!)
         const y0t = _slopeY(shape, x0, z0)
         const y1t = _slopeY(shape, x1, z1)
         faces.push({
@@ -994,7 +1010,10 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
 
 /** Whether footprint cut c runs along a junction or abut end of the roof
  *  (same outward direction within ~8 deg, within 0.4 m of that edge line). */
-function _cutOnTightEnd(shape: ShellShape, c: { a: V2; b: V2; n: V2 }): boolean {
+function _cutOnTightEnd(
+  shape: ShellShape,
+  c: { a: V2; b: V2; n: V2 },
+): { style: 'junction' | 'abut'; p: V2; m: V2 } | null {
   const poly = shape.polygon
   for (let i = 0; i < 4; i++) {
     const st = shape.styles[i]
@@ -1006,9 +1025,13 @@ function _cutOnTightEnd(shape: ShellShape, c: { a: V2; b: V2; n: V2 }): boolean 
     const m: V2 = [(q[1] - p[1]) / L, -(q[0] - p[0]) / L]
     const mid: V2 = [(c.a[0] + c.b[0]) / 2, (c.a[1] + c.b[1]) / 2]
     const dist = Math.abs(m[0] * (mid[0] - p[0]) + m[1] * (mid[1] - p[1]))
-    if (Math.abs(c.n[0] * m[0] + c.n[1] * m[1]) > 0.99 && dist < 0.4) return true
+    if (Math.abs(c.n[0] * m[0] + c.n[1] * m[1]) > 0.99 && dist < 0.4) {
+      // m, pointing the same way as the cut's outward normal
+      const sg = c.n[0] * m[0] + c.n[1] * m[1] > 0 ? 1 : -1
+      return { style: st, p, m: [m[0] * sg, m[1] * sg] }
+    }
   }
-  return false
+  return null
 }
 
 /** Start/end corners of a polygon edge in local XZ. */

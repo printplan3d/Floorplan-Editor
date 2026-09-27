@@ -1015,7 +1015,34 @@ function _roomInto(
 ): ClipVolume | null {
   const lv = o.placement.levelId ? levels.get(o.placement.levelId) : undefined
   if (!lv) return null
-  const vol = _volumeInto(o, r, false).filter((h) => !(Math.abs(h.n[1] - 1) < 1e-9 && Math.hypot(h.n[0], h.n[2]) < 1e-9))
+  // The room ends at its real walls, not at the roof's drawn outline. The
+  // L1 shed's outline is 22 cm wider than its walls; cutting the lower roof
+  // out to the outline opened that strip over the NEIGHBOURING room, and you
+  // looked through it at that room's floor (operator 2026-09-27: "one roof
+  // gap left", orange floor showing beside the shed).
+  const spans = (o.opts.realWalls ?? []) as { edge: number; t0: number; t1: number; inset: number }[]
+  const poly = o.shape.polygon
+  const local = shellVolumeLocal(o.shape, false).map((h) => {
+    if (Math.abs(h.n[1]) > 1e-9) return h
+    for (let e = 0; e < 4; e++) {
+      const a = poly[e]!
+      const b = poly[(e + 1) % 4]!
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+      const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L]
+      if (Math.abs(h.n[0] - m[0]) > 1e-6 || Math.abs(h.n[2] - m[1]) > 1e-6) continue
+      if (Math.abs((h.p[0] - a[0]) * m[0] + (h.p[2] - a[1]) * m[1]) > 1e-6) continue
+      const mine = spans.filter((s) => s.edge === e)
+      const covered = mine.reduce((acc, s) => acc + (s.t1 - s.t0), 0)
+      // At least a metre of real wall (a shed's edges are doubled, so a
+      // fraction of the edge is the wrong test).
+      if (covered * L < 1.0) return h
+      const inset = Math.max(...mine.map((s) => s.inset))
+      if (inset <= 0.02) return h
+      return { ...h, p: [h.p[0] + m[0] * inset, h.p[1], h.p[2] + m[1] * inset] as [number, number, number] }
+    }
+    return h
+  })
+  const vol = _halfSpacesInto(local, o, r).filter((h) => !(Math.abs(h.n[1] - 1) < 1e-9 && Math.hypot(h.n[0], h.n[2]) < 1e-9))
   vol.push({ n: [0, 1, 0], p: [0, lv.elev - r.placement.baseY, 0], eps: 0.01 })
   return vol
 }
