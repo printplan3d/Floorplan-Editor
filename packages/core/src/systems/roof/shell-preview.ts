@@ -936,6 +936,17 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
   const F = oh > 1e-3 ? FASCIA_M : 0
   const f = shape.frame
   for (const c of shape.footprintCuts) {
+    // A cut line the roof body never reaches (its end was pulled back to a
+    // junction short of the drawn outline): nothing to close there. The wall
+    // stood alone and the neighbour trimmed it to a sliver (operator
+    // 2026-09-27: "stray triangle").
+    const reach = Math.max(...shape.polygon.map((p) => c.n[0] * p[0] + c.n[1] * p[1]))
+    if (Math.min(c.n[0] * c.a[0] + c.n[1] * c.a[1], c.n[0] * c.b[0] + c.n[1] * c.b[1]) > reach + 0.02) continue
+    // A cut on a junction/abut end (the drawn outline is a few degrees off
+    // square there): that end has no overhang, and its closing is the abut
+    // gable or the neighbour's roof. A fascia "an overhang out" floated
+    // 0.3 m off the end, and a second wall z-fought the abut gable.
+    if (_cutOnTightEnd(shape, c)) continue
     // Sample the roof line along the edge, exact at the ridge crossing.
     const ts = new Set<number>([0, 1])
     const L = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1])
@@ -979,6 +990,25 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
     }
   }
   return faces
+}
+
+/** Whether footprint cut c runs along a junction or abut end of the roof
+ *  (same outward direction within ~8 deg, within 0.4 m of that edge line). */
+function _cutOnTightEnd(shape: ShellShape, c: { a: V2; b: V2; n: V2 }): boolean {
+  const poly = shape.polygon
+  for (let i = 0; i < 4; i++) {
+    const st = shape.styles[i]
+    if (st !== 'junction' && st !== 'abut') continue
+    const p = poly[i]!
+    const q = poly[(i + 1) % 4]!
+    const L = Math.hypot(q[0] - p[0], q[1] - p[1])
+    if (L < 1e-6) continue
+    const m: V2 = [(q[1] - p[1]) / L, -(q[0] - p[0]) / L]
+    const mid: V2 = [(c.a[0] + c.b[0]) / 2, (c.a[1] + c.b[1]) / 2]
+    const dist = Math.abs(m[0] * (mid[0] - p[0]) + m[1] * (mid[1] - p[1]))
+    if (Math.abs(c.n[0] * m[0] + c.n[1] * m[1]) > 0.99 && dist < 0.4) return true
+  }
+  return false
 }
 
 /** Start/end corners of a polygon edge in local XZ. */

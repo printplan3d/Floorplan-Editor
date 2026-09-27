@@ -792,9 +792,34 @@ function _seamProfiles(r: ResolvedSegment, o: ResolvedSegment, m: RoofSeam): Roo
       const profile: { t: number; y: number }[] = []
       for (let k = 0; k <= steps; k++) {
         const t = k / steps
-        const [X, Z] = toWorld(r.placement, h.from[0] + (h.to[0] - h.from[0]) * t, h.from[1] + (h.to[1] - h.from[1]) * t)
-        const hh = heightWorld(o.placement, o.shape, X, Z)
+        const x = h.from[0] + (h.to[0] - h.from[0]) * t
+        const z = h.from[1] + (h.to[1] - h.from[1]) * t
+        const [X, Z] = toWorld(r.placement, x, z)
+        let hh = heightWorld(o.placement, o.shape, X, Z)
+        // A seam end sits exactly on the neighbour's outline and can miss it;
+        // a miss there built a full-height wall sliver up to the ridge
+        // (operator 2026-09-27: "stray triangle"). Retry just inside it.
+        if (hh == null) {
+          const [X2, Z2] = toWorld(r.placement, x + h.n[0] * 0.02, z + h.n[1] * 0.02)
+          hh = heightWorld(o.placement, o.shape, X2, Z2)
+        }
         profile.push({ t, y: hh == null ? -1e6 : hh - r.placement.baseY })
+      }
+      // Still missing at an end (the seam line's end lies a few cm outside
+      // the neighbour, e.g. where the two halves jog at the ridge): carry on
+      // the neighbour's slope from the next two samples.
+      const n = profile.length
+      if (n >= 3) {
+        for (const [e, a, b] of [
+          [0, 1, 2],
+          [n - 1, n - 2, n - 3],
+        ] as const) {
+          const pe = profile[e]!
+          const pa = profile[a]!
+          const pb = profile[b]!
+          if (pe.y > -1e5 || pa.y < -1e5 || pb.y < -1e5) continue
+          pe.y = pa.y + ((pa.y - pb.y) * (pe.t - pa.t)) / (pa.t - pb.t)
+        }
       }
       return { ...h, profile }
     }),
