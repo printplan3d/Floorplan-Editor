@@ -23,5 +23,15 @@ ok(Math.abs(h(2, 0.05) - (2.7 + 1.2 * 0.05 / 3)) < 0.05, `low side at the eave (
 ok(Math.abs(h(2, 2.95) - (2.7 + 1.2 * 2.95 / 3)) < 0.05, `high side at the wall top (${h(2, 2.95).toFixed(2)})`)
 ok(Math.abs(h(2, 1.5) - 3.3) < 0.05, `one straight slope (mid ${h(2, 1.5).toFixed(2)})`)
 ok(h(2, 3.5) == null, 'nothing past the high wall + overhang')
+// A pitch saved for the high side (the cut-away mirrored half) must not
+// pull anything below the shed's base: it dropped the flat ceiling across a
+// window (operator 2026-09-27).
+{
+  const n2 = structuredClone(nodes)
+  n2.s.edgeWeights = [0.4, 0.577, 1.2, 0.577]
+  const m2 = roofMeshesForExport(n2, resolveRoofContext(n2)).get('s')
+  const y2 = m2.vertices.filter((_, i) => i % 3 === 1)
+  ok(Math.min(...y2) > 2.7 - 0.6, `saved high-side pitch ignored: lowest point ${Math.min(...y2).toFixed(2)} (eave 2.7)`)
+}
 P(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`)
 process.exit(fails ? 1 : 0)

@@ -431,6 +431,12 @@ export function resolveShellShape(
   let rise = Math.max(0.01, opts.ridgeRiseOverride ?? node.roofHeight ?? 2.5)
   if (opts.uniformTanOverride != null) rise = Math.max(0.01, opts.uniformTanOverride * halfSpan)
   const tans = _resolveEdgeTans(node, styles, rise / Math.max(0.1, halfSpan), opts.uniformTanOverride)
+  // A shed's high side is the mirrored half that is cut away (see above):
+  // it takes the real slope's pitch, whatever pitch was saved for that edge.
+  // A steeper saved value dropped its eave, and with it the shed's flat
+  // ceiling, 1.3 m into the room (operator 2026-09-27: a surface across the
+  // middle of the window under a Level 1 shed).
+  if (shed && ridgeAlongX) tans[2] = tans[0]!
 
   const baseZ = Math.max(0, node.wallHeight ?? 0)
   const overhang = Math.max(0, Number((node as { overhang?: number }).overhang ?? 0.3))
