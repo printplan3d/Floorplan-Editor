@@ -928,18 +928,15 @@ function _footprintsOverlap(a: ResolvedSegment, b: ResolvedSegment, margin = 0.0
 function _rakesOver(o: ResolvedSegment, r: ResolvedSegment): ClipVolume[] {
   const f = r.shape.frame
   if (f.overhang < 1e-3) return []
-  const po = o.placement
-  const pr = r.placement
-  // o's wall-line footprint: its vertical half-spaces only.
-  const prism = shellVolumeLocal(o.shape, false)
-    .filter((h) => Math.abs(h.n[1]) < 1e-9 && Math.hypot(h.n[0], h.n[2]) > 0.5)
-    .map((h) => {
-      const [wx, wz] = toWorld(po, h.p[0], h.p[2])
-      const [lx, lz] = toLocal(pr, wx, wz)
-      const nwx = po.cos * h.n[0] + po.sin * h.n[2]
-      const nwz = -po.sin * h.n[0] + po.cos * h.n[2]
-      return { n: [pr.cos * nwx - pr.sin * nwz, 0, pr.sin * nwx + pr.cos * nwz] as [number, number, number], p: [lx, 0, lz] as [number, number, number], eps: 0 }
-    })
+  // o's wall-line footprint (its vertical half-spaces), capped by o's own
+  // roof slopes. Uncapped, a rake high above a small lower neighbour lost
+  // its fascia and soffit all the way up to the ridge (operator
+  // 2026-09-27: "soffits broken", 9hd39i over the porch gable rsvzt2).
+  // Only what runs INTO the neighbour goes.
+  const body = _halfSpacesInto(shellVolumeLocal(o.shape, false), o, r)
+  const prism = body
+    .filter((h) => (Math.abs(h.n[1]) < 1e-9 && Math.hypot(h.n[0], h.n[2]) > 0.5) || h.n[1] < -1e-6)
+    .map((h) => ({ ...h, eps: 0 }))
   const out: ClipVolume[] = []
   const poly = r.shape.polygon
   for (const e of [f.eEndLo, f.eEndHi]) {

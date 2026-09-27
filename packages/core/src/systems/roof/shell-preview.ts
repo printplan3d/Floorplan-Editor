@@ -1450,13 +1450,11 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
     }
   }
 
-  // Interior cap so walk-mode doesn't see sky from below. Not when walls
-  // stand under this roof on the level above: then it sits in the middle of
-  // that floor and shows through its windows as a flat plane.
-  if (!shape.noInteriorCap) {
-    const capY = Math.min(...cornerY)
-    add(poly.map(([x, z]) => [x, capY, z] as V3), SLOT_SOFFIT)
-  }
+  // No flat interior cap any more. The undersides (above) are the ceiling
+  // seen from inside; the cap faced UP, so from below it was culled anyway,
+  // and all it still did was show through windows as a flat panel across
+  // the room behind them (operator 2026-09-27: the L1 shed, "another panel
+  // across the area behind the window").
 
   return _facesToGeometry(faces)
 }
