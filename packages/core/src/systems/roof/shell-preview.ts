@@ -510,9 +510,13 @@ export function generateShellSegmentGeometry(
     // roof back to each slanted edge (plus the overhang), then close it — a
     // wall on the edge line up to the roof, a fascia along the cut.
     const oh = shape.frame.overhang
-    const vols: ClipVolume[] = shape.footprintCuts.map((c) => [
-      { n: [c.n[0], 0, c.n[1]], p: [c.a[0] + c.n[0] * oh, 0, c.a[1] + c.n[1] * oh], eps: 0 },
-    ])
+    // Not on a junction end: that end runs on INTO the neighbour on purpose
+    // (the neighbour trims it), and cutting it back to the drawn outline
+    // stopped it short of the neighbour's roof -- a gap at the join
+    // (operator 2026-09-27, the small gable at -6.1, 5.7).
+    const vols: ClipVolume[] = shape.footprintCuts
+      .filter((c) => _cutOnTightEnd(shape, c)?.style !== 'junction')
+      .map((c) => [{ n: [c.n[0], 0, c.n[1]], p: [c.a[0] + c.n[0] * oh, 0, c.a[1] + c.n[1] * oh], eps: 0 }])
     // Seams: cut dead where the neighbour takes over (it carries on from there).
     const seamVols = _seamVolumes(shape)
     vols.push(...seamVols)
@@ -640,6 +644,8 @@ export function shellVolumeLocal(
   /** Edges whose overhang is cut away (a rake over a lower neighbour):
    *  the volume stops at their wall line. */
   noOverhangEdges: number[] = [],
+  /** false: leave the seams out (shellVolumesLocal splits by them). */
+  seamPlanes = true,
 ): ClipVolume {
   const f = shape.frame
   const poly = shape.polygon
@@ -673,8 +679,10 @@ export function shellVolumeLocal(
     vol.push({ n: [-c.n[0], 0, -c.n[1]], p: [c.a[0] + c.n[0] * oh, 0, c.a[1] + c.n[1] * oh], eps: 0.01 })
   }
   // A seam never overhangs: the neighbour's own roof starts right there.
-  for (const m of shape.seams) {
-    vol.push({ n: [-m.n[0], 0, -m.n[1]], p: [m.a[0], 0, m.a[1]], eps: 0.01 })
+  if (seamPlanes) {
+    for (const m of shape.seams) {
+      vol.push({ n: [-m.n[0], 0, -m.n[1]], p: [m.a[0], 0, m.a[1]], eps: 0.01 })
+    }
   }
   vol.push({ n: [0, 1, 0], p: [0, shape.infillFloor, 0], eps: 0.01 })
   return vol
@@ -693,12 +701,52 @@ export function shellVolumeLocal(
  * whole, and only what would poke through the overhang itself goes.
  */
 export function shellVolumesLocal(shape: ShellShape, noOverhangEdges: number[] = []): ClipVolume[] {
+  return _seamSplit(shape, _shellVolumesNoSeams(shape, noOverhangEdges))
+}
+
+/**
+ * Cut volumes back to this roof's side of its seams, the way the roof itself
+ * is cut: along each seam HALF (the true plane-intersection lines, which
+ * bend where the ridges cross), not the one straight drawn seam line. With
+ * the straight line the volume claimed a sliver past the bend where this
+ * roof has no surface, and trimmed a third roof there: a hole where a small
+ * gable's ridge crossed (operator 2026-09-27, "still gap in this roof
+ * union", the gable at -6.1, 5.7 under the main roof's seam).
+ * Kept part of a two-half seam = (half 1's side of its line, on half 1's
+ * stretch) + (half 2's, on half 2's): two convex pieces per volume.
+ */
+function _seamSplit(shape: ShellShape, vols: ClipVolume[]): ClipVolume[] {
+  let pieces = vols
+  for (const m of shape.seams) {
+    const hs = m.halves
+    const opposite =
+      hs.length === 2 && hs[0]!.s[0] * hs[1]!.s[0] + hs[0]!.s[1] * hs[1]!.s[1] < -0.99
+    const next: ClipVolume[] = []
+    for (const pc of pieces) {
+      if (!opposite) {
+        next.push([...pc, { n: [-m.n[0], 0, -m.n[1]], p: [m.a[0], 0, m.a[1]], eps: 0.01 }])
+        continue
+      }
+      for (const h of hs) {
+        next.push([
+          ...pc,
+          { n: [-h.n[0], 0, -h.n[1]], p: [h.p[0], 0, h.p[1]], eps: 0.01 },
+          { n: [h.s[0], 0, h.s[1]], p: [h.r[0], 0, h.r[1]], eps: 0.001 },
+        ])
+      }
+    }
+    pieces = next
+  }
+  return pieces
+}
+
+function _shellVolumesNoSeams(shape: ShellShape, noOverhangEdges: number[]): ClipVolume[] {
   const f = shape.frame
   const poly = shape.polygon
-  const out: ClipVolume[] = [shellVolumeLocal(shape, false)]
+  const out: ClipVolume[] = [shellVolumeLocal(shape, false, [], false)]
   const oh = f.overhang
   if (oh < 1e-3) return out
-  const outer = shellVolumeLocal(shape, true, noOverhangEdges)
+  const outer = shellVolumeLocal(shape, true, noOverhangEdges, false)
   const T = FASCIA_M + 0.05 // slab depth kept below the slope surface
   const inward = (i: number): { a: V2; m: V2 } => {
     const a = poly[i]!
@@ -1030,7 +1078,9 @@ function _cutOnTightEnd(
     const m: V2 = [(q[1] - p[1]) / L, -(q[0] - p[0]) / L]
     const mid: V2 = [(c.a[0] + c.b[0]) / 2, (c.a[1] + c.b[1]) / 2]
     const dist = Math.abs(m[0] * (mid[0] - p[0]) + m[1] * (mid[1] - p[1]))
-    if (Math.abs(c.n[0] * m[0] + c.n[1] * m[1]) > 0.99 && dist < 0.4) {
+    // A junction end is pulled on into the neighbour, so its drawn outline
+    // can sit well short of it (0.46 m on the small gable at -6.1, 5.7).
+    if (Math.abs(c.n[0] * m[0] + c.n[1] * m[1]) > 0.99 && dist < (st === 'junction' ? 1.5 : 0.4)) {
       // m, pointing the same way as the cut's outward normal
       const sg = c.n[0] * m[0] + c.n[1] * m[1] > 0 ? 1 : -1
       return { style: st, p, m: [m[0] * sg, m[1] * sg] }
