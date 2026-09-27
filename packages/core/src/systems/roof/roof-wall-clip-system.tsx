@@ -142,7 +142,7 @@ export function clipWallGeometry(
   const n = Math.min(MAX_SAMPLES, Math.max(2, Math.ceil((x1 - x0) / SAMPLE_STEP) + 1))
   const at = (x: number, z: number) => {
     // wall-local (x, z) -> world, then the roof there
-    const h = ctx.wallHeightAt(sx + dx * x - dz * z, sz + dz * x + dx * z)
+    const h = ctx.wallHeightAt(sx + dx * x - dz * z, sz + dz * x + dx * z, [dx, dz])
     return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY)
   }
   const sections: Section[] = []

@@ -104,7 +104,10 @@ export type RoofContext = {
   heightAt: (x: number, z: number) => number | null
   /** The same without dormers: where walls stop (a dormer is a closed box
    *  on the roof with its own front and window). */
-  wallHeightAt: (x: number, z: number) => number | null
+  /** dir: the wall's direction (world XZ, unit), when known. A wall running
+   *  ALONG a roof edge is a real wall of that roof, and keeps it as its roof
+   *  right out to its outer face. */
+  wallHeightAt: (x: number, z: number, dir?: [number, number]) => number | null
 }
 
 // ─── Levels ───────────────────────────────────────────────────────
@@ -376,14 +379,14 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
   // thin slab, not a roof over a room: a wall under a higher roof's eave but
   // below a lower roof's slope rose straight up through that slope to the
   // soffit (operator 2026-09-27: a post and a gap beside the L1 shed).
-  const wallHeightAt = (X: number, Z: number): number | null => {
+  const wallHeightAt = (X: number, Z: number, dir?: [number, number]): number | null => {
     let body: number | null = null
     let any: number | null = null
     for (const r of all) {
       const h = heightWorld(r.placement, r.shape, X, Z, false)
       if (h == null) continue
       if (any == null || h > any) any = h
-      if (_insideBody(r, X, Z) && (body == null || h > body)) body = h
+      if (_insideBody(r, X, Z, dir) && (body == null || h > body)) body = h
     }
     return body ?? any
   }
@@ -1004,7 +1007,7 @@ function _convexOverlap(pa: V2[], pb: V2[]): boolean {
  * of any real wall set in from that line (the strip outside such a wall is
  * overhang, not room -- operator 2026-09-27, the post beside the L1 shed).
  */
-function _insideBody(r: ResolvedSegment, X: number, Z: number): boolean {
+function _insideBody(r: ResolvedSegment, X: number, Z: number, dir?: [number, number]): boolean {
   if (!insideFootprint(r.placement, r.shape, X, Z, 0.02)) return false
   const spans = r.opts.realWalls ?? []
   if (!spans.length) return true
@@ -1019,6 +1022,15 @@ function _insideBody(r: ResolvedSegment, X: number, Z: number): boolean {
     if (mine.reduce((acc, s) => acc + (s.t1 - s.t0), 0) * L < 1.0) continue
     const face = Math.max(...mine.map((s) => s.face ?? 0))
     if (face <= 0.02) continue
+    // A wall running along this edge is that edge's real wall: its outer
+    // face must not drop to whatever lower roof is outside (operator
+    // 2026-09-27: the L1 wall beside the shed came out cropped).
+    if (dir) {
+      const [ex, ez] = toWorld(r.placement, b[0], b[1])
+      const [sx, sz] = toWorld(r.placement, a[0], a[1])
+      const el = Math.hypot(ex - sx, ez - sz) || 1
+      if (Math.abs(((ex - sx) * dir[1] - (ez - sz) * dir[0]) / el) < 0.1) continue
+    }
     const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L]
     if ((x - a[0]) * m[0] + (z - a[1]) * m[1] < face - 0.02) return false
   }
