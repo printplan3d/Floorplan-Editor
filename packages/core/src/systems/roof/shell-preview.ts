@@ -678,6 +678,61 @@ export function shellVolumeLocal(
 }
 
 /**
+ * This roof's volume for trimming NEIGHBOURS, as convex pieces: the body
+ * (wall-line footprint, under the slopes, above the infill floor) plus, for
+ * every edge that overhangs, only the overhang's SLAB (from the slope down
+ * by the fascia depth) — not everything under it down to the floor.
+ *
+ * With one solid block reaching out over the overhang, a neighbour running
+ * UNDER this roof's eave or rake was cut away below it too, and the cut was
+ * left open: gaps at intersections and soffits you could only see parts of
+ * (operator 2026-09-27). Now the neighbour carries on under the overhang,
+ * whole, and only what would poke through the overhang itself goes.
+ */
+export function shellVolumesLocal(shape: ShellShape, noOverhangEdges: number[] = []): ClipVolume[] {
+  const f = shape.frame
+  const poly = shape.polygon
+  const out: ClipVolume[] = [shellVolumeLocal(shape, false)]
+  const oh = f.overhang
+  if (oh < 1e-3) return out
+  const outer = shellVolumeLocal(shape, true, noOverhangEdges)
+  const T = FASCIA_M + 0.05 // slab depth kept below the slope surface
+  const inward = (i: number): { a: V2; m: V2 } => {
+    const a = poly[i]!
+    const b = poly[(i + 1) % 4]!
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    return { a, m: [-(b[1] - a[1]) / L, (b[0] - a[0]) / L] }
+  }
+  // y >= slope_i - T  (the slab's underside, following edge i's slope out)
+  const under = (i: number): ClipVolume[number] => {
+    const { a, m } = inward(i)
+    const t = f.tanOf[i]!
+    const k = Math.hypot(t, 1)
+    return { n: [(-t * m[0]) / k, 1 / k, (-t * m[1]) / k], p: [a[0], f.eaveOf[i]! - T, a[1]], eps: 0.005 }
+  }
+  for (let i = 0; i < 4; i++) {
+    const flush = (i === f.eSideLo && shape.flushLo) || (i === f.eSideHi && shape.flushHi)
+    const st = shape.styles[i]
+    if (flush || noOverhangEdges.includes(i) || (st !== 'hip' && st !== 'gable')) continue
+    const { a, m } = inward(i)
+    const beyond = { n: [-m[0], 0, -m[1]] as V3, p: [a[0], 0, a[1]] as V3, eps: 0.01 }
+    const sloped = i === f.eSideLo || i === f.eSideHi || st === 'hip'
+    if (sloped) {
+      out.push([...outer, beyond, under(i)])
+    } else {
+      // A rake: under each side slope, on its side of the ridge.
+      for (const sIdx of [f.eSideLo, f.eSideHi]) {
+        const lo = sIdx === f.eSideLo
+        const n: V3 = f.ridgeAlongX ? [0, 0, lo ? -1 : 1] : [lo ? -1 : 1, 0, 0]
+        const p: V3 = f.ridgeAlongX ? [0, 0, f.vMid] : [f.vMid, 0, 0]
+        out.push([...outer, beyond, { n, p, eps: 0.01 }, under(sIdx)])
+      }
+    }
+  }
+  return out
+}
+
+/**
  * Roof surface height (local Y) above local point (x, z), or null when this
  * segment doesn't cover it. Dormers count: the result is the higher of the
  * main slope and any dormer standing there.
@@ -1296,26 +1351,33 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
         const loSide = ridgeAlongX ? k <= 1 : k === 0 || k === 3
         const o = loSide ? ohLo : ohHi
         if (o < 1e-3) continue
+        // Only the overhang's own end (slope down through soffit and
+        // fascia): run down to the wall top it hung in mid-air wherever the
+        // lower neighbour didn't reach (operator 2026-09-27: "a plane
+        // triangle outside some roofs").
         const pk = poly[k]!
-        const yk = Math.max(y0, cornerY[k]!)
+        const yk = cornerY[k]!
         const pe: V2 = [pk[0] + dir[0] * sgn * o, pk[1] + dir[1] * sgn * o]
-        const ye = Math.max(y0, cornerY[k]! - f.cornerTan[k]! * o)
-        if (yk - y0 <= 1e-3) continue
+        const ye = cornerY[k]! - f.cornerTan[k]! * o
+        const D = FASCIA_M + 0.02
+        const bk = Math.max(y0, yk - D)
+        const be = Math.max(y0, ye - D)
+        if (yk - bk <= 1e-3 && ye - be <= 1e-3) continue
         add(
           sgn > 0
             ? [
-                [pk[0], y0, pk[1]],
-                [pe[0], y0, pe[1]],
+                [pk[0], bk, pk[1]],
+                [pe[0], be, pe[1]],
                 [pe[0], ye, pe[1]],
                 [pk[0], yk, pk[1]],
               ]
             : [
-                [pe[0], y0, pe[1]],
-                [pk[0], y0, pk[1]],
+                [pe[0], be, pe[1]],
+                [pk[0], bk, pk[1]],
                 [pk[0], yk, pk[1]],
                 [pe[0], ye, pe[1]],
               ],
-          SLOT_WALL_EXTERIOR,
+          SLOT_FASCIA,
         )
       }
     }

@@ -33,6 +33,7 @@ import {
   type RoofSeam,
   type RoofSeamHalf,
   shellVolumeLocal,
+  shellVolumesLocal,
   ridgeAngleRad,
   resolveShellShape,
   type ShellBuildOptions,
@@ -353,7 +354,7 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
       // r must not be trimmed by it either, or neither roof covers that
       // band (operator 2026-09-27: a slot you could see down through at
       // the north gable).
-      vols.push(_volumeInto(o, r, true, _rakeEdgesOver(o, r)))
+      vols.push(..._volumesInto(o, r, _rakeEdgesOver(o, r)))
     }
     if (vols.length) {
       r.opts = { ...r.opts, clipVolumes: vols }
@@ -987,6 +988,27 @@ function _roomInto(
   const vol = _volumeInto(o, r, false).filter((h) => !(Math.abs(h.n[1] - 1) < 1e-9 && Math.hypot(h.n[0], h.n[2]) < 1e-9))
   vol.push({ n: [0, 1, 0], p: [0, lv.elev - r.placement.baseY, 0], eps: 0.01 })
   return vol
+}
+
+/** Neighbour `o`'s trimming volumes (body + overhang slabs, see
+ *  shellVolumesLocal), re-expressed in `r`'s local frame. */
+function _volumesInto(o: ResolvedSegment, r: ResolvedSegment, noOverhangEdges: number[] = []): ClipVolume[] {
+  return shellVolumesLocal(o.shape, noOverhangEdges).map((v) => _halfSpacesInto(v, o, r))
+}
+
+function _halfSpacesInto(vol: ClipVolume, o: ResolvedSegment, r: ResolvedSegment): ClipVolume {
+  const po = o.placement
+  const pr = r.placement
+  return vol.map((h) => {
+    const [wx, wz] = toWorld(po, h.p[0], h.p[2])
+    const [lx, lz] = toLocal(pr, wx, wz)
+    const y = h.p[1] + po.baseY - pr.baseY
+    const nwx = po.cos * h.n[0] + po.sin * h.n[2]
+    const nwz = -po.sin * h.n[0] + po.cos * h.n[2]
+    const nlx = pr.cos * nwx - pr.sin * nwz
+    const nlz = pr.sin * nwx + pr.cos * nwz
+    return { n: [nlx, h.n[1], nlz] as [number, number, number], p: [lx, y, lz] as [number, number, number], eps: h.eps }
+  })
 }
 
 /** Neighbour `o`'s volume, re-expressed in `r`'s local frame. */
