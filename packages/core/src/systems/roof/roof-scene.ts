@@ -297,11 +297,13 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
   for (const r of segs.values()) {
     const spans = _realWallSpans(r, walls, levels, [...segs.values()])
     const upper = _hasUpperWalls(r, walls, levels)
-    if (spans.length || upper) {
+    const down = _infillDown(r, levels, [...segs.values()])
+    if (spans.length || upper || down) {
       r.opts = {
         ...r.opts,
         ...(spans.length ? { realWalls: spans } : {}),
         ...(upper ? { noInteriorCap: true } : {}),
+        ...(down ? { infillDown: down } : {}),
       }
       rebuild(r)
     }
@@ -345,7 +347,15 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
         if (room) vols.push(room)
         continue
       }
-      if (o.placement.levelId !== r.placement.levelId) continue
+      if (o.placement.levelId !== r.placement.levelId) {
+        // A roof on a LOWER level trims r only where r's side walls were
+        // carried down over it (see _infillDown): the part inside it is its
+        // roof space.
+        if (r.opts.infillDown && _levelAbove(r, o, levels) && _footprintsOverlap(r, o, r.shape.frame.overhang + 0.1)) {
+          vols.push(_volumeInto(o, r, false))
+        }
+        continue
+      }
       if (seamNbrs.get(r)?.includes(o)) continue
       // A gable's rake overhang doesn't run out over a lower neighbouring
       // roof: cut back to the gable wall where the neighbour is (operator
@@ -1035,6 +1045,65 @@ function _insideBody(r: ResolvedSegment, X: number, Z: number, dir?: [number, nu
     if ((x - a[0]) * m[0] + (z - a[1]) * m[1] < face - 0.02) return false
   }
   return true
+}
+
+/**
+ * Per edge of r: how far down (r-local Y) its generated side wall reaches
+ * where no real wall stands -- r's storey floor, on edges a LOWER roof runs
+ * under (null elsewhere). A room that carries on past r's edge is roofed by
+ * that lower roof, and between the two only r's side wall can close it; it
+ * used to stop at the storey wall top, leaving the room open (operator
+ * 2026-09-27: the L1 shed's east side over the main roof). The lower roof's
+ * volume trims the part inside it.
+ */
+function _infillDown(
+  r: ResolvedSegment,
+  levels: Map<string, { elev: number; height: number }>,
+  all: ResolvedSegment[],
+): { edge: number; t0: number; t1: number; y: number }[] | null {
+  const lv = r.placement.levelId ? levels.get(r.placement.levelId) : undefined
+  if (!lv) return null
+  const floorLocal = lv.elev - r.placement.baseY
+  if (floorLocal > -0.3) return null
+  const lower = all.filter((o) => o !== r && o.placement.baseY < r.placement.baseY - 0.3)
+  if (!lower.length) return null
+  const poly = r.shape.polygon
+  const out: { edge: number; t0: number; t1: number; y: number }[] = []
+  const N = 40
+  for (let e = 0; e < 4; e++) {
+    if (r.shape.styles[e] === 'junction') continue
+    const a = poly[e]!
+    const b = poly[(e + 1) % 4]!
+    // Stretches (to 1/40 of the edge) with a lower roof directly under the
+    // edge line; only there does the side wall go down (elsewhere it would
+    // hang in mid-air, nothing to trim it).
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    const out2: V2 = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L] // outward (CCW)
+    let start: number | null = null
+    for (let k = 0; k <= N; k++) {
+      const t = (k + 0.5) / N
+      const px = a[0] + (b[0] - a[0]) * t
+      const pz = a[1] + (b[1] - a[1]) * t
+      const [X, Z] = toWorld(r.placement, px, pz)
+      // On the line AND 10 cm outside it: the lower roof really carries on
+      // past this edge (not just touching it with its own wall line).
+      const [Xo, Zo] = toWorld(r.placement, px + out2[0] * 0.1, pz + out2[1] * 0.1)
+      // ...and well above this storey's floor there: roofing a room, not
+      // just an eave overhang passing at floor level.
+      const minY = lv.elev + 0.3
+      const high = (o: ResolvedSegment, x: number, z: number) => {
+        const h = heightWorld(o.placement, o.shape, x, z, false)
+        return h != null && h > minY
+      }
+      const over = k < N && lower.some((o) => high(o, X, Z) && high(o, Xo, Zo))
+      if (over && start == null) start = k / N
+      if (!over && start != null) {
+        out.push({ edge: e, t0: start, t1: k / N, y: floorLocal })
+        start = null
+      }
+    }
+  }
+  return out.length ? out : null
 }
 
 /** Is o on a level above r's? */

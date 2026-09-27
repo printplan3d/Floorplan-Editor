@@ -165,6 +165,10 @@ export type ShellBuildOptions = {
    *  segment is lifted above the storey by its own Y offset — then negative,
    *  so the infill still reaches down to the walls below. */
   infillFloor?: number
+  /** Stretches of edges where the generated side wall reaches DOWN to
+   *  local Y `y` where no real wall stands (instead of infillFloor): a lower
+   *  roof runs under them, and trims what falls inside it. */
+  infillDown?: { edge: number; t0: number; t1: number; y: number }[]
   /** Override the side (eave) lines, in local coordinates across the ridge.
    *  Set on a continuation so both masses share one cross-section. */
   sideLo?: number
@@ -294,6 +298,7 @@ export type ShellShape = {
   frame: RoofFrame
   realWalls: RealWallSpan[]
   noInteriorCap: boolean
+  infillDown: { edge: number; t0: number; t1: number; y: number }[]
   /** Slanted edges of a 4-point footprint (ridge frame, CCW, outward unit
    *  normal). The roof is built on the footprint's rectangle and cut back
    *  to these. Empty when the footprint IS its rectangle. */
@@ -458,6 +463,7 @@ export function resolveShellShape(
     frame,
     realWalls,
     noInteriorCap: !!opts.noInteriorCap,
+    infillDown: opts.infillDown ?? [],
     flushLo: !!opts.sideLoFlush,
     flushHi: !!opts.sideHiFlush,
     infillFloor: Math.min(0, Number.isFinite(opts.infillFloor) ? opts.infillFloor! : 0),
@@ -1429,19 +1435,26 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
     const inward: V2 = [-dir[1], dir[0]]
     const yi = cornerY[i]!
     const yj = cornerY[j]!
+    // Where a lower roof runs under this edge, the side wall is carried on
+    // down to that storey's floor wherever no real wall stands (the lower
+    // roof trims it at its own slope). Otherwise a room that carries on past
+    // this roof's edge was open between the two roofs (operator 2026-09-27,
+    // the L1 shed's east side over the main roof).
+    const downs = shape.infillDown.filter((d) => d.edge === i && d.y < y0)
+    const yB = downs.length ? Math.min(...downs.map((d) => d.y)) : y0
     // Outline in edge order (outward-facing; checked by the facing audit).
     const outline: V3[] =
       st === 'gable' || st === 'abut'
         ? [
-            [pi[0], y0, pi[1]],
-            [pj[0], y0, pj[1]],
+            [pi[0], yB, pi[1]],
+            [pj[0], yB, pj[1]],
             [pj[0], yj, pj[1]],
             [(pi[0] + pj[0]) / 2, ridgeZ, (pi[1] + pj[1]) / 2],
             [pi[0], yi, pi[1]],
           ]
         : [
-            [pi[0], y0, pi[1]],
-            [pj[0], y0, pj[1]],
+            [pi[0], yB, pi[1]],
+            [pj[0], yB, pj[1]],
             [pj[0], yj, pj[1]],
             [pi[0], yi, pi[1]],
           ]
@@ -1533,6 +1546,23 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
     for (let k = 0; k < runs.length; k++) {
       const r = runs[k]!
       const covered = Number.isFinite(r.top)
+      if (!covered && downs.length) {
+        // Down to the lower roof only along its stretches; storey top elsewhere.
+        const cuts = new Set<number>([r.t0, r.t1])
+        for (const dn of downs) for (const t of [dn.t0, dn.t1]) if (t > r.t0 && t < r.t1) cuts.add(t)
+        const ts = [...cuts].sort((a, b) => a - b)
+        for (let q = 0; q < ts.length - 1; q++) {
+          const a0 = ts[q]!
+          const a1 = ts[q + 1]!
+          const mid = (a0 + a1) / 2
+          const dn = downs.find((d) => d.t0 <= mid && d.t1 >= mid)
+          let sub = _clipHalf(outline, (p) => along(p) - a0 * L)
+          sub = _clipHalf(sub, (p) => a1 * L - along(p))
+          sub = _clipHalf(sub, (p) => p[1] - (dn ? dn.y : y0))
+          add(sub, SLOT_WALL_EXTERIOR)
+        }
+        continue
+      }
       const floor = covered ? Math.max(y0, r.top) : y0
       let piece = _clipHalf(outline, (p) => along(p) - r.t0 * L)
       piece = _clipHalf(piece, (p) => r.t1 * L - along(p))
