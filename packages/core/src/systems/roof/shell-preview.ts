@@ -1616,10 +1616,19 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
         const bx = ax + inward[0] * back
         const bz = az + inward[1] * back
         const h = Math.max(eaveAt(tb), y0)
-        if (h - y0 <= 1e-3) continue
+        // Next to a stretch whose side wall goes down to a lower roof (see
+        // infillDown), the step closes that far down too; the lower roof
+        // trims it. Otherwise a slit stayed open there (operator 2026-09-27:
+        // "cracks" on the L1 shed's east side).
+        const nbDown =
+          neighbour && !Number.isFinite(neighbour.top)
+            ? downs.find((d) => d.t0 <= tb + 0.03 && d.t1 >= tb - 0.03)
+            : undefined
+        const yb = nbDown ? Math.min(y0, nbDown.y) : y0
+        if (h - yb <= 1e-3) continue
         let quad: V3[] = [
-          [ax, y0, az],
-          [bx, y0, bz],
+          [ax, yb, az],
+          [bx, yb, bz],
           [bx, h, bz],
           [ax, h, az],
         ]

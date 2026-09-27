@@ -1098,7 +1098,9 @@ function _infillDown(
       const over = k < N && lower.some((o) => high(o, X, Z) && high(o, Xo, Zo))
       if (over && start == null) start = k / N
       if (!over && start != null) {
-        out.push({ edge: e, t0: start, t1: k / N, y: floorLocal })
+        // One sample wider each side: the ends are only known to 1/N, and a
+        // sliver left short stayed open (the lower roof trims any excess).
+        out.push({ edge: e, t0: Math.max(0, start - 1 / N), t1: Math.min(1, k / N + 1 / N), y: floorLocal })
         start = null
       }
     }

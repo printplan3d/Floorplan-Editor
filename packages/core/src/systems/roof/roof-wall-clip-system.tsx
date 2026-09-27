@@ -44,6 +44,11 @@ const SAMPLE_STEP = 0.05
  *  trim is invisible, and it makes near-coplanar faces for the CSG (a
  *  ground-floor wall under an eave at the same height is exactly that). */
 const TRIM_MIN_M = 0.02
+/** Walls stop this far under the roof surface: trimmed exactly to it,
+ *  their top face lay IN the slates and flickered through them (operator
+ *  2026-09-27: a speckled strip on the main roof beside the shed). The roof
+ *  slab is thicker than this, so the top stays hidden inside it. */
+const TOP_SINK = 0.03
 /** How far past each wall face the roof is sampled. */
 const SIDE_MARGIN = 0.05
 
@@ -143,14 +148,14 @@ export function clipWallGeometry(
   const at = (x: number, z: number) => {
     // wall-local (x, z) -> world, then the roof there
     const h = ctx.wallHeightAt(sx + dx * x - dz * z, sz + dz * x + dx * z, [dx, dz])
-    return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY)
+    return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY - TOP_SINK)
   }
   const sections: Section[] = []
   let needs = false
   for (let i = 0; i < n; i++) {
     const x = x0 + ((x1 - x0) * i) / (n - 1)
     const sec: Section = { l: [x, W], c: [x, 0], r: [x, -W], yl: at(x, W), yc: at(x, 0), yr: at(x, -W) }
-    if (x >= 0 && x <= len && Math.min(sec.yl, sec.yc, sec.yr) < top - TRIM_MIN_M) needs = true
+    if (x >= 0 && x <= len && Math.min(sec.yl, sec.yc, sec.yr) + TOP_SINK < top - TRIM_MIN_M) needs = true
     sections.push(sec)
   }
   if (!needs) return null
@@ -247,7 +252,7 @@ function _clipArcWall(
 
   const roofAt = (X: number, Z: number) => {
     const h = ctx.wallHeightAt(X, Z)
-    return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY)
+    return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY - TOP_SINK)
   }
   const sections: Section[] = []
   let needs = false
@@ -271,7 +276,7 @@ function _clipArcWall(
       yc: roofAt(here[0], here[1]),
       yr: roofAt(R[0], R[1]),
     }
-    if (line[i]!.onWall && Math.min(sec.yl, sec.yc, sec.yr) < top - TRIM_MIN_M) needs = true
+    if (line[i]!.onWall && Math.min(sec.yl, sec.yc, sec.yr) + TOP_SINK < top - TRIM_MIN_M) needs = true
     sections.push(sec)
   }
   if (!needs || sections.length < 2) return null
