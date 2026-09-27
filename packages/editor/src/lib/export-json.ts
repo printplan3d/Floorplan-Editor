@@ -9,6 +9,7 @@ import {
   getStairFootprint,
   openingCoveredByRoof,
   roofMeshesForExport,
+  wallTopProfile,
   type RoofNode,
   type RoofSegmentNode,
   type StairNode,
@@ -140,6 +141,24 @@ export function exportFloorPlanJSON(): object {
           ...(w.barrierType && w.barrierType !== "solid"
             ? { barrier_type: w.barrierType }
             : {}),
+          // The wall's top as the preview trims it under the roof:
+          // [metres along from `start`, ABSOLUTE height in the same frame as
+          // the roof meshes above]. Absolute, because the pipeline places
+          // storeys a little differently from the preview (L1 walls start
+          // 15 cm higher there) but renders the roof meshes at the
+          // preview's heights. The pipeline trims to exactly this instead
+          // of working it out again (it used the highest roof over each
+          // corner, which stood the end of a wall under a higher roof's
+          // overhang up as a post: operator 2026-09-27, beside the L1 shed).
+          // Mirroring X changes neither value. Absent when the roof doesn't
+          // trim the wall.
+          ...(() => {
+            const prof = roofCtx.segments.size ? wallTopProfile(w, 0, roofCtx) : null;
+            if (!prof) return {};
+            const lv = w.parentId ? roofCtx.levels.get(w.parentId) : undefined;
+            const base = lv ? lv.elev : 0;
+            return { roof_top: prof.map((p) => [p.s, Math.round((base + p.y) * 1000) / 1000]) };
+          })(),
         };
         levelWalls.push(wallExport);
 

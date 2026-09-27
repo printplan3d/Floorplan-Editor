@@ -69,7 +69,7 @@ export { CeilingSystem } from './systems/ceiling/ceiling-system'
 export { DoorSystem } from './systems/door/door-system'
 export { ItemSystem } from './systems/item/item-system'
 export { getRoofContext, RoofSystem } from './systems/roof/roof-system'
-export { openingCoveredByRoof, RoofWallClipSystem } from './systems/roof/roof-wall-clip-system'
+export { openingCoveredByRoof, RoofWallClipSystem, wallTopProfile } from './systems/roof/roof-wall-clip-system'
 export { type RoofExportMesh, roofMeshesForExport } from './systems/roof/roof-export'
 export {
   resolveRoofContext,

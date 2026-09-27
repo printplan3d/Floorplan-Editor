@@ -162,6 +162,61 @@ export function clipWallGeometry(
   return _intersect(src, _loftPrism(sections), node.id)
 }
 
+/**
+ * The wall's top, as trimmed here, for the render pipeline: points
+ * { s, y } with s metres along the wall from its start and y the top's
+ * height above the wall's base (the lowest across the thickness), or null
+ * when the roof never trims it. Straight walls only.
+ *
+ * The render trimmed walls on its own, to the HIGHEST roof over each top
+ * corner, so the end of a wall under a higher roof's overhang stood up as a
+ * post through the lower roof (operator 2026-09-27: "a small wall coming out
+ * of the shed" in the render; the preview had it right). Sending the
+ * preview's own trim makes the two agree.
+ */
+export function wallTopProfile(
+  node: WallNode,
+  slabY: number,
+  ctx: RoofContext,
+): { s: number; y: number }[] | null {
+  if (!isStraight(node.bulge ?? 0)) return null
+  const [sx, sz] = node.start
+  const [ex, ez] = node.end
+  const len = Math.hypot(ex - sx, ez - sz)
+  if (len < 1e-3) return null
+  const dx = (ex - sx) / len
+  const dz = (ez - sz) / len
+  const lv = node.parentId ? ctx.levels.get(node.parentId) : undefined
+  const baseY = (lv ? lv.elev : 0) + slabY
+  const top = node.height ?? 2.7
+  const W = (node.thickness ?? 0.15) / 2 + SIDE_MARGIN
+  const at = (x: number, z: number) => {
+    const h = ctx.wallHeightAt(sx + dx * x - dz * z, sz + dz * x + dx * z, [dx, dz])
+    return h == null ? OPEN_SKY : h - baseY - TOP_SINK
+  }
+  const n = Math.min(MAX_SAMPLES, Math.max(2, Math.ceil(len / SAMPLE_STEP) + 1))
+  const pts: { s: number; y: number }[] = []
+  let needs = false
+  for (let i = 0; i < n; i++) {
+    const s = (len * i) / (n - 1)
+    const y = Math.min(at(s, W), at(s, 0), at(s, -W))
+    if (y + TOP_SINK < top - TRIM_MIN_M) needs = true
+    pts.push({ s, y: Math.max(0.02, Math.min(top, y)) })
+  }
+  if (!needs) return null
+  // Drop points on a straight line between their neighbours (1 mm).
+  const out: { s: number; y: number }[] = [pts[0]!]
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = out[out.length - 1]!
+    const b = pts[i]!
+    const c = pts[i + 1]!
+    const yLine = a.y + ((c.y - a.y) * (b.s - a.s)) / (c.s - a.s || 1)
+    if (Math.abs(b.y - yLine) > 0.001) out.push(b)
+  }
+  out.push(pts[pts.length - 1]!)
+  return out.map((p) => ({ s: Math.round(p.s * 1000) / 1000, y: Math.round(p.y * 1000) / 1000 }))
+}
+
 /** src ∩ prism, or null if the CSG fails (the wall then shows untrimmed). */
 function _intersect(src: THREE.BufferGeometry, prism: THREE.BufferGeometry, id: string): THREE.BufferGeometry | null {
   try {
