@@ -383,7 +383,7 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
       const h = heightWorld(r.placement, r.shape, X, Z, false)
       if (h == null) continue
       if (any == null || h > any) any = h
-      if (insideFootprint(r.placement, r.shape, X, Z, 0.02) && (body == null || h > body)) body = h
+      if (_insideBody(r, X, Z) && (body == null || h > body)) body = h
     }
     return body ?? any
   }
@@ -999,6 +999,32 @@ function _convexOverlap(pa: V2[], pb: V2[]): boolean {
   return true
 }
 
+/**
+ * Is (X, Z) under r's BODY: inside its wall line, and inside the outer face
+ * of any real wall set in from that line (the strip outside such a wall is
+ * overhang, not room -- operator 2026-09-27, the post beside the L1 shed).
+ */
+function _insideBody(r: ResolvedSegment, X: number, Z: number): boolean {
+  if (!insideFootprint(r.placement, r.shape, X, Z, 0.02)) return false
+  const spans = r.opts.realWalls ?? []
+  if (!spans.length) return true
+  const [x, z] = toLocal(r.placement, X, Z)
+  const poly = r.shape.polygon
+  for (let e = 0; e < 4; e++) {
+    const mine = spans.filter((s) => s.edge === e)
+    if (!mine.length) continue
+    const a = poly[e]!
+    const b = poly[(e + 1) % 4]!
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    if (mine.reduce((acc, s) => acc + (s.t1 - s.t0), 0) * L < 1.0) continue
+    const face = Math.max(...mine.map((s) => s.face ?? 0))
+    if (face <= 0.02) continue
+    const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L]
+    if ((x - a[0]) * m[0] + (z - a[1]) * m[1] < face - 0.02) return false
+  }
+  return true
+}
+
 /** Is o on a level above r's? */
 function _levelAbove(o: ResolvedSegment, r: ResolvedSegment, levels: Map<string, { elev: number; height: number }>): boolean {
   const lo = o.placement.levelId ? levels.get(o.placement.levelId) : undefined
@@ -1197,7 +1223,14 @@ function _realWallSpans(
       // ledge (operator 2026-09-27: "GAP" beside the L1 shed, 15-22 cm).
       const atBase = topLocal > -0.05 && inset > 0.02
       if (topLocal <= 0.05 && !atBase) continue
-      out.push({ edge: e, t0: lo, t1: hi, top: Math.max(topLocal, 0), inset: Math.max(0, inset) })
+      out.push({
+        edge: e,
+        t0: lo,
+        t1: hi,
+        top: Math.max(topLocal, 0),
+        inset: Math.max(0, inset),
+        face: Math.max(0, inset - (w.thickness ?? 0.15) / 2),
+      })
     }
   }
   return out

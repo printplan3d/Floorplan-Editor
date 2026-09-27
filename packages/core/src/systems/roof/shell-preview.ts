@@ -113,6 +113,9 @@ export type RealWallSpan = {
   top: number
   /** How far inside the edge line the wall stands, metres. */
   inset: number
+  /** How far inside the edge line its OUTER face is (inset - half its
+   *  thickness), metres. The generated wall above it continues that face. */
+  face?: number
 }
 type V3 = [number, number, number]
 type V2 = [number, number]
@@ -1212,7 +1215,7 @@ function _faceNormal(verts: V3[]): V3 {
   return [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!]
 }
 
-type EdgeRun = { t0: number; t1: number; top: number; inset: number }
+type EdgeRun = { t0: number; t1: number; top: number; inset: number; face: number }
 
 /** Split an edge into runs by which real wall (if any) stands along it. A
  *  run with no wall has top = -Infinity. */
@@ -1231,15 +1234,17 @@ function _edgeRuns(spans: RealWallSpan[]): EdgeRun[] {
     const mid = (t0 + t1) / 2
     let top = Number.NEGATIVE_INFINITY
     let inset = 0
+    let face = 0
     for (const s of spans) {
       if (s.t0 <= mid && s.t1 >= mid && s.top > top) {
         top = s.top
         inset = s.inset
+        face = Math.max(0, s.face ?? 0)
       }
     }
     const prev = runs[runs.length - 1]
-    if (prev && prev.top === top && prev.inset === inset) prev.t1 = t1
-    else runs.push({ t0, t1, top, inset })
+    if (prev && prev.top === top && prev.inset === inset && prev.face === face) prev.t1 = t1
+    else runs.push({ t0, t1, top, inset, face })
   }
   return runs
 }
@@ -1442,6 +1447,20 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
       let piece = _clipHalf(outline, (p) => along(p) - r.t0 * L)
       piece = _clipHalf(piece, (p) => r.t1 * L - along(p))
       piece = _clipHalf(piece, (p) => p[1] - floor)
+      // Over a real wall set in from the edge line, the generated wall
+      // continues that wall's outer face instead of standing proud of it on
+      // the drawn outline (operator 2026-09-27: "the shed has cropped the
+      // wall" -- the L1 shed's outline is 22 cm wider than its walls, and
+      // its side read as a stepped, cut-back wall). Its top follows the
+      // slope at the new line; the strip outside becomes overhang.
+      const shift = covered && r.face > 0.02 ? r.face : 0
+      if (shift > 0) {
+        piece = piece.map((p): V3 => {
+          const x = p[0] + inward[0] * shift
+          const z = p[2] + inward[1] * shift
+          return [x, p[1] > floor + 1e-6 ? Math.max(floor, _slopeY(shape, x, z)) : p[1], z]
+        })
+      }
       add(piece, SLOT_WALL_EXTERIOR)
 
       // Return faces where a covered stretch meets an uncovered one.
@@ -1450,8 +1469,9 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
       // The ledge: the generated wall above stands on the edge line, the
       // real wall below is inset, and the strip between them at the real
       // wall's top was open. From under the overhang it read as a slot into
-      // the roof (operator 2026-09-27: "GAP" beside the L1 shed).
-      {
+      // the roof (operator 2026-09-27: "GAP" beside the L1 shed). Not needed
+      // once the wall above has moved onto the real wall's face.
+      if (shift === 0) {
         const p0: V2 = [pi[0] + dir[0] * r.t0 * L, pi[1] + dir[1] * r.t0 * L]
         const p1: V2 = [pi[0] + dir[0] * r.t1 * L, pi[1] + dir[1] * r.t1 * L]
         let ledge: V3[] = [
@@ -1472,8 +1492,9 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
         if (neighbour && Number.isFinite(neighbour.top) && neighbour.top >= r.top) continue
         const ax = pi[0] + dir[0] * tb * L
         const az = pi[1] + dir[1] * tb * L
-        const bx = ax + inward[0] * r.inset
-        const bz = az + inward[1] * r.inset
+        const back = shift > 0 ? shift : r.inset
+        const bx = ax + inward[0] * back
+        const bz = az + inward[1] * back
         const h = Math.max(eaveAt(tb), y0)
         if (h - y0 <= 1e-3) continue
         let quad: V3[] = [
