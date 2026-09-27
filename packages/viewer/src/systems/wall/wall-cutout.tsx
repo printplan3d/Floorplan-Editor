@@ -1,4 +1,4 @@
-import { sceneRegistry, useScene, type WallNode } from '@ritn3d/core'
+import { getRoofContext, sceneRegistry, useScene, type WallNode } from '@ritn3d/core'
 import { useFrame } from '@react-three/fiber'
 import { useRef } from 'react'
 import { Fn, float, fract, length, mix, positionLocal, smoothstep, step, vec2 } from 'three/tsl'
@@ -80,6 +80,37 @@ export const WallCutout = () => {
       camera.getWorldDirection(u)
 
       const walls = sceneRegistry.byType.wall
+      const nodes = useScene.getState().nodes
+      // An interior wall under a roof stays visible in the cutaway. With the
+      // roof on, the rooms can't be seen into from above anyway, and such a
+      // wall often rises ABOVE a lower roof on one side -- hiding it opened a
+      // hole straight through the house (operator 2026-09-27: the L1 wall
+      // beside the shed, between the shed room and the room under the main
+      // roof's slope).
+      let roofCtx: ReturnType<typeof getRoofContext> | null = null
+      let roofsShown: boolean | null = null
+      const underRoof = (w: WallNode): boolean => {
+        roofCtx ??= getRoofContext(nodes as Parameters<typeof getRoofContext>[0])
+        if (!roofCtx.segments.size) return false
+        // Only while roofs are on screen: with them hidden the cutaway is
+        // back to its job of showing the rooms.
+        roofsShown ??= [...roofCtx.segments.keys()].some((id) => {
+          let o = sceneRegistry.nodes.get(id) as { visible: boolean; parent: unknown } | undefined
+          if (!o) return false
+          while (o) {
+            if (!o.visible) return false
+            o = o.parent as typeof o
+          }
+          return true
+        })
+        if (!roofsShown) return false
+        const [sx, sz] = w.start
+        const [ex, ez] = w.end
+        for (const t of [0.1, 0.5, 0.9]) {
+          if (roofCtx.wallHeightAt(sx + (ex - sx) * t, sz + (ez - sz) * t) != null) return true
+        }
+        return false
+      }
       walls.forEach((wallId) => {
         const wallMesh = sceneRegistry.nodes.get(wallId)
         if (!wallMesh) return
@@ -102,6 +133,15 @@ export const WallCutout = () => {
             // Back side
             hideWall = true
           }
+        }
+        if (
+          hideWall &&
+          wallMode !== 'down' &&
+          wallNode.frontSide === 'interior' &&
+          wallNode.backSide === 'interior' &&
+          underRoof(wallNode)
+        ) {
+          hideWall = false
         }
         ;(wallMesh as Mesh).material = hideWall ? invsibleWallMaterial : wallMaterial
       })
