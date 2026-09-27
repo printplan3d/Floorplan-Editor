@@ -95,6 +95,9 @@ export type ResolvedSegment = {
   /** Which neighbour this wing was matched/joined to, for the panel. */
   joinedTo?: string
   ridgeMatchApplied?: RidgeMatch
+  /** Lower continuation roofs this roof keeps a gable end over (see the
+   *  continuation join): they trim its overhang even as seam neighbours. */
+  gableOver?: string[]
 }
 
 export type RoofContext = {
@@ -356,7 +359,11 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
         }
         continue
       }
-      if (seamNbrs.get(r)?.includes(o)) continue
+      // Seam neighbours are cut by the seam, not by each other's volumes --
+      // except where r keeps its gable end over o (a higher continuation):
+      // its overhang has to stop at o's roof, or its barge board ran on
+      // down through o (a floating board at the stepped east sections).
+      if (seamNbrs.get(r)?.includes(o) && !r.gableOver?.includes(o.placement.seg.id)) continue
       // A gable's rake overhang doesn't run out over a lower neighbouring
       // roof: cut back to the gable wall where the neighbour is (operator
       // 2026-09-27: from low down you looked up under the overhang, and
@@ -518,12 +525,26 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
     const uA = localU(pa, A.shape, hit[0], hit[1])
     const nearLo = Math.abs(uA - fa.uMin) < Math.abs(uA - fa.uMax)
     const match = _seamProfilesMatch(A, B)
-    const style = match ? 'junction' : 'abut'
-    A.opts = nearLo ? { ...A.opts, endLo: style } : { ...A.opts, endHi: style }
-    rebuild(A)
-    if (!match) {
+    // Mismatched: the LOWER roof's end closes against the step (abut). The
+    // HIGHER roof's end stands above the lower roof and reads as a gable
+    // end, so it keeps its own end -- overhang, soffit and barge boards --
+    // and the lower roof trims what of that overhang runs into it. Before,
+    // both ends were abut: no overhang, so no soffit on the higher gable
+    // (operator 2026-09-27: "soffits are not visible", the tall 45 deg wing).
+    const aHigher = ridgeWorld(pa, A.shape).y > ridgeWorld(pb, B.shape).y + 0.05
+    const bHigher = ridgeWorld(pb, B.shape).y > ridgeWorld(pa, A.shape).y + 0.05
+    if (match || !aHigher) {
+      const style = match ? 'junction' : 'abut'
+      A.opts = nearLo ? { ...A.opts, endLo: style } : { ...A.opts, endHi: style }
+      rebuild(A)
+    } else {
+      A.gableOver = [...(A.gableOver ?? []), B.placement.seg.id]
+    }
+    if (!match && !bHigher) {
       B.opts = buriedIsLo ? { ...B.opts, endLo: 'abut' } : { ...B.opts, endHi: 'abut' }
       rebuild(B)
+    } else if (!match) {
+      B.gableOver = [...(B.gableOver ?? []), A.placement.seg.id]
     }
   }
 }

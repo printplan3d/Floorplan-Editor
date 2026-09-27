@@ -1251,7 +1251,11 @@ function _clipHalf(verts: V3[], f: (p: V3) => number): V3[] {
     const bin = fb >= -1e-7
     if (ain) out.push(a)
     if (ain !== bin) {
-      const t = fa / (fa - fb)
+      // Clamped: a point counts as inside down to -1e-7, so with both ends
+      // near the plane t could fall outside [0, 1] and the cut vertex landed
+      // far off the edge -- a sliver 1.2 m past a ridge, up to 9.06 m, on a
+      // stepped east section (2026-09-28).
+      const t = Math.min(1, Math.max(0, fa / (fa - fb)))
       out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t])
     }
   }
