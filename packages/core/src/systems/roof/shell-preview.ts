@@ -954,7 +954,9 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
     // (operator 2026-09-27: "all roof sections lost fascia").
     const tightEnd = _cutOnTightEnd(shape, c)
     const tight = tightEnd?.style ?? null
-    if (tight === 'junction') continue
+    // Junction: inside the neighbour. Abut: its wall and barge board are
+    // built with the end itself (see the abut infill).
+    if (tight) continue
     // Sample the roof line along the edge, exact at the ridge crossing.
     const ts = new Set<number>([0, 1])
     const L = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1])
@@ -1401,6 +1403,44 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
     // east sections, one with a 24 deg south slope). Carried on out along
     // the end line to each side's overhang, under the slope line; the
     // neighbour trims away what falls inside its own roof.
+    if (st === 'abut' && F > 0) {
+      // Barge board. An abut end stands above the lower roof it steps onto
+      // and reads as a gable end, so it gets boards along its rakes like
+      // one: flush under the slate edge (no overhang here), 2 cm proud of
+      // the wall, carried on down to each eave overhang's end. The lower
+      // neighbour trims away what falls inside it (operator 2026-09-27:
+      // "this side is still missing fascia", the stepped east sections).
+      const outN: V2 = [-inward[0], -inward[1]]
+      const P2 = (q: V2): V2 => [q[0] + outN[0] * 0.02, q[1] + outN[1] * 0.02]
+      const chain: [V2, number][] = []
+      const endOf = (k: number, sgn: number): [V2, number] | null => {
+        const loSide = ridgeAlongX ? k <= 1 : k === 0 || k === 3
+        const o = loSide ? ohLo : ohHi
+        if (o < 1e-3) return null
+        const pk = poly[k]!
+        return [[pk[0] + dir[0] * sgn * o, pk[1] + dir[1] * sgn * o], cornerY[k]! - f.cornerTan[k]! * o]
+      }
+      const e0 = endOf(i, -1)
+      if (e0) chain.push(e0)
+      chain.push([pi, yi], [[(pi[0] + pj[0]) / 2, (pi[1] + pj[1]) / 2], ridgeZ], [pj, yj])
+      const e1 = endOf(j, 1)
+      if (e1) chain.push(e1)
+      for (let k = 0; k < chain.length - 1; k++) {
+        const [a, ya] = chain[k]!
+        const [b, yb] = chain[k + 1]!
+        const A = P2(a)
+        const B = P2(b)
+        let quad: V3[] = [
+          [A[0], ya - F, A[1]],
+          [B[0], yb - F, B[1]],
+          [B[0], yb, B[1]],
+          [A[0], ya, A[1]],
+        ]
+        const n = _faceNormal(quad)
+        if (n[0] * outN[0] + n[2] * outN[1] < 0) quad = quad.reverse()
+        add(quad, SLOT_FASCIA)
+      }
+    }
     if (st === 'abut') {
       for (const [k, sgn] of [
         [i, -1],
