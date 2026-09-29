@@ -1348,8 +1348,11 @@ function _realWallSpans(
  * overhang must stop at the wall's outer face, not run on out through it.
  * Along the facade the wall hid that; where the facade ends it poked out
  * into the open (operator 2026-09-29: a dark sliver in the inside corner
- * beside the bay, the main roof's eave). Returns, per such stretch, the
- * volume (r's local frame) outside the wall's face, below its top.
+ * beside the bay, the main roof's eave). The same goes for such a wall
+ * crossing r's eave at an angle near r's end. Returns, per stretch where the
+ * wall rises past r, the volume (r's local frame) outside the wall's outer
+ * face, below its top -- only where r reaches no further past that face
+ * than its overhang.
  *
  * A wall r itself caps (its own gable wall, say) doesn't rise past r, so
  * rakes and ordinary eaves keep their overhang.
@@ -1374,40 +1377,62 @@ function _abuttingWallCuts(
   const RISE = 0.3
   const K = 16
   const out: ClipVolume[] = []
-  for (let e = 0; e < 4; e++) {
-    if (s.styles[e] === 'junction' || s.styles[e] === 'abut') continue
-    const [a, b] = shellEdgeLocal(s, e)
-    const L = Math.hypot(b[0] - a[0], b[1] - a[1])
-    if (L < 1e-6) continue
-    const d: V2 = [(b[0] - a[0]) / L, (b[1] - a[1]) / L]
-    const m: V2 = [-d[1], d[0]] // inward
+
+  // Walls crossing the roof's edge zone at ANY angle (2026-09-29, second
+  // case): an upper-storey wall running across an eave near the roof's end
+  // (the roof's own parapet lifts that eave into the storey above) left the
+  // eave's end poking a few cm past the wall's outer face -- orange through
+  // the bay window. Where r reaches no further past such a wall than its
+  // overhang, everything of r past the wall's outer face goes, along the
+  // wall (plus half its thickness at each end, for the corner) and below its
+  // top. A roof that carries on well past the wall (a lean-to, a roof under
+  // an upper room) is left alone.
+  {
+    const poly = s.polygon
+    const cx = poly.reduce((acc, q) => acc + q[0], 0) / poly.length
+    const cz = poly.reduce((acc, q) => acc + q[1], 0) / poly.length
+    const oh = s.frame.overhang
+    // Footprint boundary, sampled.
+    const bnd: V2[] = []
+    for (let e = 0; e < poly.length; e++) {
+      const a = poly[e]!
+      const b = poly[(e + 1) % poly.length]!
+      const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.05))
+      for (let k = 0; k < n; k++) bnd.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n])
+    }
     for (const w of walls) {
       if ((w.bulge ?? 0) !== 0) continue
       const ws = toLocal(p, w.start[0], w.start[1])
       const we = toLocal(p, w.end[0], w.end[1])
       const wl = Math.hypot(we[0] - ws[0], we[1] - ws[1])
-      if (wl < 1e-6) continue
-      if (Math.abs(d[0] * (we[1] - ws[1]) - d[1] * (we[0] - ws[0])) / wl > 0.09) continue
-      const inset = ((ws[0] + we[0]) / 2 - a[0]) * m[0] + ((ws[1] + we[1]) / 2 - a[1]) * m[1]
-      if (inset < -0.15 || inset > WALL_ON_EDGE) continue
-      const t0 = ((ws[0] - a[0]) * d[0] + (ws[1] - a[1]) * d[1]) / L
-      const t1 = ((we[0] - a[0]) * d[0] + (we[1] - a[1]) * d[1]) / L
-      const lo = Math.max(0, Math.min(t0, t1))
-      const hi = Math.min(1, Math.max(t0, t1))
-      if (hi - lo < 0.02) continue
+      if (wl < 0.05) continue
+      const d: V2 = [(we[0] - ws[0]) / wl, (we[1] - ws[1]) / wl]
+      let no: V2 = [-d[1], d[0]]
+      const mx = (ws[0] + we[0]) / 2
+      const mz = (ws[1] + we[1]) / 2
+      if ((cx - mx) * no[0] + (cz - mz) * no[1] > 0) no = [-no[0], -no[1]] // away from the roof
+      const ht = (w.thickness ?? 0.15) / 2
+      const F: V2 = [mx + no[0] * ht, mz + no[1] * ht]
+      // How far the roof's footprint reaches past the outer face, within the
+      // wall's run.
+      let reach = Number.NEGATIVE_INFINITY
+      for (const q of bnd) {
+        const al = (q[0] - ws[0]) * d[0] + (q[1] - ws[1]) * d[1]
+        if (al < -ht - oh || al > wl + ht + oh) continue
+        reach = Math.max(reach, (q[0] - F[0]) * no[0] + (q[1] - F[1]) * no[1])
+      }
+      if (!Number.isFinite(reach) || reach > 0.15 || reach < -oh - 0.05) continue
       const lv = w.parentId ? levels.get(w.parentId) : undefined
       const wallTop = (lv ? lv.elev : 0) + (w.height ?? 2.7)
-      const face = inset - (w.thickness ?? 0.15) / 2
-      // Sample the wall's line: where it stands (roofed by whatever is
-      // highest there) well above r's own surface, r abuts it.
-      let run: { t0: number; top: number } | null = null
-      const flush = (tEnd: number) => {
+      let run: { a0: number; top: number } | null = null
+      const flush = (a1: number) => {
         if (!run) return
-        const A: V2 = [a[0] + d[0] * run.t0 * L, a[1] + d[1] * run.t0 * L]
-        const B: V2 = [a[0] + d[0] * tEnd * L, a[1] + d[1] * tEnd * L]
-        const F: V2 = [a[0] + m[0] * face, a[1] + m[1] * face]
+        const lo = run.a0 <= 1e-6 ? -ht : run.a0
+        const hi = a1 >= wl - 1e-6 ? wl + ht : a1
+        const A: V2 = [ws[0] + d[0] * lo, ws[1] + d[1] * lo]
+        const B: V2 = [ws[0] + d[0] * hi, ws[1] + d[1] * hi]
         out.push([
-          { n: [-m[0], 0, -m[1]], p: [F[0], 0, F[1]], eps: 0.005 },
+          { n: [no[0], 0, no[1]], p: [F[0], 0, F[1]], eps: 0.005 },
           { n: [d[0], 0, d[1]], p: [A[0], 0, A[1]], eps: 0.005 },
           { n: [-d[0], 0, -d[1]], p: [B[0], 0, B[1]], eps: 0.005 },
           { n: [0, -1, 0], p: [0, run.top - p.baseY, 0], eps: 0 },
@@ -1415,19 +1440,19 @@ function _abuttingWallCuts(
         run = null
       }
       for (let k = 0; k <= K; k++) {
-        const t = lo + ((hi - lo) * k) / K
-        const qx = a[0] + d[0] * t * L + m[0] * inset
-        const qz = a[1] + d[1] * t * L + m[1] * inset
-        const [X, Z] = toWorld(p, qx, qz)
+        const al = (wl * k) / K
+        const [X, Z] = toWorld(p, ws[0] + d[0] * al, ws[1] + d[1] * al)
         const self = heightWorld(p, s, X, Z, false)
         const over = roofOver(X, Z)
         const stands = over == null ? wallTop : Math.min(wallTop, over)
-        const rises = self != null && stands > self + RISE
-        if (rises && !run) run = { t0: Math.max(lo, t - (hi - lo) / K / 2), top: stands }
+        // Past r's reach (no height) a run carries on: the overhang's outer
+        // edge falls between samples, and there is nothing else to cut.
+        const rises = self == null ? run != null : stands > self + RISE
+        if (rises && !run) run = { a0: Math.max(0, al - wl / K / 2), top: stands }
         else if (rises && run) run.top = Math.min(run.top, stands)
-        if (!rises && run) flush(Math.min(hi, t - (hi - lo) / K / 2))
+        if (!rises && run) flush(Math.min(wl, al - wl / K / 2))
       }
-      flush(hi)
+      flush(wl)
     }
   }
   return out
