@@ -51,6 +51,10 @@ const TRIM_MIN_M = 0.02
 const TOP_SINK = 0.03
 /** How far past each wall face the roof is sampled. */
 const SIDE_MARGIN = 0.05
+/** Steepest slope (rise over run) the exported top follows across a wall's
+ *  thickness. A side sample lower than this allows is a DIFFERENT, lower
+ *  roof butting against the wall's face, not the slope over it. */
+const MAX_CROSS_SLOPE = 2.4
 
 /** One cross-section of a trimming prism, wall-local: points left of, on,
  *  and right of the centreline with the roof height (wall-local y) at each. */
@@ -197,9 +201,27 @@ export function wallTopProfile(
   const n = Math.min(MAX_SAMPLES, Math.max(2, Math.ceil(len / SAMPLE_STEP) + 1))
   const pts: { s: number; y: number }[] = []
   let needs = false
+  // The render cuts a wall flat across its thickness, so the lowest of the
+  // three samples wins -- but only while a side sample is the SAME slope as
+  // over the wall: no steeper than a roof gets over W, and already dipping
+  // at the wall's own face on the way out. Otherwise it has landed on a
+  // lower roof abutting the wall (its eave at the wall's foot, outside the
+  // face): taking it dropped a whole L1 wall to 15 cm in the render while
+  // the preview, which only shaves the outer face, showed it standing
+  // (operator 2026-09-29).
+  const maxDrop = W * MAX_CROSS_SLOPE
+  const faceAt = (node.thickness ?? 0.15) / 2 / W
   for (let i = 0; i < n; i++) {
     const s = (len * i) / (n - 1)
-    const y = Math.min(at(s, W), at(s, 0), at(s, -W))
+    const c = at(s, 0)
+    const side = (z: number) => {
+      const v = at(s, z)
+      const drop = c - v
+      if (drop <= 0.01) return v
+      const atFace = c - at(s, z * faceAt)
+      return drop <= maxDrop && atFace >= drop * faceAt * 0.5 ? v : c
+    }
+    const y = Math.min(side(W), c, side(-W))
     if (y + TOP_SINK < top - TRIM_MIN_M) needs = true
     pts.push({ s, y: Math.max(0.02, Math.min(top, y)) })
   }
