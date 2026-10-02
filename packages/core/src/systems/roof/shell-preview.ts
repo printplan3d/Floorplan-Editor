@@ -1861,7 +1861,12 @@ function _resolveDormer(
     cheekD: runToBury + 0.15,
     rZ,
     zEaveD: rZ - gableRise,
-    zBase: zFront - Math.max(0.6, rh),
+    // Never below the eave: the slope is at or above it over the whole
+    // dormer, so that is deep enough for the slope to cut it, and a body
+    // hanging lower stuck out under the eave down the wall once a dormer's
+    // front came forward to a low window (operator 2026-10-02: "extended
+    // downward till Level 0").
+    zBase: Math.max(eaveParent, zFront - Math.max(0.6, rh)),
     tanParent,
     tanShed,
     forwardCover: 0.05,
