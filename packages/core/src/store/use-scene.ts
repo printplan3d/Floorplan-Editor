@@ -18,6 +18,17 @@ function migrateNodes(nodes: Record<string, any>): Record<string, AnyNode> {
     if (node.type === 'item' && !('scale' in node)) {
       patchedNodes[id] = { ...node, scale: [1, 1, 1] }
     }
+    // 1b. Doors placed from the 2D plan sat at position y = 0, but a door's
+    // position is its CENTRE (y = height / 2, on the floor). The door was
+    // drawn half sunk into the floor until the plan was next loaded from the
+    // cloud, which re-derives y (operator 2026-10-02: "doors look half buried
+    // in earth"). A door's y is always height / 2; put it back.
+    if (node.type === 'door' && Array.isArray(node.position)) {
+      const h = typeof node.height === 'number' ? node.height : 2.1
+      if (Math.abs((node.position[1] ?? 0) - h / 2) > 1e-6) {
+        patchedNodes[id] = { ...node, position: [node.position[0] ?? 0, h / 2, node.position[2] ?? 0] }
+      }
+    }
     // 2. Old roof to new roof + segment migration
     if (node.type === 'roof' && !('children' in node)) {
       const oldRoof = node

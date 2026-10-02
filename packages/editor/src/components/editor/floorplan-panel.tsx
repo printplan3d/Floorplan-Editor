@@ -8685,6 +8685,10 @@ export function FloorplanPanel() {
               // driven by the same constant. See NEW_OPENING_WIDTH_M.
               width: NEW_OPENING_WIDTH_M.door,
             });
+            // A door's position is its centre: y = height / 2, on the
+            // floor. 0 drew it half sunk into the floor (operator
+            // 2026-10-02: "doors look half buried in earth").
+            node.position = [distance, node.height / 2, 0];
             state.createNode(node, wall.id as AnyNodeId);
             useViewer.getState().setSelection({ selectedIds: [node.id] });
           } else {
