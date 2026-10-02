@@ -1257,6 +1257,13 @@ function _seamProfilesMatch(A: ResolvedSegment, B: ResolvedSegment): boolean {
       }
     }
     if (Math.abs(a.y - best.y) > SEAM_PROFILE_TOL) return false
+    // ...and the eave LINES must coincide across the ridge, not just their
+    // heights: a wider roof joined to a narrower one at the same heights was
+    // opened as a junction and its gable end stood open beyond the narrower
+    // roof (operator 2026-10-02, once a moved ridge made the two collinear).
+    const offA = (a.p[0] - ra.a[0]) * ra.dir[1] - (a.p[1] - ra.a[1]) * ra.dir[0]
+    const offB = (best.p[0] - ra.a[0]) * ra.dir[1] - (best.p[1] - ra.a[1]) * ra.dir[0]
+    if (Math.abs(offA - offB) > SEAM_PROFILE_TOL) return false
   }
   return true
 }
