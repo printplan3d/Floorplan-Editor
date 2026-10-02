@@ -1582,7 +1582,7 @@ function _dormerWindowOverrides(
     // opening — stands in front and forms the dormer's face.
     // Front flush with the wall's OUTER face: the dormer has its own front
     // and window (like a free one), standing on the wall line.
-    const inward = parallel
+    let inward = parallel
       ? Math.max(0, bestDist - (wall.thickness ?? 0.15) / 2)
       : Math.max(0, bestDist)
     // Fit to the window, adjustable in the panel.
@@ -1597,7 +1597,6 @@ function _dormerWindowOverrides(
     const halfW = cheekWidth / 2
     const f = s.frame
     const tanP = Math.max(0.01, f.tanOf[bestEdge]!)
-    const zFront = f.eaveOf[bestEdge]! + tanP * inward
     // Its own window, sized from the followed one unless set in the panel.
     // The dormer's size comes from the FOLLOWED window and the headroom
     // only: editing the dormer's window just changes the window, never the
@@ -1607,8 +1606,19 @@ function _dormerWindowOverrides(
     const winW = num(dw.w, win.width ?? 1)
     const winH = num(dw.h, win.height ?? 1.2)
     const sill = num(dw.sill, 0.15)
-    void headWorld
-    void zFront
+    // A window lower than where the slope crosses its wall: bring the
+    // dormer's front forward, down the slope, until its window sits at the
+    // real window's sill; the dormer runs back over the wall. Before, its
+    // window started just above the slope at the wall -- above the real one
+    // (operator 2026-10-02: an L1 window 3.3 m in from an L0 roof's eave).
+    {
+      const eave = f.eaveOf[bestEdge]!
+      const sillLocal = headWorld - (win.height ?? 1.2) - p.baseY
+      // Fixed 0.15 (the dormer window's default sill), not its own sill
+      // setting: editing the dormer's window must never move the dormer.
+      const wantFront = sillLocal - 0.15
+      if (wantFront < eave + tanP * inward) inward = Math.max(0, (wantFront - eave) / tanP)
+    }
     const need = 0.15 + (win.height ?? 1.2) + headroom
     let ridgeHeight: number
     if (d.type === 'shed') ridgeHeight = need
