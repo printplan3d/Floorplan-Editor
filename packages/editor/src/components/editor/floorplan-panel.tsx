@@ -8674,14 +8674,15 @@ export function FloorplanPanel() {
             return parentWall?.parentId === levelId;
           }).length;
           const name = `${isDoor ? "Door" : "Window"} ${existing + 1}`;
-          const wallDx = wall.end[0] - wall.start[0];
-          const wallDy = wall.end[1] - wall.start[1];
-          const wallAngle = Math.atan2(wallDy, wallDx);
           if (isDoor) {
             const node = DoorNode.parse({
               name,
               position: [distance, 0, 0],
-              rotation: [0, wallAngle, 0],
+              // Wall-local: the door/window is a child of the wall, which
+              // already carries the wall's angle. Giving it the angle again
+              // turned it off the wall on any wall not along x (operator
+              // 2026-10-02: doors on 45 deg walls, cut-outs slicing walls).
+              rotation: [0, 0, 0],
               side: "front",
               wallId: wall.id,
               parentId: wall.id,
@@ -8700,7 +8701,11 @@ export function FloorplanPanel() {
             const node = WindowNode.parse({
               name,
               position: [distance, floorplanOpeningLocalY, 0],
-              rotation: [0, wallAngle, 0],
+              // Wall-local: the door/window is a child of the wall, which
+              // already carries the wall's angle. Giving it the angle again
+              // turned it off the wall on any wall not along x (operator
+              // 2026-10-02: doors on 45 deg walls, cut-outs slicing walls).
+              rotation: [0, 0, 0],
               side: "front",
               wallId: wall.id,
               parentId: wall.id,

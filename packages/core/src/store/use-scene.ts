@@ -29,6 +29,17 @@ function migrateNodes(nodes: Record<string, any>): Record<string, AnyNode> {
         patchedNodes[id] = { ...node, position: [node.position[0] ?? 0, h / 2, node.position[2] ?? 0] }
       }
     }
+    // 1c. Doors/windows placed from the 2D plan carried the WALL's angle as
+    // their own rotation. They live in the wall's frame (already turned by
+    // that angle), so it was applied twice: off the wall on any wall not
+    // along x, and their cut-outs sliced across it. Nothing else sets an
+    // opening's rotation; it is always 0 in the wall's frame.
+    if ((node.type === 'door' || node.type === 'window') && Array.isArray(node.rotation)) {
+      const cur = patchedNodes[id]
+      if (cur.rotation.some((r: number) => Math.abs(r ?? 0) > 1e-9)) {
+        patchedNodes[id] = { ...cur, rotation: [0, 0, 0] }
+      }
+    }
     // 2. Old roof to new roof + segment migration
     if (node.type === 'roof' && !('children' in node)) {
       const oldRoof = node
