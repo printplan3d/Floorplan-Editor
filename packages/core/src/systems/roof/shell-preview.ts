@@ -1074,29 +1074,7 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
       wall.push([x, Math.max(y0, _slopeY(shape, x, z)), z])
     }
     if (!tight) faces.push({ verts: wall, slot: SLOT_WALL_EXTERIOR })
-    // Fascia along the cut line. On a cut along a long side it reaches down
-    // to that side's boxed soffit, which stays level with the RECTANGLE's
-    // eave: a cut a little inside that eave sits where the slope is a little
-    // higher, and a board only F deep left a slit up to ~2 cm between its
-    // bottom and the soffit -- read as a soffit strip floating under the
-    // roof edge (operator 2026-10-02).
-    const vOut = f.ridgeAlongX ? c.n[1] : c.n[0]
-    const sideIdx = vOut < -0.7 ? f.eSideLo : vOut > 0.7 ? f.eSideHi : -1
-    const sideFlush = (sideIdx === f.eSideLo && shape.flushLo) || (sideIdx === f.eSideHi && shape.flushHi)
-    const sideSoffitY =
-      sideIdx >= 0 && !sideFlush ? f.eaveOf[sideIdx]! - f.tanOf[sideIdx]! * oh - F : Number.POSITIVE_INFINITY
-    // Only where the soffit is actually under the board: inside the
-    // rectangle's overhang band on that side. A cut further in (a strongly
-    // slanted edge) has no soffit below it, and the board keeps its depth.
-    const bottom = (x: number, z: number, yTop: number): number => {
-      if (!Number.isFinite(sideSoffitY)) return yTop - F
-      const v = f.ridgeAlongX ? z : x
-      const inBand =
-        sideIdx === f.eSideLo
-          ? v >= f.vMin - oh - 1e-3 && v <= f.vMin + 1e-3
-          : v <= f.vMax + oh + 1e-3 && v >= f.vMax - 1e-3
-      return inBand ? Math.min(yTop - F, sideSoffitY) : yTop - F
-    }
+    // Fascia along the cut line.
     if (F > 0) {
       for (let k = 0; k < t.length - 1; k++) {
         const [x0, z0] = fasciaAt(t[k]!)
@@ -1105,8 +1083,8 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
         const y1t = _slopeY(shape, x1, z1)
         faces.push({
           verts: [
-            [x0, bottom(x0, z0, y0t), z0],
-            [x1, bottom(x1, z1, y1t), z1],
+            [x0, y0t - F, z0],
+            [x1, y1t - F, z1],
             [x1, y1t, z1],
             [x0, y0t, z0],
           ],
@@ -1430,12 +1408,17 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   add([E_ll, E_hl, R_hi, R_lo], SLOT_SLATE_TOP)
   add([E_hh, E_lh, R_lo, R_hi], SLOT_SLATE_TOP)
 
-  // Eave fascia + boxed soffit on both long sides.
+  // Eave fascia + OPEN soffit on both long sides: the overhang's underside
+  // runs parallel to the slates, the fascia depth below them, from the
+  // fascia's bottom back to the wall line. It was a flat boxed soffit, which
+  // met the gable's sloped rake soffit at an ugly corner and showed as a
+  // strip floating under the roof edge (operator 2026-10-02: "join them at
+  // corners or totally get rid of them" -- chose open eaves).
   if (F > 0) {
     add([down(E_ll), down(E_hl), E_hl, E_ll], SLOT_FASCIA)
     add([down(E_hh), down(E_lh), E_lh, E_hh], SLOT_FASCIA)
-    if (ohLo > 1e-3) add([P(uLoO, eLoO - F, vMin), P(uHiO, eLoO - F, vMin), down(E_hl), down(E_ll)], SLOT_SOFFIT)
-    if (ohHi > 1e-3) add([P(uHiO, eHiO - F, vMax), P(uLoO, eHiO - F, vMax), down(E_lh), down(E_hh)], SLOT_SOFFIT)
+    if (ohLo > 1e-3) add([P(uLoO, eLo - F, vMin), P(uHiO, eLo - F, vMin), down(E_hl), down(E_ll)], SLOT_SOFFIT)
+    if (ohHi > 1e-3) add([P(uHiO, eHi - F, vMax), P(uLoO, eHi - F, vMax), down(E_lh), down(E_hh)], SLOT_SOFFIT)
   }
 
   // Overhang dressing at the ends. The vertical end walls themselves are
@@ -1463,7 +1446,9 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
       add(orient([EL, EH, R]), SLOT_SLATE_TOP)
       if (F > 0) {
         add(orient([down(EL), down(EH), EH, EL]), SLOT_FASCIA)
-        add(orient([P(uWall, eLoO - F, vLoO), P(uWall, eHiO - F, vHiO), down(EH), down(EL)]), SLOT_SOFFIT)
+        // Open: from the end's eave at the wall line out to the fascia.
+        const eEnd = eaveOf[atHi ? f.eEndHi : f.eEndLo]!
+        add(orient([P(uWall, eEnd - F, vLoO), P(uWall, eEnd - F, vHiO), down(EH), down(EL)]), SLOT_SOFFIT)
       }
     }
   }
