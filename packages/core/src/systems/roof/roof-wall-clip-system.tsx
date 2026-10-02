@@ -176,8 +176,11 @@ export function clipWallGeometry(
 /** A rise between two 5 cm samples bigger than any roof slope makes. */
 const STEP_JUMP_M = 0.3
 /** A step is moved this far into the higher roof, so the wall's step face
- *  stands behind that roof's end wall instead of in its plane. */
-const STEP_INSET_M = 0.02
+ *  stands behind that roof's end wall instead of in its plane. The roof's
+ *  body reaches 2 cm past its drawn edge, so 2 cm left the step right in the
+ *  gable's plane, and the lower roof's slates run a few cm in under it
+ *  (operator 2026-10-03: walls still showing at Roof 9's gable). */
+const STEP_INSET_M = 0.06
 
 /**
  * Where the roof height jumps between two samples -- one roof ends and a
@@ -199,12 +202,13 @@ function _sharpenSteps(
     yc: h.c,
     yr: h.r,
   })
-  const out: Section[] = []
-  for (let i = 0; i < sections.length; i++) {
+  const added: Section[] = []
+  // Samples on the higher roof that now fall on the step's low side.
+  const dropped = new Set<Section>()
+  for (let i = 0; i + 1 < sections.length; i++) {
     const A = sections[i]!
-    out.push(A)
-    const B = sections[i + 1]
-    if (!B || Math.abs(B.yc - A.yc) <= STEP_JUMP_M) continue
+    const B = sections[i + 1]!
+    if (Math.abs(B.yc - A.yc) <= STEP_JUMP_M) continue
     // Bisect for the jump.
     let lo = A.c[0]
     let hi = B.c[0]
@@ -216,22 +220,26 @@ function _sharpenSteps(
       if (above === aHigh) lo = m
       else hi = m
     }
-    // lo is on A's side, hi on B's. Step STEP_INSET_M into the higher side.
-    const span = B.c[0] - A.c[0]
-    const inset = Math.min(STEP_INSET_M, span * 0.4)
-    const xs = aHigh ? lo - inset : hi + inset
+    // lo is on A's side, hi on B's. Step STEP_INSET_M into the higher side
+    // -- past the next sample or two if need be, which then take the low
+    // roof's height (straight on from the step to the next low sample).
+    const xs = aHigh ? lo - STEP_INSET_M : hi + STEP_INSET_M
     const highH = heightsAt(aHigh ? lo : hi)
     const lowH = heightsAt(aHigh ? hi : lo)
-    const xa = aHigh ? Math.max(A.c[0] + 1e-4, xs - 1e-4) : Math.max(A.c[0] + 1e-4, xs - 1e-4)
-    const xb = aHigh ? Math.min(B.c[0] - 1e-4, xs + 1e-4) : Math.min(B.c[0] - 1e-4, xs + 1e-4)
-    if (!(xb > xa)) continue
-    if (aHigh) {
-      out.push(make(xa, highH), make(xb, lowH))
-    } else {
-      out.push(make(xa, lowH), make(xb, highH))
+    // A face sample can still be on the higher roof's overhang there (the
+    // two roofs' drawn edges a few cm apart): the low side is low right
+    // across the wall, or that face stood up through the lower roof
+    // (operator 2026-10-03, the L1 wall at Roof 9's west gable).
+    lowH.l = Math.min(lowH.l, lowH.c + STEP_JUMP_M)
+    lowH.r = Math.min(lowH.r, lowH.c + STEP_JUMP_M)
+    for (const s of sections) {
+      if (aHigh ? s.c[0] > xs - 2e-4 && s.c[0] < hi : s.c[0] > lo && s.c[0] < xs + 2e-4) dropped.add(s)
     }
+    if (aHigh) added.push(make(xs - 1e-4, highH), make(xs + 1e-4, lowH))
+    else added.push(make(xs - 1e-4, lowH), make(xs + 1e-4, highH))
   }
-  return out
+  if (!added.length) return sections
+  return [...sections.filter((s) => !dropped.has(s)), ...added].sort((p, q) => p.c[0] - q.c[0])
 }
 
 type P3 = [number, number, number]

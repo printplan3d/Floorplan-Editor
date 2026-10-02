@@ -398,16 +398,25 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
   // thin slab, not a roof over a room: a wall under a higher roof's eave but
   // below a lower roof's slope rose straight up through that slope to the
   // soffit (operator 2026-09-27: a post and a gap beside the L1 shed).
+  //
+  // Where no body covers the point, a roof whose DRAWN outline still does
+  // wins over one that only reaches it with its overhang. Taking the highest
+  // overhang there left walls at a higher roof's eave height just past its
+  // gable end, standing up through the lower roof drawn right there
+  // (operator 2026-10-03: L1 walls poking out in front of Roof 9's gable).
   const wallHeightAt = (X: number, Z: number, dir?: [number, number]): number | null => {
     let body: number | null = null
+    let drawn: number | null = null
     let any: number | null = null
     for (const r of all) {
       const h = heightWorld(r.placement, r.shape, X, Z, false)
       if (h == null) continue
       if (any == null || h > any) any = h
-      if (_insideBody(r, X, Z, dir) && (body == null || h > body)) body = h
+      if (_insideBody(r, X, Z, dir)) {
+        if (body == null || h > body) body = h
+      } else if (_outsideDrawn(r, X, Z) <= 0.02 && (drawn == null || h > drawn)) drawn = h
     }
-    return body ?? any
+    return body ?? drawn ?? any
   }
   return { segments: segs, levels, heightAt, wallHeightAt }
 }
@@ -1065,6 +1074,20 @@ function _convexOverlap(pa: V2[], pb: V2[]): boolean {
  * of any real wall set in from that line (the strip outside such a wall is
  * overhang, not room -- operator 2026-09-27, the post beside the L1 shed).
  */
+/**
+ * How far (m) a world point lies outside r's DRAWN outline -- the frame
+ * rectangle cut back by its footprint cuts; <= 0 inside.
+ */
+function _outsideDrawn(r: ResolvedSegment, X: number, Z: number): number {
+  const [x, z] = toLocal(r.placement, X, Z)
+  const f = r.shape.frame
+  const u = f.ridgeAlongX ? x : z
+  const v = f.ridgeAlongX ? z : x
+  let d = Math.max(f.uMin - u, u - f.uMax, f.vMin - v, v - f.vMax)
+  for (const c of r.shape.footprintCuts) d = Math.max(d, c.n[0] * (x - c.a[0]) + c.n[1] * (z - c.a[1]))
+  return d
+}
+
 function _insideBody(r: ResolvedSegment, X: number, Z: number, dir?: [number, number]): boolean {
   if (!insideFootprint(r.placement, r.shape, X, Z, 0.02)) return false
   const [x, z] = toLocal(r.placement, X, Z)
