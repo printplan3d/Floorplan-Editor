@@ -314,6 +314,21 @@ const SelectIconNode = (
     />
   </svg>
 );
+// Roofs view switch: a roof outline, struck through when roofs are off.
+const roofsIconNode = (on: boolean) => (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <path
+      d="M3 12 L12 5 L21 12 M6 10 V19 H18 V10"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    {on ? null : (
+      <path d="M4 20 L20 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    )}
+  </svg>
+);
 const UndoIconNode = (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
     <path
@@ -683,6 +698,8 @@ export function IconRail({
   const setGridSnapEnabled = useEditor((s) => s.setGridSnapEnabled);
   const orthoEnabled = useEditor((s) => s.orthoEnabled);
   const setOrthoEnabled = useEditor((s) => s.setOrthoEnabled);
+  const showRoofs = useViewer((s) => s.showRoofs);
+  const setShowRoofs = useViewer((s) => s.setShowRoofs);
   const { canUndo, canRedo, undo, redo } = useUndoRedo();
   const [mounted, setMounted] = useState(false);
   const traceInputRef = useRef<HTMLInputElement>(null);
@@ -1022,6 +1039,14 @@ export function IconRail({
         onClick={() => setOrthoEnabled(!orthoEnabled)}
         label={orthoEnabled ? "Ortho on" : "Ortho off"}
         iconNode={OrthoIconNode}
+      />
+      {/* View only: hides roofs in 2D and 3D so walls, windows and doors
+          under them can be clicked. Roofs stay in the plan and render. */}
+      <RailButton
+        isActive={!showRoofs}
+        onClick={() => setShowRoofs(!showRoofs)}
+        label={showRoofs ? "Roofs on" : "Roofs off"}
+        iconNode={roofsIconNode(showRoofs)}
       />
 
       {/* Undo / Redo — grouped just below the build tools */}

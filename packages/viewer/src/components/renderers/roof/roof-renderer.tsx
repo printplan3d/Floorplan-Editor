@@ -1,5 +1,5 @@
 import { type RoofNode, useRegistry, useScene } from '@ritn3d/core'
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useNodeEvents } from '../../../hooks/use-node-events'
 import useViewer from '../../../store/use-viewer'
@@ -86,13 +86,35 @@ export const RoofRenderer = ({ node }: { node: RoofNode }) => {
 
   const handlers = useNodeEvents(node, 'roof')
   const debugColors = useViewer((s) => s.debugColors)
+  // Editor "Roofs off" switch, and the per-node eye icon: a hidden roof must
+  // not catch clicks either. three.js raycasts invisible objects (and the
+  // segment meshes always sit in an invisible wrapper), so switch raycasting
+  // off for the whole subtree while hidden, so walls, windows and doors
+  // under it can be picked.
+  const showRoofs = useViewer((s) => s.showRoofs)
+  const shown = showRoofs && node.visible !== false
+  useEffect(() => {
+    const root = ref.current
+    if (!root) return
+    const noRay: THREE.Object3D['raycast'] = () => {}
+    root.traverse((o) => {
+      const ud = o.userData as { __rayOrig?: THREE.Object3D['raycast'] }
+      if (!shown) {
+        if (!ud.__rayOrig) ud.__rayOrig = o.raycast
+        o.raycast = noRay
+      } else if (ud.__rayOrig) {
+        o.raycast = ud.__rayOrig
+        delete ud.__rayOrig
+      }
+    })
+  }, [shown, node.children])
 
   return (
     <group
       position={[node.position[0], node.position[1] + storeyTop, node.position[2]]}
       ref={ref}
       rotation-y={node.rotation}
-      visible={node.visible}
+      visible={shown}
       {...handlers}
     >
       <mesh

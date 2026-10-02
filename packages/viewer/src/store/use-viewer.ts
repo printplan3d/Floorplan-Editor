@@ -111,6 +111,15 @@ type ViewerState = {
   showZoneLabels: boolean
   setShowZoneLabels: (enabled: boolean) => void
 
+  /**
+   * Editor view switch: roofs drawn (and clickable) or not, in 3D and on
+   * the 2D plan. Off makes walls, windows and doors under a roof reachable.
+   * View only -- the roofs stay in the plan, the render and every export.
+   * Not persisted: a fresh session always shows roofs.
+   */
+  showRoofs: boolean
+  setShowRoofs: (show: boolean) => void
+
   cameraDragging: boolean
   setCameraDragging: (dragging: boolean) => void
 }
@@ -233,6 +242,9 @@ const useViewer = create<ViewerState>()(
 
       showZoneLabels: true,
       setShowZoneLabels: (enabled) => set({ showZoneLabels: enabled }),
+
+      showRoofs: true,
+      setShowRoofs: (show) => set({ showRoofs: show }),
 
       cameraDragging: false,
       setCameraDragging: (dragging) => set({ cameraDragging: dragging }),

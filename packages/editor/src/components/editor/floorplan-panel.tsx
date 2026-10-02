@@ -4281,6 +4281,9 @@ const FloorplanPolygonHandleLayer = memo(function FloorplanPolygonHandleLayer({
   );
 });
 
+/** Plan metres either side of a roof's outline that still pick the roof. */
+const ROOF_OUTLINE_HIT_M = 0.25
+
 export function FloorplanPanel() {
   const viewportHostRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -4340,6 +4343,8 @@ export function FloorplanPanel() {
   const setSelection = useViewer((state) => state.setSelection);
   const theme = useViewer((state) => state.theme);
   const unit = useViewer((state) => state.unit);
+  // Editor "Roofs off" switch: roofs neither drawn nor clickable here.
+  const showRoofs = useViewer((state) => state.showRoofs);
   const showGrid = useViewer((state) => state.showGrid);
   const showGuides = useViewer((state) => state.showGuides);
   const setShowGuides = useViewer((state) => state.setShowGuides);
@@ -8719,17 +8724,25 @@ export function FloorplanPanel() {
       // final setSelection([]) would immediately clear the roof selection —
       // that's the "properties panel flashes then disappears" symptom.
       // Testing here mirrors the stair/zone flow and keeps the selection.
-      const roofClick = roofRects.find((r) => {
-        // Local point in the roof's un-rotated frame.
-        const [lx, ly] = segmentWorldToLocal(
-          { cx: r.cx, cz: r.cz, rot: r.rotation },
-          planPoint[0],
-          planPoint[1],
-        );
-        return (
-          Math.abs(lx) <= r.width / 2 && Math.abs(ly) <= r.depth / 2
-        );
-      });
+      // Only a roof's outline picks it (or anywhere inside once it is
+      // selected): inside the outline the click belongs to whatever lies
+      // under the roof -- a wall, window, door or room (operator
+      // 2026-10-02: walls and windows under a roof couldn't be reached).
+      const roofClick = !showRoofs
+        ? undefined
+        : roofRects.find((r) => {
+            // Local point in the roof's un-rotated frame.
+            const [lx, ly] = segmentWorldToLocal(
+              { cx: r.cx, cz: r.cz, rot: r.rotation },
+              planPoint[0],
+              planPoint[1],
+            );
+            const inX = r.width / 2 - Math.abs(lx);
+            const inY = r.depth / 2 - Math.abs(ly);
+            if (inX < -ROOF_OUTLINE_HIT_M || inY < -ROOF_OUTLINE_HIT_M) return false;
+            if (selectedIdSet.has(r.segId) || selectedIdSet.has(r.roofId)) return true;
+            return Math.min(Math.abs(inX), Math.abs(inY)) <= ROOF_OUTLINE_HIT_M;
+          });
       if (roofClick) {
         setSelectedReferenceId(null);
         setSelection({ selectedIds: [roofClick.segId], zoneId: null });
@@ -8812,6 +8825,8 @@ export function FloorplanPanel() {
       roofDraftStart,
       createRoofOnCurrentLevel,
       roofRects,
+      selectedIdSet,
+      showRoofs,
       setSelectedReferenceId,
       setSelection,
       shiftPressed,
@@ -11797,7 +11812,7 @@ export function FloorplanPanel() {
                 background handler — otherwise trying to place a corner
                 INSIDE an existing roof would select the existing roof
                 instead of dropping the new point. */}
-            {roofRects.length > 0 && (
+            {roofRects.length > 0 && showRoofs && (
               <g
                 data-element="roof-layer"
                 pointerEvents={isRoofBuildActive ? "none" : "auto"}
@@ -11838,11 +11853,38 @@ export function FloorplanPanel() {
                       }}
                       style={{ cursor: "pointer" }}
                     >
+                      {/* Unselected, only the outline (a wide invisible
+                          band along it), the ridge line and the label pick
+                          the roof; its inside lets clicks through to the
+                          walls, openings and rooms under it. */}
                       {r.polygon && r.polygon.length >= 3 ? (
                         <polygon
                           points={r.polygon
                             .map((p) => `${-p[0]},${-p[1]}`)
                             .join(' ')}
+                          fill="none"
+                          stroke="transparent"
+                          strokeWidth={ROOF_OUTLINE_HIT_M * 2}
+                          pointerEvents="stroke"
+                        />
+                      ) : (
+                        <rect
+                          x={-w / 2}
+                          y={-d / 2}
+                          width={w}
+                          height={d}
+                          fill="none"
+                          stroke="transparent"
+                          strokeWidth={ROOF_OUTLINE_HIT_M * 2}
+                          pointerEvents="stroke"
+                        />
+                      )}
+                      {r.polygon && r.polygon.length >= 3 ? (
+                        <polygon
+                          points={r.polygon
+                            .map((p) => `${-p[0]},${-p[1]}`)
+                            .join(' ')}
+                          pointerEvents={isSel ? "visiblePainted" : "none"}
                           fill={isSel ? "rgba(180,83,9,0.16)" : "rgba(180,83,9,0.08)"}
                           stroke={isSel ? "#b45309" : "#8a5a20"}
                           strokeWidth={isSel ? 0.06 : 0.04}
@@ -11854,6 +11896,7 @@ export function FloorplanPanel() {
                           y={-d / 2}
                           width={w}
                           height={d}
+                          pointerEvents={isSel ? "visiblePainted" : "none"}
                           fill={isSel ? "rgba(180,83,9,0.16)" : "rgba(180,83,9,0.08)"}
                           stroke={isSel ? "#b45309" : "#8a5a20"}
                           strokeWidth={isSel ? 0.06 : 0.04}
