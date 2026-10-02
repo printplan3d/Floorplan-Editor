@@ -354,7 +354,7 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
         // A roof on a LOWER level trims r only where r's side walls were
         // carried down over it (see _infillDown): the part inside it is its
         // roof space.
-        if (r.opts.infillDown && _levelAbove(r, o, levels) && _footprintsOverlap(r, o, r.shape.frame.overhang + 0.1)) {
+        if (r.opts.infillDown && _levelAbove(r, o, levels) && _footprintsOverlap(r, o, Math.max(...r.shape.frame.ohEdge) + 0.1)) {
           vols.push(_volumeInto(o, r, false))
         }
         continue
@@ -368,7 +368,7 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
       // roof: cut back to the gable wall where the neighbour is (operator
       // 2026-09-27: from low down you looked up under the overhang, and
       // it read as a gap between the two gables).
-      if (_footprintsOverlap(r, o, r.shape.frame.overhang + 0.1)) vols.push(..._rakesOver(o, r))
+      if (_footprintsOverlap(r, o, Math.max(...r.shape.frame.ohEdge) + 0.1)) vols.push(..._rakesOver(o, r))
       if (!_footprintsOverlap(r, o)) continue
       // o's rake cut back over r (see _rakesOver) no longer reaches over r:
       // r must not be trimmed by it either, or neither roof covers that
@@ -757,7 +757,7 @@ function _seamPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
       [B, loB, reachB],
     ] as const) {
       const f = r.shape.frame
-      const oh = f.overhang
+      const oh = f.ohEdge[lo ? f.eSideLo : f.eSideHi]!
       const vEdge = lo ? f.vMin - oh : f.vMax + oh
       const [px, pz] = local(r, p0)
       const [dx, dz] = rot(r, dl)
@@ -1030,6 +1030,7 @@ function _rakeEdgesOver(o: ResolvedSegment, r: ResolvedSegment): number[] {
   const out: number[] = []
   for (const e of [f.eEndLo, f.eEndHi]) {
     if (o.shape.styles[e] !== 'gable') continue
+    const oh = f.ohEdge[e]!
     const a = poly[e]!
     const b = poly[(e + 1) % 4]!
     const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
@@ -1422,7 +1423,7 @@ function _abuttingWallCuts(
     const poly = s.polygon
     const cx = poly.reduce((acc, q) => acc + q[0], 0) / poly.length
     const cz = poly.reduce((acc, q) => acc + q[1], 0) / poly.length
-    const oh = s.frame.overhang
+    const oh = Math.max(...s.frame.ohEdge)
     // Footprint boundary, sampled.
     const bnd: V2[] = []
     for (let e = 0; e < poly.length; e++) {

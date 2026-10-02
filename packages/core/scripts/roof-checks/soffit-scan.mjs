@@ -56,11 +56,13 @@ for (const [id, r] of ctx.segments) {
     const cx = poly.reduce((q, p) => q + p[0], 0) / 4, cz = poly.reduce((q, p) => q + p[1], 0) / 4
     const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2
     if (out[0] * (mx - cx) + out[1] * (mz - cz) < 0) { out[0] = -out[0]; out[1] = -out[1] }
+    // Each edge's own overhang (level-fascia eaves vary with pitch).
+    const ohI = f.ohEdge?.[i] ?? f.overhang
     const n = Math.max(2, Math.floor(L / 0.25))
     for (let k = 1; k < n; k++) {
       const t = k / n
-      const x = a[0] + (b[0] - a[0]) * t + out[0] * f.overhang * 0.5
-      const z = a[1] + (b[1] - a[1]) * t + out[1] * f.overhang * 0.5
+      const x = a[0] + (b[0] - a[0]) * t + out[0] * ohI * 0.5
+      const z = a[1] + (b[1] - a[1]) * t + out[1] * ohI * 0.5
       // Skip points inside another roof's footprint (the neighbour takes over there).
       const X = pl.tx + pl.cos * x + pl.sin * z, Z = pl.tz - pl.sin * x + pl.cos * z
       const h = firstUp([X, pl.baseY - 1.5, Z])

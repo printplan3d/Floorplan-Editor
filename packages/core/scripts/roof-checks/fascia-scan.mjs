@@ -58,6 +58,8 @@ for (const [id, r] of ctx.segments) {
     const out = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L]
     const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2
     if (out[0] * (mx - cx) + out[1] * (mz - cz) < 0) { out[0] = -out[0]; out[1] = -out[1] }
+    // Each edge's own overhang (level-fascia eaves vary with pitch).
+    const oh = f.ohEdge?.[i] ?? f.overhang
     const n = Math.max(2, Math.floor(L / 0.25))
     const bad = {}
     for (let k = 1; k < n; k++) {

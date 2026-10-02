@@ -289,7 +289,15 @@ type RoofFrame = {
   rLoU: number
   rHiU: number
   meanEave: number
+  /** The authored overhang (m): a gable rake's horizontal reach, and the
+   *  fascia drop every sloped eave shares (see ohEdge). */
   overhang: number
+  /** Horizontal overhang per EDGE. Gable rakes: the authored overhang.
+   *  Sloped eaves (sides, hip ends): whatever puts the fascia the same
+   *  height below the wall top on every roof -- the drop a 45 deg roof gets
+   *  from the authored overhang -- so fascias line up where roofs of
+   *  different pitch meet (operator 2026-10-02: "level everywhere"). */
+  ohEdge: number[]
 }
 
 export type ShellShape = {
@@ -551,7 +559,10 @@ export function generateShellSegmentGeometry(
     // (operator 2026-09-27, the small gable at -6.1, 5.7).
     const vols: ClipVolume[] = shape.footprintCuts
       .filter((c) => _cutOnTightEnd(shape, c)?.style !== 'junction')
-      .map((c) => [{ n: [c.n[0], 0, c.n[1]], p: [c.a[0] + c.n[0] * oh, 0, c.a[1] + c.n[1] * oh], eps: 0 }])
+      .map((c) => {
+        const o = _ohForDir(shape.frame, c.n)
+        return [{ n: [c.n[0], 0, c.n[1]], p: [c.a[0] + c.n[0] * o, 0, c.a[1] + c.n[1] * o], eps: 0 }]
+      })
     // Seams: cut dead where the neighbour takes over (it carries on from there).
     const seamVols = _seamVolumes(shape)
     vols.push(...seamVols)
@@ -699,7 +710,9 @@ export function shellVolumeLocal(
     const m: V2 = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L] // inward (CCW in x/z as used by the infill)
     const flush = (i === f.eSideLo && shape.flushLo) || (i === f.eSideHi && shape.flushHi)
     const out =
-      !flush && !noOverhangEdges.includes(i) && (shape.styles[i] === 'hip' || shape.styles[i] === 'gable') ? oh : 0
+      !flush && !noOverhangEdges.includes(i) && (shape.styles[i] === 'hip' || shape.styles[i] === 'gable')
+        ? (withOverhang ? f.ohEdge[i]! : 0)
+        : 0
     vol.push({ n: [m[0], 0, m[1]], p: [a[0] - m[0] * out, 0, a[1] - m[1] * out], eps: 0.01 })
     const sloped = i === f.eSideLo || i === f.eSideHi || shape.styles[i] === 'hip'
     if (sloped) {
@@ -711,7 +724,8 @@ export function shellVolumeLocal(
     }
   }
   for (const c of shape.footprintCuts) {
-    vol.push({ n: [-c.n[0], 0, -c.n[1]], p: [c.a[0] + c.n[0] * oh, 0, c.a[1] + c.n[1] * oh], eps: 0.01 })
+    const o = withOverhang ? _ohForDir(f, c.n) : 0
+    vol.push({ n: [-c.n[0], 0, -c.n[1]], p: [c.a[0] + c.n[0] * o, 0, c.a[1] + c.n[1] * o], eps: 0.01 })
   }
   // A seam never overhangs: the neighbour's own roof starts right there.
   if (seamPlanes) {
@@ -1057,7 +1071,7 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
     // outline can sit several cm inside it, which hid the board behind the
     // wall), 2 cm proud of it.
     const fasciaAt = (tt: number): [number, number] => {
-      if (!tightEnd) return at(tt, oh)
+      if (!tightEnd) return at(tt, _ohForDir(f, c.n))
       const [x, z] = at(tt, 0)
       const e = tightEnd.p
       const m = tightEnd.m
@@ -1285,7 +1299,33 @@ function _roofFrame(
     rHiU: uMax - insetFor(eEndHi),
     meanEave,
     overhang: Math.max(0, overhang),
+    ohEdge: styles.map((st, i) =>
+      i === eSideLo || i === eSideHi || st === 'hip'
+        ? _levelOverhang(Math.max(0, overhang), tanOf[i]!)
+        : Math.max(0, overhang),
+    ),
   }
+}
+
+/** Longest a level-fascia eave overhang may reach (a very shallow pitch). */
+const LEVEL_OH_MAX = 0.9
+
+/**
+ * Horizontal overhang that drops a sloped eave's fascia by `oh` (the drop
+ * a 45 deg roof gets from an `oh` overhang), so every roof's fascia sits at
+ * the same height below its wall top whatever its pitch.
+ */
+function _levelOverhang(oh: number, tan: number): number {
+  if (!(oh > 1e-3)) return 0
+  return Math.min(Math.max(LEVEL_OH_MAX, oh), Math.max(0.05, oh / Math.max(0.05, tan)))
+}
+
+/** The overhang on the side a footprint cut faces (ridge frame normal n). */
+function _ohForDir(f: RoofFrame, n: V2): number {
+  const vOut = f.ridgeAlongX ? n[1] : n[0]
+  const uOut = f.ridgeAlongX ? n[0] : n[1]
+  if (Math.abs(vOut) >= Math.abs(uOut)) return f.ohEdge[vOut < 0 ? f.eSideLo : f.eSideHi]!
+  return f.ohEdge[uOut < 0 ? f.eEndLo : f.eEndHi]!
 }
 
 // ─── Main shell ───────────────────────────────────────────────────
@@ -1373,8 +1413,8 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
 
   const eLo = eaveOf[f.eSideLo]!
   const eHi = eaveOf[f.eSideHi]!
-  const ohLo = shape.flushLo ? 0 : oh
-  const ohHi = shape.flushHi ? 0 : oh
+  const ohLo = shape.flushLo ? 0 : f.ohEdge[f.eSideLo]!
+  const ohHi = shape.flushHi ? 0 : f.ohEdge[f.eSideHi]!
   const eLoO = eLo - tanOf[f.eSideLo]! * ohLo
   const eHiO = eHi - tanOf[f.eSideHi]! * ohHi
   const F = oh > 1e-3 ? FASCIA_M : 0
@@ -1382,15 +1422,15 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   // Ridge u-extent. Gable ends run the ridge PAST the wall by the overhang
   // (the rake); junction/abut ends stop exactly at the wall; hips keep
   // their inset.
-  const rLoU = f.rLoU - (styleLo === 'gable' ? oh : 0)
-  const rHiU = f.rHiU + (styleHi === 'gable' ? oh : 0)
+  const rLoU = f.rLoU - (styleLo === 'gable' ? f.ohEdge[f.eEndLo]! : 0)
+  const rHiU = f.rHiU + (styleHi === 'gable' ? f.ohEdge[f.eEndHi]! : 0)
   const R_lo = P(rLoU, ridgeZ, vMid)
   const R_hi = P(rHiU, ridgeZ, vMid)
 
   // Eave-line extent: outset everywhere except at a junction/abut end, which
   // must stop dead so nothing pokes into or out of the neighbouring roof.
-  const uLoO = noOverhangEnd(styleLo) ? uMin : uMin - oh
-  const uHiO = noOverhangEnd(styleHi) ? uMax : uMax + oh
+  const uLoO = noOverhangEnd(styleLo) ? uMin : uMin - f.ohEdge[f.eEndLo]!
+  const uHiO = noOverhangEnd(styleHi) ? uMax : uMax + f.ohEdge[f.eEndHi]!
   const vLoO = vMin - ohLo
   const vHiO = vMax + ohHi
   const E_ll = P(uLoO, eLoO, vLoO)
