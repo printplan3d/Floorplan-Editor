@@ -9199,10 +9199,17 @@ export function FloorplanPanel() {
   );
   const handleGuideSelect = useCallback(
     (guideId: GuideNode["id"]) => {
+      // Delete mode removes the trace like any other node (it only ever
+      // selected it, so a trace could not be deleted from the plan).
+      if (mode === "delete") {
+        setSelectedReferenceId(null);
+        useScene.getState().deleteNode(guideId as AnyNodeId);
+        return;
+      }
       setSelectedReferenceId(guideId);
       setSelection({ selectedIds: [], zoneId: null });
     },
-    [setSelectedReferenceId, setSelection],
+    [mode, setSelectedReferenceId, setSelection],
   );
   const handleGuideCornerPointerDown = useCallback(
     (
