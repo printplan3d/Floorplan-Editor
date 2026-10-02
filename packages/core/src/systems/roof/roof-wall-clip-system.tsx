@@ -152,7 +152,10 @@ export function clipWallGeometry(
   const at = (x: number, z: number) => {
     // wall-local (x, z) -> world, then the roof there
     const h = ctx.wallHeightAt(sx + dx * x - dz * z, sz + dz * x + dx * z, [dx, dz])
-    return h == null ? OPEN_SKY : Math.min(OPEN_SKY, h - baseY - TOP_SINK)
+    // Capped just above the wall: the prism never needs to reach higher, and
+    // a 97 m spike beside a near-zero section (no roof just past a wall's
+    // end) tripped the CSG into dropping most of the wall.
+    return h == null ? top + 1 : Math.min(top + 1, h - baseY - TOP_SINK)
   }
   const sections: Section[] = []
   let needs = false
@@ -163,7 +166,190 @@ export function clipWallGeometry(
     sections.push(sec)
   }
   if (!needs) return null
-  return _intersect(src, _loftPrism(sections), node.id)
+  // Cut directly against the roof's height field, no CSG: the CSG
+  // misclassified long thin walls and dropped most of them (operator
+  // 2026-10-02: whole L0 walls missing, an L1 wall kept at 4% of what the
+  // roof allows; nudging the prism didn't make it reliable).
+  return _clipToHeightField(src, sections, top)
+}
+
+type P3 = [number, number, number]
+
+/** Keep the part of a convex planar polygon where f(p) >= 0 (Sutherland–Hodgman). */
+function _keep(poly: P3[], f: (p: P3) => number): P3[] {
+  const out: P3[] = []
+  const n = poly.length
+  for (let i = 0; i < n; i++) {
+    const a = poly[i]!
+    const b = poly[(i + 1) % n]!
+    const fa = f(a)
+    const fb = f(b)
+    if (fa >= 0) out.push(a)
+    if ((fa >= 0) !== (fb >= 0)) {
+      const t = Math.min(1, Math.max(0, fa / (fa - fb)))
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t])
+    }
+  }
+  return out
+}
+
+function _polyArea(poly: P3[]): number {
+  let x = 0
+  let y = 0
+  let z = 0
+  for (let i = 1; i < poly.length - 1; i++) {
+    const a = poly[0]!
+    const b = poly[i]!
+    const c = poly[i + 1]!
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2]
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2]
+    x += uy * vz - uz * vy
+    y += uz * vx - ux * vz
+    z += ux * vy - uy * vx
+  }
+  return Math.hypot(x, y, z) / 2
+}
+
+/** One planar piece of the roof height field over the wall (wall-local). */
+type Cell = {
+  xMin: number
+  xMax: number
+  tri: [[number, number], [number, number], [number, number]]
+  a: number
+  b: number
+  d: number
+}
+
+/**
+ * The trimming prism's top as planar triangles in plan (x, z), each with its
+ * height plane y = a x + b z + d -- the same triangulation the old CSG prism
+ * used, so the trim is unchanged where the CSG got it right.
+ */
+function _heightCells(sections: Section[]): Cell[] {
+  const cells: Cell[] = []
+  const add = (p: [number, number, number], q: [number, number, number], r: [number, number, number]) => {
+    // Points are (x, z, y). Solve y = a x + b z + d through the three.
+    const det = (q[0] - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (q[1] - p[1])
+    if (Math.abs(det) < 1e-12) return
+    const a = ((q[2] - p[2]) * (r[1] - p[1]) - (r[2] - p[2]) * (q[1] - p[1])) / det
+    const b = ((r[2] - p[2]) * (q[0] - p[0]) - (q[2] - p[2]) * (r[0] - p[0])) / det
+    const d = p[2] - a * p[0] - b * p[1]
+    cells.push({
+      xMin: Math.min(p[0], q[0], r[0]),
+      xMax: Math.max(p[0], q[0], r[0]),
+      tri: [
+        [p[0], p[1]],
+        [q[0], q[1]],
+        [r[0], r[1]],
+      ],
+      a,
+      b,
+      d,
+    })
+  }
+  for (let i = 0; i < sections.length - 1; i++) {
+    const A = sections[i]!
+    const C = sections[i + 1]!
+    const Ac: [number, number, number] = [A.c[0], A.c[1], A.yc]
+    const Cc: [number, number, number] = [C.c[0], C.c[1], C.yc]
+    const Al: [number, number, number] = [A.l[0], A.l[1], A.yl]
+    const Cl: [number, number, number] = [C.l[0], C.l[1], C.yl]
+    const Ar: [number, number, number] = [A.r[0], A.r[1], A.yr]
+    const Cr: [number, number, number] = [C.r[0], C.r[1], C.yr]
+    add(Ac, Cc, Cl)
+    add(Ac, Cl, Al)
+    add(Ar, Cr, Cc)
+    add(Ar, Cc, Ac)
+  }
+  return cells
+}
+
+/** 2D convex hull (x, z) of a point set, counter-clockwise. */
+function _hull2(pts: [number, number][]): [number, number][] {
+  const p = [...pts].sort((u, v) => u[0] - v[0] || u[1] - v[1])
+  if (p.length < 3) return p
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+  const lo: [number, number][] = []
+  for (const q of p) {
+    while (lo.length >= 2 && cross(lo[lo.length - 2]!, lo[lo.length - 1]!, q) <= 1e-12) lo.pop()
+    lo.push(q)
+  }
+  const hi: [number, number][] = []
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i]!
+    while (hi.length >= 2 && cross(hi[hi.length - 2]!, hi[hi.length - 1]!, q) <= 1e-12) hi.pop()
+    hi.push(q)
+  }
+  return lo.slice(0, -1).concat(hi.slice(0, -1))
+}
+
+/**
+ * The wall below the roof's height field, as plain geometry: every face
+ * clipped to the field (cell by cell), plus a cap on the field wherever it
+ * cuts through the wall. Wall-local; `top` is the wall's own height.
+ */
+function _clipToHeightField(src: THREE.BufferGeometry, sections: Section[], top: number): THREE.BufferGeometry {
+  const cells = _heightCells(sections)
+  const pos = src.getAttribute('position') as THREE.BufferAttribute
+  const idx = src.getIndex()
+  const n = idx ? idx.count : pos.count
+  const V = (i: number): P3 => [pos.getX(i), pos.getY(i), pos.getZ(i)]
+  const out: number[] = []
+  const emit = (poly: P3[]) => {
+    if (poly.length < 3 || _polyArea(poly) < 1e-8) return
+    for (let i = 1; i < poly.length - 1; i++) out.push(...poly[0]!, ...poly[i]!, ...poly[i + 1]!)
+  }
+  // Inside-the-cell test in plan, oriented so the triangle's inside is >= 0.
+  const inCell = (c: Cell, poly: P3[]): P3[] => {
+    const [p, q, r] = c.tri
+    const s = Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])) || 1
+    let out2 = poly
+    for (const [a, b] of [
+      [p, q],
+      [q, r],
+      [r, p],
+    ] as const) {
+      out2 = _keep(out2, (v) => s * ((b[0] - a[0]) * (v[2] - a[1]) - (b[1] - a[1]) * (v[0] - a[0])) + 1e-9)
+      if (out2.length < 3) return out2
+    }
+    return out2
+  }
+  const below = (c: Cell) => (v: P3) => c.a * v[0] + c.b * v[2] + c.d - v[1]
+  for (let k = 0; k + 2 < n; k += 3) {
+    const tri: P3[] = [V(idx ? idx.getX(k) : k), V(idx ? idx.getX(k + 1) : k + 1), V(idx ? idx.getX(k + 2) : k + 2)]
+    const tx0 = Math.min(tri[0]![0], tri[1]![0], tri[2]![0])
+    const tx1 = Math.max(tri[0]![0], tri[1]![0], tri[2]![0])
+    for (const c of cells) {
+      if (c.xMax < tx0 - 1e-9 || c.xMin > tx1 + 1e-9) continue
+      const piece = inCell(c, tri)
+      if (piece.length < 3) continue
+      emit(_keep(piece, below(c)))
+    }
+  }
+  // Caps: the field's surface inside the wall's plan outline, between the
+  // wall's base and its top, facing up.
+  const plan: [number, number][] = []
+  for (let i = 0; i < pos.count; i++) plan.push([pos.getX(i), pos.getZ(i)])
+  const hull = _hull2(plan)
+  if (hull.length >= 3) {
+    for (const c of cells) {
+      let cap: P3[] = hull.map(([x, z]): P3 => [x, c.a * x + c.b * z + c.d, z])
+      cap = inCell(c, cap)
+      if (cap.length < 3) continue
+      cap = _keep(cap, (v) => top - 1e-6 - v[1])
+      cap = _keep(cap, (v) => v[1] - 1e-6)
+      if (cap.length < 3) continue
+      // Facing up.
+      const [p0, p1, p2] = cap as [P3, P3, P3]
+      const ny = (p1[2] - p0[2]) * (p2[0] - p0[0]) - (p1[0] - p0[0]) * (p2[2] - p0[2])
+      emit(ny >= 0 ? cap : [...cap].reverse())
+    }
+  }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.Float32BufferAttribute(out, 3))
+  g.computeVertexNormals()
+  return g
 }
 
 /**
@@ -239,9 +425,69 @@ export function wallTopProfile(
   return out.map((p) => ({ s: Math.round(p.s * 1000) / 1000, y: Math.round(p.y * 1000) / 1000 }))
 }
 
-/** src ∩ prism, or null if the CSG fails (the wall then shows untrimmed). */
-function _intersect(src: THREE.BufferGeometry, prism: THREE.BufferGeometry, id: string): THREE.BufferGeometry | null {
+/** Total triangle area of a geometry. */
+function _area(g: THREE.BufferGeometry): number {
+  const p = g.getAttribute('position')
+  if (!p) return 0
+  const ix = g.getIndex()
+  const n = ix ? ix.count : p.count
+  const a = new THREE.Vector3()
+  const b = new THREE.Vector3()
+  const c = new THREE.Vector3()
+  let sum = 0
+  for (let k = 0; k + 2 < n; k += 3) {
+    a.fromBufferAttribute(p, ix ? ix.getX(k) : k)
+    b.fromBufferAttribute(p, ix ? ix.getX(k + 1) : k + 1)
+    c.fromBufferAttribute(p, ix ? ix.getX(k + 2) : k + 2)
+    sum += b.sub(a).cross(c.sub(a)).length() / 2
+  }
+  return sum
+}
+
+/** Tiny prism nudges to retry a CSG that came back wrong (coplanar faces). */
+const CSG_NUDGES: [number, number, number][] = [
+  [0, 0, 0],
+  [1.3e-4, 0.7e-4, -0.9e-4],
+  [-1.1e-4, 1.7e-4, 0.6e-4],
+  [0.6e-4, -1.4e-4, 1.2e-4],
+]
+
+/**
+ * src ∩ prism, or null if the CSG fails (the wall then shows untrimmed).
+ * `keepRatio`: the share of the wall the roof profile leaves (0..1). The CSG
+ * sometimes misclassifies and drops most of a wall (operator 2026-10-02:
+ * whole L0 walls missing in the preview, an L1 wall at 4% of what the roof
+ * allows); a result well short of that is retried with the prism nudged a
+ * fraction of a millimetre, and if every try fails the wall stays untrimmed.
+ */
+function _intersect(
+  src: THREE.BufferGeometry,
+  makePrism: () => THREE.BufferGeometry,
+  id: string,
+  keepRatio?: number,
+): THREE.BufferGeometry | null {
+  const srcArea = keepRatio != null ? _area(src) : 0
+  for (const [nx, ny, nz] of CSG_NUDGES) {
+    const g = _intersectOnce(src, makePrism(), id, nx, ny, nz)
+    if (!g) return null
+    if (keepRatio == null || keepRatio < 0.05) return g
+    if (_area(g) >= 0.75 * srcArea * keepRatio) return g
+    g.dispose()
+  }
+  console.warn('roof-wall-clip: trim kept far less of the wall than the roof allows; kept untrimmed', id)
+  return null
+}
+
+function _intersectOnce(
+  src: THREE.BufferGeometry,
+  prism: THREE.BufferGeometry,
+  id: string,
+  nx: number,
+  ny: number,
+  nz: number,
+): THREE.BufferGeometry | null {
   try {
+    if (nx || ny || nz) prism.translate(nx, ny, nz)
     const a = new Brush(src)
     a.updateMatrixWorld()
     const b = new Brush(prism)
@@ -357,7 +603,7 @@ function _clipArcWall(
     sections.push(sec)
   }
   if (!needs || sections.length < 2) return null
-  return _intersect(src, _loftPrism(sections), node.id)
+  return _intersect(src, () => _loftPrism(sections), node.id)
 }
 
 /**
