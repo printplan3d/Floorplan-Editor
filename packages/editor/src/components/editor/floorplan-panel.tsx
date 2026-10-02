@@ -61,6 +61,7 @@ import {
 import useEditor from "../../store/use-editor";
 import { FLOORPLAN_SYMBOL_MIME } from "../ui/symbol-catalog";
 import { snapToHalf } from "../tools/item/placement-math";
+import { type RoofOutline, type RoofSnapKind, snapRoofPoint } from "../tools/roof/roof-snap";
 import {
   createWallOnCurrentLevel,
   isWallLongEnough,
@@ -4742,6 +4743,27 @@ export function FloorplanPanel() {
     }
     return rects;
   }, [allNodes, levelId]);
+  // Every roof footprint on this level as world corners, for roof snapping.
+  const roofOutlines = useMemo<RoofOutline[]>(
+    () =>
+      roofRects.map((r) => {
+        const local: [number, number][] =
+          r.polygon && r.polygon.length >= 3
+            ? r.polygon
+            : [
+                [-r.width / 2, -r.depth / 2],
+                [r.width / 2, -r.depth / 2],
+                [r.width / 2, r.depth / 2],
+                [-r.width / 2, r.depth / 2],
+              ];
+        const pl = { cx: r.cx, cz: r.cz, rot: r.rotation };
+        return {
+          segId: r.segId,
+          corners: local.map(([lx, lz]) => segmentLocalToWorld(pl, lx, lz) as WallPlanPoint),
+        };
+      }),
+    [roofRects],
+  );
   const zones = useScene(
     useShallow((state) => {
       if (!levelId) {
@@ -4855,6 +4877,8 @@ export function FloorplanPanel() {
   const [guideTransformDraft, setGuideTransformDraft] =
     useState<GuideTransformDraft | null>(null);
   const [cursorPoint, setCursorPoint] = useState<WallPlanPoint | null>(null);
+  // What the roof cursor / dragged corner snapped to (marker ring).
+  const [roofSnapKind, setRoofSnapKind] = useState<RoofSnapKind>(null);
   const [floorplanCursorPosition, setFloorplanCursorPosition] =
     useState<SvgPoint | null>(null);
   const [wallEndpointDraft, setWallEndpointDraft] =
@@ -8317,6 +8341,22 @@ export function FloorplanPanel() {
         return;
       }
 
+      // Roof tool: snap the cursor to other roofs' corners / edges and wall
+      // corners (Shift: none), else the grid. Drives the marker and the
+      // rubber-band rectangle.
+      if (isRoofBuildActive) {
+        const snap = snapRoofPoint({
+          point: planPoint,
+          roofs: roofOutlines,
+          walls,
+          objectSnap: !shiftPressed,
+          gridSnap: snapActive,
+        });
+        setCursorPoint(snap.point);
+        setRoofSnapKind(snap.kind);
+        return;
+      }
+
       if (!isWallBuildActive) {
         setCursorPoint(null);
         return;
@@ -8360,7 +8400,9 @@ export function FloorplanPanel() {
       isArcWallBuildActive,
       isOpeningPlacementActive,
       isPolygonBuildActive,
+      isRoofBuildActive,
       isWallBuildActive,
+      roofOutlines,
       siteVertexDragState,
       slabVertexDragState,
       shiftPressed,
@@ -8679,10 +8721,17 @@ export function FloorplanPanel() {
       // and ortho behave the same way stair/slab do because we route
       // planPoint through the same source.
       if (isRoofBuildActive) {
+        const corner = snapRoofPoint({
+          point: planPoint,
+          roofs: roofOutlines,
+          walls,
+          objectSnap: !shiftPressed,
+          gridSnap: snapActive,
+        }).point;
         if (roofDraftStart == null) {
-          setRoofDraftStart(planPoint);
+          setRoofDraftStart(corner);
         } else {
-          createRoofOnCurrentLevel(roofDraftStart, planPoint);
+          createRoofOnCurrentLevel(roofDraftStart, corner);
           setRoofDraftStart(null);
         }
         return;
@@ -8825,6 +8874,7 @@ export function FloorplanPanel() {
       roofDraftStart,
       createRoofOnCurrentLevel,
       roofRects,
+      roofOutlines,
       selectedIdSet,
       showRoofs,
       setSelectedReferenceId,
@@ -11653,10 +11703,25 @@ export function FloorplanPanel() {
               // roofCornerDrag is set. The store update reruns
               // roofRects and the handle follows the pointer.
               if (roofCornerDrag) {
-                const planPt = getPlanPointFromClientPoint(
+                const rawPt = getPlanPointFromClientPoint(
                   event.clientX,
                   event.clientY,
                 );
+                // Snap the dragged corner to other roofs' corners / edges
+                // and wall corners (Shift: none), else the grid.
+                const snap = rawPt
+                  ? snapRoofPoint({
+                      point: rawPt,
+                      roofs: roofOutlines,
+                      walls,
+                      ignoreSegId: roofCornerDrag.segId,
+                      objectSnap: !shiftPressed,
+                      gridSnap: snapActive,
+                    })
+                  : null;
+                const planPt = snap?.point ?? null;
+                setCursorPoint(planPt);
+                setRoofSnapKind(snap?.kind ?? null);
                 if (planPt) {
                   const state = useScene.getState();
                   const seg = state.nodes[roofCornerDrag.segId as AnyNodeId] as
@@ -11701,7 +11766,11 @@ export function FloorplanPanel() {
             onPointerUp={(event) => {
               handleStairPointerUp(event);
               endPanning(event);
-              if (roofCornerDrag) setRoofCornerDrag(null);
+              if (roofCornerDrag) {
+                setRoofCornerDrag(null);
+                setCursorPoint(null);
+                setRoofSnapKind(null);
+              }
             }}
             ref={svgRef}
             style={{
@@ -12059,6 +12128,21 @@ export function FloorplanPanel() {
                 pointer position isn't tracked at this component level.
                 First-corner marker is enough to signal "click again to
                 place the diagonal corner". */}
+            {isRoofBuildActive && roofDraftStart && cursorPoint && (
+              // Rubber band: the roof rectangle the second click will make.
+              <rect
+                data-element="roof-draft-rect"
+                fill="rgba(180,83,9,0.10)"
+                height={Math.abs(toSvgY(cursorPoint[1]) - toSvgY(roofDraftStart[1]))}
+                pointerEvents="none"
+                stroke="#b45309"
+                strokeDasharray="0.3 0.18"
+                strokeWidth={0.05}
+                width={Math.abs(toSvgX(cursorPoint[0]) - toSvgX(roofDraftStart[0]))}
+                x={Math.min(toSvgX(cursorPoint[0]), toSvgX(roofDraftStart[0]))}
+                y={Math.min(toSvgY(cursorPoint[1]), toSvgY(roofDraftStart[1]))}
+              />
+            )}
             {isRoofBuildActive && roofDraftStart && (
               <g data-element="roof-draft" pointerEvents="none">
                 <circle
@@ -12735,6 +12819,21 @@ export function FloorplanPanel() {
 
             {cursorPoint && (
               <g>
+                {/* Roof snap: a ring when locked onto another roof's corner
+                    or edge, or a wall corner. */}
+                {(isRoofBuildActive || roofCornerDrag) &&
+                  roofSnapKind &&
+                  roofSnapKind !== "grid" && (
+                    <circle
+                      cx={toSvgX(cursorPoint[0])}
+                      cy={toSvgY(cursorPoint[1])}
+                      fill="none"
+                      pointerEvents="none"
+                      r={roofSnapKind === "roof-edge" ? 0.28 : 0.38}
+                      stroke="#b45309"
+                      strokeWidth={0.07}
+                    />
+                  )}
                 <circle
                   cx={toSvgX(cursorPoint[0])}
                   cy={toSvgY(cursorPoint[1])}
