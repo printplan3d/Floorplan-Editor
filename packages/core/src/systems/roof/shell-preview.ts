@@ -2069,9 +2069,15 @@ function _unionDormers(base: THREE.BufferGeometry, shape: ShellShape): THREE.Buf
       acc.geometry.dispose()
       acc = next
       glass.push({ verts: w.glass, slot: SLOT_GLASS })
-      // Both windings: seen from outside whatever the material's side.
-      glass.push({ verts: w.backing, slot: SLOT_BACKING })
-      glass.push({ verts: [...w.backing].reverse(), slot: SLOT_BACKING })
+      // The dark backing behind the glass only on a dormer over a real
+      // window. A dormer placed by hand looks INTO the house through its
+      // window: with the backing, its window showed a dark slate-coloured
+      // panel and read as roof (operator 2026-10-03: "it should cut through
+      // the roof"). Both windings: seen from outside whatever the side.
+      if (d.followsWindow) {
+        glass.push({ verts: w.backing, slot: SLOT_BACKING })
+        glass.push({ verts: [...w.backing].reverse(), slot: SLOT_BACKING })
+      }
     } catch (e) {
       console.warn('shell-preview: dormer window cut failed', e)
     }
