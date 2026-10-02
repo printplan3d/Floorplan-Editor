@@ -1605,21 +1605,24 @@ function _dormerWindowOverrides(
     const dw = d.window ?? {}
     const winW = num(dw.w, win.width ?? 1)
     const winH = num(dw.h, win.height ?? 1.2)
-    const sill = num(dw.sill, 0.15)
-    // A window lower than where the slope crosses its wall: bring the
-    // dormer's front forward, down the slope, until its window sits at the
-    // real window's sill; the dormer runs back over the wall. Before, its
-    // window started just above the slope at the wall -- above the real one
-    // (operator 2026-10-02: an L1 window 3.3 m in from an L0 roof's eave).
-    {
-      const eave = f.eaveOf[bestEdge]!
-      const sillLocal = headWorld - (win.height ?? 1.2) - p.baseY
-      // Fixed 0.15 (the dormer window's default sill), not its own sill
-      // setting: editing the dormer's window must never move the dormer.
-      const wantFront = sillLocal - 0.15
-      if (wantFront < eave + tanP * inward) inward = Math.max(0, (wantFront - eave) / tanP)
-    }
-    const need = 0.15 + (win.height ?? 1.2) + headroom
+    // The dormer's window matches the FOLLOWED window's height (operator
+    // 2026-10-02). Its sill is measured up from the dormer's front, where
+    // the slope meets it.
+    // - Window lower than that: bring the front forward, down the slope,
+    //   until the gap is the default 0.15; the dormer runs back over the
+    //   wall. Before, its window started just above the slope at the wall --
+    //   above the real one (an L1 window 3.3 m in from an L0 roof's eave).
+    // - Window higher (a wall on the eave line): raise the dormer window's
+    //   default sill to the real sill, and make the dormer that much taller.
+    // Both come from the followed window, never from the dormer window's
+    // own settings, so editing that window still never moves the dormer.
+    const eave = f.eaveOf[bestEdge]!
+    const sillLocal = headWorld - (win.height ?? 1.2) - p.baseY
+    const wantFront = sillLocal - 0.15
+    if (wantFront < eave + tanP * inward) inward = Math.max(0, (wantFront - eave) / tanP)
+    const sillGap = Math.max(0.15, sillLocal - (eave + tanP * inward))
+    const sill = num(dw.sill, sillGap)
+    const need = sillGap + (win.height ?? 1.2) + headroom
     let ridgeHeight: number
     if (d.type === 'shed') ridgeHeight = need
     else ridgeHeight = need >= halfW * tanP ? need + halfW * tanP : 2 * need
