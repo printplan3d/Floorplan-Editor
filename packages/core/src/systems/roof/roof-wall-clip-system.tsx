@@ -170,7 +170,68 @@ export function clipWallGeometry(
   // misclassified long thin walls and dropped most of them (operator
   // 2026-10-02: whole L0 walls missing, an L1 wall kept at 4% of what the
   // roof allows; nudging the prism didn't make it reliable).
-  return _clipToHeightField(src, sections, top)
+  return _clipToHeightField(src, _sharpenSteps(sections, (x) => ({ l: at(x, W), c: at(x, 0), r: at(x, -W) }), W), top)
+}
+
+/** A rise between two 5 cm samples bigger than any roof slope makes. */
+const STEP_JUMP_M = 0.3
+/** A step is moved this far into the higher roof, so the wall's step face
+ *  stands behind that roof's end wall instead of in its plane. */
+const STEP_INSET_M = 0.02
+
+/**
+ * Where the roof height jumps between two samples -- one roof ends and a
+ * lower one takes over -- the straight line between the samples sloped the
+ * wall's top across the gap, and that sliver stood above the lower roof,
+ * under the higher one's overhang (operator 2026-10-02: the L1 wall with two
+ * windows showing at Roof 9's end). Find the jump and make it a clean step.
+ */
+function _sharpenSteps(
+  sections: Section[],
+  heightsAt: (x: number) => { l: number; c: number; r: number },
+  W: number,
+): Section[] {
+  const make = (x: number, h: { l: number; c: number; r: number }): Section => ({
+    l: [x, W],
+    c: [x, 0],
+    r: [x, -W],
+    yl: h.l,
+    yc: h.c,
+    yr: h.r,
+  })
+  const out: Section[] = []
+  for (let i = 0; i < sections.length; i++) {
+    const A = sections[i]!
+    out.push(A)
+    const B = sections[i + 1]
+    if (!B || Math.abs(B.yc - A.yc) <= STEP_JUMP_M) continue
+    // Bisect for the jump.
+    let lo = A.c[0]
+    let hi = B.c[0]
+    const mid = (A.yc + B.yc) / 2
+    const aHigh = A.yc > B.yc
+    for (let k = 0; k < 12; k++) {
+      const m = (lo + hi) / 2
+      const above = heightsAt(m).c > mid
+      if (above === aHigh) lo = m
+      else hi = m
+    }
+    // lo is on A's side, hi on B's. Step STEP_INSET_M into the higher side.
+    const span = B.c[0] - A.c[0]
+    const inset = Math.min(STEP_INSET_M, span * 0.4)
+    const xs = aHigh ? lo - inset : hi + inset
+    const highH = heightsAt(aHigh ? lo : hi)
+    const lowH = heightsAt(aHigh ? hi : lo)
+    const xa = aHigh ? Math.max(A.c[0] + 1e-4, xs - 1e-4) : Math.max(A.c[0] + 1e-4, xs - 1e-4)
+    const xb = aHigh ? Math.min(B.c[0] - 1e-4, xs + 1e-4) : Math.min(B.c[0] - 1e-4, xs + 1e-4)
+    if (!(xb > xa)) continue
+    if (aHigh) {
+      out.push(make(xa, highH), make(xb, lowH))
+    } else {
+      out.push(make(xa, lowH), make(xb, highH))
+    }
+  }
+  return out
 }
 
 type P3 = [number, number, number]
