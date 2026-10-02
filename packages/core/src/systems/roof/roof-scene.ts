@@ -1067,9 +1067,18 @@ function _convexOverlap(pa: V2[], pb: V2[]): boolean {
  */
 function _insideBody(r: ResolvedSegment, X: number, Z: number, dir?: [number, number]): boolean {
   if (!insideFootprint(r.placement, r.shape, X, Z, 0.02)) return false
+  const [x, z] = toLocal(r.placement, X, Z)
+  // A 4-point roof's body is its DRAWN outline, not the rectangle it is built
+  // on. Past a cut edge the rectangle reaches a few cm (or more) beyond what
+  // was drawn: a wall just outside that edge, under a lower neighbouring
+  // roof, was topped at this roof's height and stood up through the
+  // neighbour (operator 2026-10-02: L1 walls popping out between Roof 9 and
+  // the next roof).
+  for (const c of r.shape.footprintCuts) {
+    if (c.n[0] * (x - c.a[0]) + c.n[1] * (z - c.a[1]) > 0.02) return false
+  }
   const spans = r.opts.realWalls ?? []
   if (!spans.length) return true
-  const [x, z] = toLocal(r.placement, X, Z)
   const poly = r.shape.polygon
   for (let e = 0; e < 4; e++) {
     const mine = spans.filter((s) => s.edge === e)
