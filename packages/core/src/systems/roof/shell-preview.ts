@@ -336,10 +336,71 @@ export type ShellShape = {
  * ridge along that frame's x — with the footprint left where it was drawn.
  * roof-scene adds it to the placement rotation and roof-system to the
  * segment's, so every consumer sees one consistent frame.
+ *
+ * The authored angle plus an automatic squaring for a 4-point footprint
+ * (see _autoSquareRad).
  */
 export function ridgeAngleRad(node: RoofSegmentNode): number {
   const d = (node as unknown as { ridgeAngleDeg?: number }).ridgeAngleDeg
-  return typeof d === 'number' && Number.isFinite(d) && Math.abs(d) > 1e-6 ? (d * Math.PI) / 180 : 0
+  const base = typeof d === 'number' && Number.isFinite(d) && Math.abs(d) > 1e-6 ? (d * Math.PI) / 180 : 0
+  return base + _autoSquareRad(node, base)
+}
+
+/** Eave edges within this many degrees of each other are squared up. */
+const AUTO_SQUARE_MAX_SPREAD_DEG = 10
+/** ...and only when they're within this many degrees of the ridge axis. */
+const AUTO_SQUARE_MAX_TILT_DEG = 20
+
+/**
+ * A 4-point roof is built on the rectangle around its footprint, in the
+ * ridge frame. An eave edge drawn a few degrees off that frame sits inside
+ * the rectangle at one end, where the slope is higher, so its eave and
+ * fascia rode up above the wall top -- 25 cm at the far end of a 6 m eave
+ * drawn 2 deg off (operator 2026-10-02: fascias of snapped roofs not
+ * matching). When the two eave edges are near-parallel, turn the frame to
+ * their average direction so both run (almost) along it.
+ *
+ * Only for a ridge along the frame's x (east-west, auto with width >= depth,
+ * or an authored angle): turning a north-south frame by ~90 deg would
+ * re-index the edges and move any per-edge pitch onto other edges.
+ */
+function _autoSquareRad(node: RoofSegmentNode, base: number): number {
+  const poly = (node as unknown as { polygon?: [number, number][] }).polygon
+  if (!Array.isArray(poly) || poly.length !== 4) return 0
+  if (node.roofType === 'shed' || node.roofType === 'flat') return 0
+  const alongX =
+    base !== 0 ||
+    node.ridgeAxis === 'east-west' ||
+    (node.ridgeAxis !== 'north-south' && (node.width ?? 0) >= (node.depth ?? 0))
+  if (!alongX) return 0
+  const c = Math.cos(base)
+  const s = Math.sin(base)
+  const q = poly.map(([x, z]) => [x * c - z * s, x * s + z * c] as V2)
+  // Edge angle to the frame's x, folded into (-90, 90] degrees.
+  const angle = (i: number): number => {
+    const a = q[i]!
+    const b = q[(i + 1) % 4]!
+    let t = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI
+    t = ((((t + 90) % 180) + 180) % 180) - 90
+    return t
+  }
+  const len = (i: number): number => {
+    const a = q[i]!
+    const b = q[(i + 1) % 4]!
+    return Math.hypot(b[0] - a[0], b[1] - a[1])
+  }
+  const pairs: [number, number, number, number][] = [
+    [angle(0), angle(2), len(0), len(2)],
+    [angle(1), angle(3), len(1), len(3)],
+  ]
+  const [ta, tb, la, lb] = pairs.sort((p, r) => Math.abs(p[0]) + Math.abs(p[1]) - (Math.abs(r[0]) + Math.abs(r[1])))[0]!
+  if (Math.abs(ta - tb) > AUTO_SQUARE_MAX_SPREAD_DEG) return 0
+  if (Math.max(Math.abs(ta), Math.abs(tb)) > AUTO_SQUARE_MAX_TILT_DEG) return 0
+  // Length-weighted: the far ends of the two eaves then sit about equally
+  // far off the frame (a long edge counts for more than a short one).
+  const mean = la + lb > 1e-6 ? (ta * la + tb * lb) / (la + lb) : (ta + tb) / 2
+  if (Math.abs(mean) < 0.05) return 0
+  return (-mean * Math.PI) / 180
 }
 
 /**

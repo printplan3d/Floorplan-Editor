@@ -21,6 +21,7 @@ import {
   loadAssetUrl,
   type Point2D,
   pointAndTangentAtT,
+  ridgeAngleRad,
   RoofNode,
   RoofSegmentNode,
   type SiteNode,
@@ -4729,8 +4730,12 @@ export function FloorplanPanel() {
             Array.isArray(seg.polygon) && seg.polygon.length >= 3
               ? (seg.polygon as [number, number][])
               : undefined,
-          ridgeAngleDeg:
-            typeof seg.ridgeAngleDeg === "number" ? seg.ridgeAngleDeg : undefined,
+          // The angle the roof is BUILT at: authored plus the automatic
+          // squaring of a 4-point footprint, so the dashed ridge matches 3D.
+          ridgeAngleDeg: (() => {
+            const a = (ridgeAngleRad(seg) * 180) / Math.PI;
+            return Math.abs(a) > 1e-6 ? a : undefined;
+          })(),
           // Gable ridge moved by hand (metres across the span, ridge frame).
           ridgeOffset:
             (seg.roofType ?? "gable") === "gable" &&
