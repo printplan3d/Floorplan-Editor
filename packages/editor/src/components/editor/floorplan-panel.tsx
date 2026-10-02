@@ -4691,6 +4691,7 @@ export function FloorplanPanel() {
       material: string;
       ridgeAxis: "auto" | "east-west" | "north-south";
       ridgeAngleDeg?: number;
+      ridgeOffset?: number;
       polygon?: [number, number][];
     }> = [];
     if (!levelId) return rects;
@@ -4724,6 +4725,13 @@ export function FloorplanPanel() {
               : undefined,
           ridgeAngleDeg:
             typeof seg.ridgeAngleDeg === "number" ? seg.ridgeAngleDeg : undefined,
+          // Gable ridge moved by hand (metres across the span, ridge frame).
+          ridgeOffset:
+            (seg.roofType ?? "gable") === "gable" &&
+            typeof seg.ridgeOffset === "number" &&
+            Number.isFinite(seg.ridgeOffset)
+              ? seg.ridgeOffset
+              : undefined,
         });
       }
     }
@@ -11865,15 +11873,21 @@ export function FloorplanPanel() {
                         // that angle (three.js rotation-y sense; points are
                         // drawn negated here, which a line through the
                         // origin doesn't notice).
+                        // A ridge moved off-centre (ridgeOffset, ridge frame
+                        // v) shifts the line across the span; segment-local
+                        // (x, z) is drawn here as (-x, -z).
+                        const off = r.ridgeOffset ?? 0;
                         if (typeof r.ridgeAngleDeg === "number" && r.ridgeAngleDeg !== 0) {
                           const a = (r.ridgeAngleDeg * Math.PI) / 180;
                           const L = Math.max(w, d) / 2;
+                          const ox = -off * Math.sin(a);
+                          const oy = -off * Math.cos(a);
                           return (
                             <line
-                              x1={-L * Math.cos(a)}
-                              y1={L * Math.sin(a)}
-                              x2={L * Math.cos(a)}
-                              y2={-L * Math.sin(a)}
+                              x1={ox - L * Math.cos(a)}
+                              y1={oy + L * Math.sin(a)}
+                              x2={ox + L * Math.cos(a)}
+                              y2={oy - L * Math.sin(a)}
                               stroke={isSel ? "#b45309" : "#8a5a20"}
                               strokeWidth={0.06}
                               strokeDasharray="0.15 0.15"
@@ -11891,9 +11905,9 @@ export function FloorplanPanel() {
                           return (
                             <line
                               x1={-w / 2}
-                              y1={0}
+                              y1={-off}
                               x2={w / 2}
-                              y2={0}
+                              y2={-off}
                               stroke={isSel ? "#b45309" : "#8a5a20"}
                               strokeWidth={0.06}
                               strokeDasharray="0.15 0.15"
@@ -11902,9 +11916,9 @@ export function FloorplanPanel() {
                         }
                         return (
                           <line
-                            x1={0}
+                            x1={-off}
                             y1={-d / 2}
-                            x2={0}
+                            x2={-off}
                             y2={d / 2}
                             stroke={isSel ? "#b45309" : "#8a5a20"}
                             strokeWidth={0.06}
