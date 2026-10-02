@@ -1536,13 +1536,19 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
     const downs = shape.infillDown.filter((d) => d.edge === i && d.y < y0)
     const yB = downs.length ? Math.min(...downs.map((d) => d.y)) : y0
     // Outline in edge order (outward-facing; checked by the facing audit).
+    // The apex is where the ridge crosses this end -- the edge's middle
+    // unless the ridge was moved off-centre (ridgeOffset).
+    const vi = ridgeAlongX ? pi[1] : pi[0]
+    const vj = ridgeAlongX ? pj[1] : pj[0]
+    const tApex = Math.abs(vj - vi) > 1e-9 ? Math.min(1, Math.max(0, (vMid - vi) / (vj - vi))) : 0.5
+    const apex: V3 = [pi[0] + (pj[0] - pi[0]) * tApex, ridgeZ, pi[1] + (pj[1] - pi[1]) * tApex]
     const outline: V3[] =
       st === 'gable' || st === 'abut'
         ? [
             [pi[0], yB, pi[1]],
             [pj[0], yB, pj[1]],
             [pj[0], yj, pj[1]],
-            [(pi[0] + pj[0]) / 2, ridgeZ, (pi[1] + pj[1]) / 2],
+            apex,
             [pi[0], yi, pi[1]],
           ]
         : [
