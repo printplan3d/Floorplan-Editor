@@ -1584,7 +1584,8 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
       }
       const e0 = endOf(i, -1)
       if (e0) chain.push(e0)
-      chain.push([pi, yi], [[(pi[0] + pj[0]) / 2, (pi[1] + pj[1]) / 2], ridgeZ], [pj, yj])
+      // Peak where the ridge crosses this end (moved ridge), like the wall.
+      chain.push([pi, yi], [[apex[0], apex[2]], ridgeZ], [pj, yj])
       const e1 = endOf(j, 1)
       if (e1) chain.push(e1)
       for (let k = 0; k < chain.length - 1; k++) {
