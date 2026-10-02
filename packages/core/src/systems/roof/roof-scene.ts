@@ -483,6 +483,22 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
     // soffits between the stepped gables).
     const lateralMax = Math.max(CONTINUATION_LATERAL, 0.2 * Math.min(spanOf(A.shape), spanOf(B.shape)))
     if (lateral > lateralMax) return
+    // B wider than A (its eaves run past A's): pulling B's end back to A's
+    // end line left the part of B beyond A with no roof at all -- an L0 wall
+    // standing open under a roof drawn over it, however big the roof was
+    // made (operator 2026-10-02). B keeps its drawn end and overlaps A (the
+    // union trimming hides what falls inside A); A's end closes against B.
+    if (_sideSnap(A, B) == null && !_seamProfilesMatch(A, B) && spanOf(B.shape) > spanOf(A.shape) + 0.05) {
+      const buriedEnd = buriedIsLo ? rb.a : rb.b
+      const fa = A.shape.frame
+      const uA = localU(pa, A.shape, buriedEnd[0], buriedEnd[1])
+      const nearLo = Math.abs(uA - fa.uMin) < Math.abs(uA - fa.uMax)
+      if (!(nearLo ? A.opts.endLo : A.opts.endHi)) {
+        A.opts = nearLo ? { ...A.opts, endLo: 'abut' } : { ...A.opts, endHi: 'abut' }
+        rebuild(A)
+      }
+      return
+    }
     // Share A's side lines when they're close, so the two masses read as
     // one roof: no kink in the ridge or the eaves at the seam.
     const snap = _sideSnap(A, B)
