@@ -1074,7 +1074,29 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
       wall.push([x, Math.max(y0, _slopeY(shape, x, z)), z])
     }
     if (!tight) faces.push({ verts: wall, slot: SLOT_WALL_EXTERIOR })
-    // Fascia along the cut line.
+    // Fascia along the cut line. On a cut along a long side it reaches down
+    // to that side's boxed soffit, which stays level with the RECTANGLE's
+    // eave: a cut a little inside that eave sits where the slope is a little
+    // higher, and a board only F deep left a slit up to ~2 cm between its
+    // bottom and the soffit -- read as a soffit strip floating under the
+    // roof edge (operator 2026-10-02).
+    const vOut = f.ridgeAlongX ? c.n[1] : c.n[0]
+    const sideIdx = vOut < -0.7 ? f.eSideLo : vOut > 0.7 ? f.eSideHi : -1
+    const sideFlush = (sideIdx === f.eSideLo && shape.flushLo) || (sideIdx === f.eSideHi && shape.flushHi)
+    const sideSoffitY =
+      sideIdx >= 0 && !sideFlush ? f.eaveOf[sideIdx]! - f.tanOf[sideIdx]! * oh - F : Number.POSITIVE_INFINITY
+    // Only where the soffit is actually under the board: inside the
+    // rectangle's overhang band on that side. A cut further in (a strongly
+    // slanted edge) has no soffit below it, and the board keeps its depth.
+    const bottom = (x: number, z: number, yTop: number): number => {
+      if (!Number.isFinite(sideSoffitY)) return yTop - F
+      const v = f.ridgeAlongX ? z : x
+      const inBand =
+        sideIdx === f.eSideLo
+          ? v >= f.vMin - oh - 1e-3 && v <= f.vMin + 1e-3
+          : v <= f.vMax + oh + 1e-3 && v >= f.vMax - 1e-3
+      return inBand ? Math.min(yTop - F, sideSoffitY) : yTop - F
+    }
     if (F > 0) {
       for (let k = 0; k < t.length - 1; k++) {
         const [x0, z0] = fasciaAt(t[k]!)
@@ -1083,8 +1105,8 @@ function _footprintClosing(shape: ShellShape): { verts: V3[]; slot: number }[] {
         const y1t = _slopeY(shape, x1, z1)
         faces.push({
           verts: [
-            [x0, y0t - F, z0],
-            [x1, y1t - F, z1],
+            [x0, bottom(x0, z0, y0t), z0],
+            [x1, bottom(x1, z1, y1t), z1],
             [x1, y1t, z1],
             [x0, y0t, z0],
           ],
