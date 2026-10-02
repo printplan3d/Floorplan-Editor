@@ -11,9 +11,11 @@
  *   - Segment local frame: y = 0 at the storey wall top; the roof group is
  *     lifted there by RoofRenderer. wallHeight is a PARAPET on top of that.
  *   - The ridge is CENTRED across the span and PINNED at baseZ + roofHeight.
- *     Each sloped edge drops from it at its OWN pitch over the half-span,
- *         eave_i = ridgeZ - tan_i * halfSpan
- *     so changing one pitch moves only that eave.
+ *     Each sloped edge drops from it at its OWN pitch over its run,
+ *         eave_i = ridgeZ - tan_i * run_i
+ *     so changing one pitch moves only that eave. A gable's ridge can be
+ *     moved off-centre by hand (`ridgeOffset`, 2026-10-02); its default
+ *     pitches then come from each side's run, so both eaves stay level.
  *   - Gable ends are vertical walls with the roof overhanging them (rake);
  *     hip ends slope; JUNCTION ends are open — they sit inside a neighbouring
  *     roof (L/T wings, or two masses continuing one ridge) and get no end
@@ -267,6 +269,7 @@ type RoofFrame = {
   uMax: number
   vMin: number
   vMax: number
+  /** The ridge line across the span — the middle unless `ridgeOffset` moved it. */
   vMid: number
   halfSpan: number
   ridgeZ: number
@@ -358,8 +361,12 @@ export function resolveShellShape(
   let zMin = Math.min(...zs)
   let zMax = Math.max(...zs)
   if (!(xMax > xMin && zMax > zMin)) return null
+  // The drawn footprint's own cross-ridge middle, before any neighbour moves
+  // a side: the ridge offset is measured from here.
+  const drawnMidX = (xMin + xMax) / 2
+  const drawnMidZ = (zMin + zMax) / 2
 
-  const seams = (opts.seams ?? []).filter(
+  const seams =(opts.seams ?? []).filter(
     (m) => Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1]) > 1e-3 && m.halves.length > 0,
   )
   // A seam replaces the footprint cut along the same line: no overhang,
@@ -438,7 +445,29 @@ export function resolveShellShape(
   const halfSpan = (ridgeAlongX ? zMax - zMin : xMax - xMin) / 2
   let rise = Math.max(0.01, opts.ridgeRiseOverride ?? node.roofHeight ?? 2.5)
   if (opts.uniformTanOverride != null) rise = Math.max(0.01, opts.uniformTanOverride * halfSpan)
+  // Ridge line across the span. Centred unless the operator moved it with
+  // the ridge-position slider (gable only); each side's default pitch then
+  // comes from its own run so both eaves stay on the wall top.
+  const vLo = ridgeAlongX ? zMin : xMin
+  const vHi = ridgeAlongX ? zMax : xMax
+  const ridgeV = _ridgeLine(node, shed, vLo, vHi, ridgeAlongX ? drawnMidZ : drawnMidX)
+  const runLo = Math.max(0.1, ridgeV - vLo)
+  const runHi = Math.max(0.1, vHi - ridgeV)
   const tans = _resolveEdgeTans(node, styles, rise / Math.max(0.1, halfSpan), opts.uniformTanOverride)
+  // A ridge moved by hand keeps both eaves on the wall top even under a
+  // Pitch match (uniformTanOverride): that mode then only sets the height.
+  if (Math.abs(ridgeV - (vLo + vHi) / 2) > 1e-6) {
+    const authored = (node as unknown as { edgeWeights?: number[] }).edgeWeights
+    const hasOwn = (i: number) =>
+      opts.uniformTanOverride == null &&
+      Array.isArray(authored) &&
+      authored.length === styles.length &&
+      Number(authored[i]) > 0
+    const sLo = ridgeAlongX ? 0 : 3
+    const sHi = ridgeAlongX ? 2 : 1
+    if (styles[sLo] === 'hip' && !hasOwn(sLo)) tans[sLo] = rise / runLo
+    if (styles[sHi] === 'hip' && !hasOwn(sHi)) tans[sHi] = rise / runHi
+  }
   // A shed's high side is the mirrored half that is cut away (see above):
   // it takes the real slope's pitch, whatever pitch was saved for that edge.
   // A steeper saved value dropped its eave, and with it the shed's flat
@@ -448,7 +477,7 @@ export function resolveShellShape(
 
   const baseZ = Math.max(0, node.wallHeight ?? 0)
   const overhang = Math.max(0, Number((node as { overhang?: number }).overhang ?? 0.3))
-  const frame = _roofFrame(polygon, styles, tans, baseZ, rise, overhang, ridgeAlongX)
+  const frame = _roofFrame(polygon, styles, tans, baseZ, rise, overhang, ridgeAlongX, ridgeV)
 
   const realWalls = (opts.realWalls ?? []).filter(
     (w) => Number.isFinite(w.t0) && Number.isFinite(w.t1) && Number.isFinite(w.top) && w.t1 > w.t0,
@@ -1146,6 +1175,25 @@ function _resolveEdgeStyles(node: RoofSegmentNode, polygon: V2[]): ('hip' | 'gab
   return ew ? ['hip', 'gable', 'hip', 'gable'] : ['gable', 'hip', 'gable', 'hip']
 }
 
+/** Least distance kept between a moved ridge and either eave line. */
+const RIDGE_EDGE_CLEAR_M = 0.3
+
+/**
+ * Where the ridge runs across the span (ridge frame, v). The middle of the
+ * current span unless the segment carries a `ridgeOffset` (gable only, set by
+ * hand in the panel): then the drawn footprint's middle plus that offset,
+ * kept RIDGE_EDGE_CLEAR_M inside both eaves.
+ */
+function _ridgeLine(node: RoofSegmentNode, shed: boolean, vLo: number, vHi: number, drawnMid: number): number {
+  const mid = (vLo + vHi) / 2
+  const off = Number((node as unknown as { ridgeOffset?: number }).ridgeOffset ?? 0)
+  if (shed || node.roofType !== 'gable' || !Number.isFinite(off) || Math.abs(off) < 1e-4) return mid
+  const lo = vLo + RIDGE_EDGE_CLEAR_M
+  const hi = vHi - RIDGE_EDGE_CLEAR_M
+  if (!(hi > lo)) return mid
+  return Math.min(hi, Math.max(lo, drawnMid + off))
+}
+
 function _resolveEdgeTans(
   node: RoofSegmentNode,
   styles: EdgeStyle[],
@@ -1175,6 +1223,7 @@ function _roofFrame(
   rise: number,
   overhang: number,
   ridgeAlongX: boolean,
+  ridgeV?: number,
 ): RoofFrame {
   const xMin = polygon[0]![0]
   const xMax = polygon[1]![0]
@@ -1193,9 +1242,11 @@ function _roofFrame(
   const eEndHi = ridgeAlongX ? 1 : 2
 
   const tanOf = tans.map((t) => Math.max(MIN_EDGE_WEIGHT, t))
-  // RIDGE CENTRED AND PINNED; each sloped edge's eave from its own pitch.
-  const eLo = ridgeZ - tanOf[eSideLo]! * halfSpan
-  const eHi = ridgeZ - tanOf[eSideHi]! * halfSpan
+  // RIDGE PINNED (centred unless moved by the ridge-position slider); each
+  // sloped edge's eave from its own pitch over its own run to the ridge.
+  const vMid = ridgeV ?? (vMin + vMax) / 2
+  const eLo = ridgeZ - tanOf[eSideLo]! * (vMid - vMin)
+  const eHi = ridgeZ - tanOf[eSideHi]! * (vMax - vMid)
   const meanEave = (eLo + eHi) / 2
   const eaveOf = [meanEave, meanEave, meanEave, meanEave]
   eaveOf[eSideLo] = eLo
@@ -1219,7 +1270,7 @@ function _roofFrame(
     uMax,
     vMin,
     vMax,
-    vMid: (vMin + vMax) / 2,
+    vMid,
     halfSpan,
     ridgeZ,
     eaveOf,
@@ -1746,9 +1797,11 @@ function _resolveDormer(
   // Run from this edge in to the ridge: the half-span for a side edge, the
   // hip inset for a hip end.
   const run =
-    idx === f.eSideLo || idx === f.eSideHi
-      ? f.halfSpan
-      : idx === f.eEndLo
+    idx === f.eSideLo
+      ? f.vMid - f.vMin
+      : idx === f.eSideHi
+        ? f.vMax - f.vMid
+        : idx === f.eEndLo
         ? f.rLoU - f.uMin
         : f.uMax - f.rHiU
   // Run over which the main roof climbs back up to meet the dormer's roof.

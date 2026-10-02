@@ -461,7 +461,7 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
   if (mode === 'level') {
     // Rise is measured from the segment's wall top (baseZ), not its base.
     B.opts = { ...B.opts, ridgeRiseOverride: ra.y - pb.baseY - B.shape.baseZ }
-  } else if (mode === 'pitch') {
+  } else if (mode === 'pitch' && !_ridgeMoved(B)) {
     const f = A.shape.frame
     B.opts = { ...B.opts, uniformTanOverride: (f.tanOf[f.eSideLo]! + f.tanOf[f.eSideHi]!) / 2 }
   }
@@ -642,7 +642,7 @@ function _seamPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
   B.opts = { ...B.opts, [`end${endB}`]: 'junction' }
   if (mode === 'level') {
     B.opts = { ...B.opts, ridgeRiseOverride: ra.y - B.placement.baseY - B.shape.baseZ }
-  } else if (mode === 'pitch') {
+  } else if (mode === 'pitch' && !_ridgeMoved(B)) {
     const f = A.shape.frame
     B.opts = { ...B.opts, uniformTanOverride: (f.tanOf[f.eSideLo]! + f.tanOf[f.eSideHi]!) / 2 }
   }
@@ -788,6 +788,14 @@ function _seamPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
   B.joinedTo = A.placement.seg.id
   B.ridgeMatchApplied = mode
   return true
+}
+
+/** The operator moved this gable's ridge off-centre by hand. Its two slopes
+ *  then have different pitches, so a Pitch match can't apply: the segment
+ *  keeps its own height (2026-10-02). */
+function _ridgeMoved(r: ResolvedSegment): boolean {
+  const off = Number((r.placement.seg as { ridgeOffset?: number }).ridgeOffset ?? 0)
+  return r.placement.seg.roofType === 'gable' && Number.isFinite(off) && Math.abs(off) >= 1e-4
 }
 
 function _ridgeMatchOf(r: ResolvedSegment): RidgeMatch | undefined {

@@ -185,6 +185,9 @@ export interface CanonicalRoof {
   // Ridge at any angle (degrees, the editor's ridgeAngleDeg). Absent = the
   // ridge_axis. Added 2026-09-27: it used to be dropped on every cloud save.
   ridge_angle_deg?: number;
+  // Gable ridge moved off-centre by hand (metres, the editor's ridgeOffset,
+  // in the segment's own frame — passes through the 180° conversion as-is).
+  ridge_offset?: number;
   // Shell-rebuild fields — all optional, backend pipeline accepts
   // additively. See ROOF_REBUILD_PLAN.md §"Data model — additions to
   // roof_masses" for semantics.
@@ -504,6 +507,11 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
           ...(typeof (seg as any).ridgeAngleDeg === "number" &&
           Number.isFinite((seg as any).ridgeAngleDeg)
             ? { ridge_angle_deg: (seg as any).ridgeAngleDeg }
+            : {}),
+          ...(typeof (seg as any).ridgeOffset === "number" &&
+          Number.isFinite((seg as any).ridgeOffset) &&
+          (seg as any).ridgeOffset !== 0
+            ? { ridge_offset: (seg as any).ridgeOffset }
             : {}),
           ...(Array.isArray((seg as any).facesOverride) && (seg as any).facesOverride.length
             ? { faces_override: (seg as any).facesOverride }
@@ -963,6 +971,9 @@ export function canonicalToSceneGraph(
           : {}),
         ...(typeof s.ridge_angle_deg === "number" && Number.isFinite(s.ridge_angle_deg)
           ? { ridgeAngleDeg: s.ridge_angle_deg }
+          : {}),
+        ...(typeof s.ridge_offset === "number" && Number.isFinite(s.ridge_offset)
+          ? { ridgeOffset: s.ridge_offset }
           : {}),
         ...(typeof s.roof_override_mesh === "string" && s.roof_override_mesh
           ? { roofOverrideMesh: s.roof_override_mesh }

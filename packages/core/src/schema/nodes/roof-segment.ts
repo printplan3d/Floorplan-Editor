@@ -156,6 +156,11 @@ export const RoofSegmentNode = BaseNode.extend({
   // INDEPENDENT for a small wing (keeps its own pitch; its ridge dies into
   // the main slope). 'pitch' = same pitch as the main roof, dropped ridge.
   ridgeMatch: z.enum(['level', 'pitch', 'independent']).optional(),
+  // Gable only: move the ridge across the span by hand, metres from the
+  // drawn footprint's middle (+ toward the max-v side of the ridge frame).
+  // Height and both eaves stay put; each side's pitch follows its own run.
+  // Unset / 0 = centred, exactly as before (operator 2026-10-02).
+  ridgeOffset: z.number().optional(),
   // Escape hatch: path to a manually-authored OBJ that replaces the
   // pipeline-generated shell for this segment. Validation still runs
   // on the loaded mesh. Rare; used for eyebrow dormers / bay windows /

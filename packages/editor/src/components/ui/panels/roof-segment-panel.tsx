@@ -529,6 +529,50 @@ export function RoofSegmentPanel() {
             onClick={() => handleUpdate({ ridgeAngleDeg: alongLongestEdgeDeg(node) } as any)}
           />
         </div>
+        {node.roofType === 'gable' && joined
+          ? (() => {
+              // Ridge position across the span, by hand. 0 = centred. The
+              // height stays and both eaves stay on the wall top, so each
+              // side's pitch follows its own run; per-edge pitches set
+              // earlier are cleared so they can't hold an eave off the wall.
+              const f = joined.shape.frame
+              const reach = Math.max(0, (f.vMax - f.vMin) / 2 - 0.3)
+              const off = Number((node as any).ridgeOffset ?? 0) || 0
+              const n = edgeCount(node)
+              return reach > 0.05 ? (
+                <>
+                  <SliderControl
+                    label="Ridge position"
+                    max={Math.round(reach * 100) / 100}
+                    min={-Math.round(reach * 100) / 100}
+                    onChange={(v) =>
+                      handleUpdate({
+                        ridgeOffset: Math.abs(v) < 0.005 ? undefined : v,
+                        edgeWeights: undefined,
+                      } as any)
+                    }
+                    precision={2}
+                    step={0.05}
+                    unit="m"
+                    value={Math.round(off * 100) / 100}
+                  />
+                  <div className="px-1 pt-0 pb-1 text-[10px] leading-tight text-neutral-500">
+                    0 = centred. Minus moves the ridge toward the{' '}
+                    {edgeLabel(f.eSideLo, n)} eave, plus toward the {edgeLabel(f.eSideHi, n)} eave.
+                    Height and eaves stay; the slopes take different pitches.
+                  </div>
+                  {off !== 0 ? (
+                    <div className="flex gap-1.5 px-1 pt-1 pb-1">
+                      <ActionButton
+                        label="Reset to centre"
+                        onClick={() => handleUpdate({ ridgeOffset: undefined } as any)}
+                      />
+                    </div>
+                  ) : null}
+                </>
+              ) : null
+            })()
+          : null}
       </PanelSection>
 
       {(() => {
