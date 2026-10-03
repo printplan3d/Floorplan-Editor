@@ -2058,6 +2058,7 @@ function _unionDormers(base: THREE.BufferGeometry, shape: ShellShape): THREE.Buf
   // into the front with a glass pane at the back of it.
   // Plain faces appended after the CSG: dormer glass and dormer ceilings.
   const glass: { verts: V3[]; slot: number }[] = []
+  const backs: ((p: V3) => boolean)[] = []
   for (const d of shape.dormers) {
     const w = _dormerWindow(d)
     if (!w) continue
@@ -2069,15 +2070,11 @@ function _unionDormers(base: THREE.BufferGeometry, shape: ShellShape): THREE.Buf
       acc.geometry.dispose()
       acc = next
       glass.push({ verts: w.glass, slot: SLOT_GLASS })
-      // The dark backing behind the glass only on a dormer over a real
-      // window. A dormer placed by hand looks INTO the house through its
-      // window: with the backing, its window showed a dark slate-coloured
-      // panel and read as roof (operator 2026-10-03: "it should cut through
-      // the roof"). Both windings: seen from outside whatever the side.
-      if (d.followsWindow) {
-        glass.push({ verts: w.backing, slot: SLOT_BACKING })
-        glass.push({ verts: [...w.backing].reverse(), slot: SLOT_BACKING })
-      }
+      // The window opens into the dormer: no back to the recess and no
+      // dark panel behind the glass. With them every dormer window read as
+      // a solid white or dark pane in the render (operator 2026-10-03:
+      // "none of the dormer windows show what's inside").
+      backs.push(w.isBack)
     } catch (e) {
       console.warn('shell-preview: dormer window cut failed', e)
     }
@@ -2086,11 +2083,13 @@ function _unionDormers(base: THREE.BufferGeometry, shape: ShellShape): THREE.Buf
   // The dormer body's bottom plate sits inside the house below the slope;
   // from a room it read as a floating ceiling. Drop it (the body only needed
   // it closed for the union).
-  let out = _dropFaces(acc.geometry, (a, b, c) =>
-    shape.dormers.some(
-      (d) =>
-        Math.abs(a[1] - d.zBase) < 1e-4 && Math.abs(b[1] - d.zBase) < 1e-4 && Math.abs(c[1] - d.zBase) < 1e-4,
-    ),
+  let out = _dropFaces(
+    acc.geometry,
+    (a, b, c) =>
+      shape.dormers.some(
+        (d) =>
+          Math.abs(a[1] - d.zBase) < 1e-4 && Math.abs(b[1] - d.zBase) < 1e-4 && Math.abs(c[1] - d.zBase) < 1e-4,
+      ) || backs.some((f) => f(a) && f(b) && f(c)),
   )
   if (out !== acc.geometry) acc.geometry.dispose()
   _normaliseFacing(out)
@@ -2336,7 +2335,7 @@ const DORMER_WIN_MIN = 0.3
  */
 function _dormerWindow(
   d: ResolvedDormer,
-): { recess: THREE.BufferGeometry; glass: V3[]; backing: V3[] } | null {
+): { recess: THREE.BufferGeometry; glass: V3[]; backing: V3[]; isBack: (p: V3) => boolean } | null {
   const req = d.win ?? {}
   // Width: requested (default DORMER_WIN_W), keeping DORMER_WIN_SIDE of wall
   // each side.
@@ -2385,7 +2384,15 @@ function _dormerWindow(
   // dormer) shows through it (operator 2026-09-26: "two planes inside").
   const bd = gd + 0.02
   const backing: V3[] = pane.map((p) => [p[0] + d.inwardUnit[0] * (bd - gd), p[1], p[2] + d.inwardUnit[1] * (bd - gd)])
-  return { recess, glass: pane, backing }
+  // The recess's back face, where the window opens into the dormer.
+  const isBack = (p: V3): boolean => {
+    const rx = p[0] - d.anchor[0]
+    const rz = p[2] - d.anchor[1]
+    const off = rx * d.inwardUnit[0] + rz * d.inwardUnit[1]
+    const w = rx * d.eaveUnit[0] + rz * d.eaveUnit[1]
+    return Math.abs(off - f1) < 2e-3 && Math.abs(w) <= halfW + 2e-3 && p[1] >= sill - 2e-3 && p[1] <= head + 2e-3
+  }
+  return { recess, glass: pane, backing, isBack }
 }
 
 /** Faces of a convex closed solid -> geometry with every face turned to

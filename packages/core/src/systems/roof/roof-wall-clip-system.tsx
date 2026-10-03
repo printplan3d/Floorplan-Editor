@@ -468,7 +468,13 @@ export function wallTopProfile(
     const h = ctx.wallHeightAt(sx + dx * x - dz * z, sz + dz * x + dx * z, [dx, dz])
     return h == null ? OPEN_SKY : h - baseY - TOP_SINK
   }
-  const n = Math.min(MAX_SAMPLES, Math.max(2, Math.ceil(len / SAMPLE_STEP) + 1))
+  // Sampled a little PAST both ends: the render's wall mesh runs on into
+  // the corner by about half a thickness, and the pipeline holds the end
+  // height flat beyond the profile, so the top's last stretch came out
+  // shallower than the roof and stood up to 5 cm above the slates -- a white
+  // stripe down the slope (operator 2026-10-03).
+  const ext = W + 0.05
+  const n = Math.min(MAX_SAMPLES, Math.max(2, Math.ceil((len + 2 * ext) / SAMPLE_STEP) + 1))
   const pts: { s: number; y: number }[] = []
   let needs = false
   // The render cuts a wall flat across its thickness, so the lowest of the
@@ -481,8 +487,7 @@ export function wallTopProfile(
   // (operator 2026-09-29).
   const maxDrop = W * MAX_CROSS_SLOPE
   const faceAt = (node.thickness ?? 0.15) / 2 / W
-  for (let i = 0; i < n; i++) {
-    const s = (len * i) / (n - 1)
+  const yAt = (s: number) => {
     const c = at(s, 0)
     const side = (z: number) => {
       const v = at(s, z)
@@ -491,11 +496,51 @@ export function wallTopProfile(
       const atFace = c - at(s, z * faceAt)
       return drop <= maxDrop && atFace >= drop * faceAt * 0.5 ? v : c
     }
-    const y = Math.min(side(W), c, side(-W))
-    if (y + TOP_SINK < top - TRIM_MIN_M) needs = true
-    pts.push({ s, y: Math.max(0.02, Math.min(top, y)) })
+    return Math.max(0.02, Math.min(top, Math.min(side(W), c, side(-W))))
+  }
+  for (let i = 0; i < n; i++) {
+    const s = -ext + ((len + 2 * ext) * i) / (n - 1)
+    const y = yAt(s)
+    if (s >= 0 && s <= len && y + TOP_SINK < top - TRIM_MIN_M) needs = true
+    pts.push({ s, y })
   }
   if (!needs) return null
+  // Where one roof ends and a lower one takes over, a clean step a little
+  // inside the higher roof, as the preview does (see _sharpenSteps): joined
+  // straight between two samples, the top sloped across the gap and a
+  // wedge of wall stood in front of the higher roof's gable in the render
+  // (operator 2026-10-03).
+  const added: { s: number; y: number }[] = []
+  const dropped = new Set<{ s: number; y: number }>()
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const A = pts[i]!
+    const B = pts[i + 1]!
+    if (Math.abs(B.y - A.y) <= STEP_JUMP_M) continue
+    let lo = A.s
+    let hi = B.s
+    const mid = (A.y + B.y) / 2
+    const aHigh = A.y > B.y
+    for (let k = 0; k < 12; k++) {
+      const m = (lo + hi) / 2
+      if (yAt(m) > mid === aHigh) lo = m
+      else hi = m
+    }
+    const xs = aHigh ? lo - STEP_INSET_M : hi + STEP_INSET_M
+    const yHigh = yAt(aHigh ? lo : hi)
+    const yLow = yAt(aHigh ? hi : lo)
+    for (const p of pts) {
+      if (aHigh ? p.s > xs - 2e-4 && p.s < hi : p.s > lo && p.s < xs + 2e-4) dropped.add(p)
+    }
+    // 2 mm apart: distinct after the export's 1 mm rounding, so the
+    // pipeline cuts the wall twice and the step stands vertical.
+    if (aHigh) added.push({ s: xs - 1e-3, y: yHigh }, { s: xs + 1e-3, y: yLow })
+    else added.push({ s: xs - 1e-3, y: yLow }, { s: xs + 1e-3, y: yHigh })
+  }
+  if (added.length) {
+    const kept = [...pts.filter((p) => !dropped.has(p)), ...added].sort((p, q) => p.s - q.s)
+    pts.length = 0
+    pts.push(...kept)
+  }
   // Drop points on a straight line between their neighbours (1 mm).
   const out: { s: number; y: number }[] = [pts[0]!]
   for (let i = 1; i < pts.length - 1; i++) {
