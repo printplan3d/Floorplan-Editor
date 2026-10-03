@@ -157,11 +157,26 @@ export function clipWallGeometry(
     // end) tripped the CSG into dropping most of the wall.
     return h == null ? top + 1 : Math.min(top + 1, h - baseY - TOP_SINK)
   }
+  // A face rises above the centre only as a slope across the wall does: by
+  // what the other face drops, and never more than the steepest roof over W.
+  // Otherwise the face sample has landed on a DIFFERENT, higher roof just
+  // outside the wall -- the wall runs along the eave of the roof over it --
+  // and that face stood up through the eave as a sliver (operator
+  // 2026-10-03: beside the dormer, at Roof 9's east gable).
+  const maxRise = W * MAX_CROSS_SLOPE
+  const cross = (x: number) => {
+    const c = at(x, 0)
+    const l = at(x, W)
+    const r = at(x, -W)
+    const rise = (other: number) => Math.min(maxRise, Math.max(0, c - other)) + TRIM_MIN_M
+    return { l: Math.min(l, c + rise(r)), c, r: Math.min(r, c + rise(l)) }
+  }
   const sections: Section[] = []
   let needs = false
   for (let i = 0; i < n; i++) {
     const x = x0 + ((x1 - x0) * i) / (n - 1)
-    const sec: Section = { l: [x, W], c: [x, 0], r: [x, -W], yl: at(x, W), yc: at(x, 0), yr: at(x, -W) }
+    const h = cross(x)
+    const sec: Section = { l: [x, W], c: [x, 0], r: [x, -W], yl: h.l, yc: h.c, yr: h.r }
     if (x >= 0 && x <= len && Math.min(sec.yl, sec.yc, sec.yr) + TOP_SINK < top - TRIM_MIN_M) needs = true
     sections.push(sec)
   }
@@ -170,7 +185,7 @@ export function clipWallGeometry(
   // misclassified long thin walls and dropped most of them (operator
   // 2026-10-02: whole L0 walls missing, an L1 wall kept at 4% of what the
   // roof allows; nudging the prism didn't make it reliable).
-  return _clipToHeightField(src, _sharpenSteps(sections, (x) => ({ l: at(x, W), c: at(x, 0), r: at(x, -W) }), W), top)
+  return _clipToHeightField(src, _sharpenSteps(sections, cross, W), top)
 }
 
 /** A rise between two 5 cm samples bigger than any roof slope makes. */
