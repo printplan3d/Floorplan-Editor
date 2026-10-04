@@ -86,7 +86,11 @@ export function buildGapFills(nodes: Record<string, AnyNode>): Fill[] {
     // storey above when there is one.
     const topAt = (x: number, zz: number): number => {
       const ceiling = hasAbove ? height - FLOOR_GAP : Infinity
-      const roof = ctx.wallHeightAt(x, zz)
+      // The LOWEST roof over the point: where roofs overlap the higher one
+      // is cut away inside the lower, and a fill under the higher poked up
+      // through the lower one's slope -- magenta that looked like a crack
+      // (operator 2026-10-04, where the west roof's gable meets the main).
+      const roof = ctx.lowestAt(x, zz)
       const underRoof = roof == null ? Infinity : roof - elev - TOP_GAP
       const t = Math.min(ceiling, underRoof)
       return Number.isFinite(t) ? t : height - FLOOR_GAP

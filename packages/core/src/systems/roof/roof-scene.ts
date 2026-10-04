@@ -111,6 +111,11 @@ export type RoofContext = {
    *  ALONG a roof edge is a real wall of that roof, and keeps it as its roof
    *  right out to its outer face. */
   wallHeightAt: (x: number, z: number, dir?: [number, number]) => number | null
+  /** The LOWEST roof over the point (overhangs included), or null. Where
+   *  roofs overlap, the one you see can be the lower: the higher is cut
+   *  away inside it. For things that must stay under every roof (the
+   *  viewer's Check gaps fill). */
+  lowestAt: (x: number, z: number) => number | null
 }
 
 // ─── Levels ───────────────────────────────────────────────────────
@@ -418,7 +423,15 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     }
     return body ?? drawn ?? any
   }
-  return { segments: segs, levels, heightAt, wallHeightAt }
+  const lowestAt = (X: number, Z: number): number | null => {
+    let best: number | null = null
+    for (const r of all) {
+      const h = heightWorld(r.placement, r.shape, X, Z, false)
+      if (h != null && (best == null || h < best)) best = h
+    }
+    return best
+  }
+  return { segments: segs, levels, heightAt, wallHeightAt, lowestAt }
 }
 
 function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: ResolvedSegment) => void) {
