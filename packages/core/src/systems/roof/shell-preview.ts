@@ -764,6 +764,7 @@ export function shellVolumeLocal(
   // gable's barge board ran straight down through the bay roof). Seams
   // (junction / abut) have no overhang and stay put.
   const oh = withOverhang ? f.overhang : 0
+  const shifts = _edgeShifts(shape)
   for (let i = 0; i < 4; i++) {
     const a = poly[i]!
     const b = poly[(i + 1) % 4]!
@@ -774,7 +775,13 @@ export function shellVolumeLocal(
       !flush && !noOverhangEdges.includes(i) && (shape.styles[i] === 'hip' || shape.styles[i] === 'gable')
         ? (withOverhang ? f.ohEdge[i]! : 0)
         : 0
-    vol.push({ n: [m[0], 0, m[1]], p: [a[0] - m[0] * out, 0, a[1] - m[1] * out], eps: 0.01 })
+    // Without an overhang the volume stops at the edge's WALL -- moved in
+    // onto the real walls' face when it is (see _edgeShifts). Left on the
+    // drawn line, it cut the neighbour back 9 cm short of that wall: an open
+    // strip along the seam (operator 2026-10-04, "Check gaps" where the
+    // west roof's east gable meets the main roof).
+    const inset = out === 0 && shifts[i]! > 0 ? shifts[i]! : 0
+    vol.push({ n: [m[0], 0, m[1]], p: [a[0] - m[0] * (out - inset), 0, a[1] - m[1] * (out - inset)], eps: 0.01 })
     const sloped = i === f.eSideLo || i === f.eSideHi || shape.styles[i] === 'hip'
     if (sloped) {
       // y <= eave_i + tan_i * d  ->  tan_i*d - y + eave_i >= 0
@@ -1433,6 +1440,23 @@ type EdgeRun = { t0: number; t1: number; top: number; inset: number; face: numbe
 
 /** Split an edge into runs by which real wall (if any) stands along it. A
  *  run with no wall has top = -Infinity. */
+/**
+ * How far each edge's generated wall stands in from the drawn edge line
+ * (negative: out from it), onto the outer face of the real walls along it
+ * that rise into the roof -- see the wall-line infill in the shell build.
+ * The volume this roof cuts its neighbours with follows it (shellVolumeLocal).
+ */
+function _edgeShifts(shape: ShellShape): number[] {
+  return [0, 1, 2, 3].map((e) => {
+    const fs = _edgeRuns(shape.realWalls.filter((w) => w.edge === e))
+      .filter((r) => Number.isFinite(r.top) && r.top > 0.05)
+      .map((r) => r.face)
+    if (!fs.length) return 0
+    const f = Math.max(...fs)
+    return f > 0.02 ? f - EDGE_FACE_GAP : Math.min(0, f - EDGE_FACE_GAP)
+  })
+}
+
 function _edgeRuns(spans: RealWallSpan[]): EdgeRun[] {
   const pts = new Set<number>([0, 1])
   for (const s of spans) {
@@ -1599,14 +1623,7 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   // pulled the whole gable 38 cm in onto its face, and the storey above's
   // wall forming the rest of that gable stood out on the edge line -- an
   // open slot between them (operator 2026-10-04, Roof 9's west gable).
-  const edgeShift = [0, 1, 2, 3].map((e) => {
-    const fs = _edgeRuns(shape.realWalls.filter((w) => w.edge === e))
-      .filter((r) => Number.isFinite(r.top) && r.top > 0.05)
-      .map((r) => r.face)
-    if (!fs.length) return 0
-    const f = Math.max(...fs)
-    return f > 0.02 ? f - EDGE_FACE_GAP : Math.min(0, f - EDGE_FACE_GAP)
-  })
+  const edgeShift = _edgeShifts(shape)
   // Keep each side wall inside its neighbours' (moved) planes: no stub
   // past a corner.
   const insideOthers = (e: number, piece: V3[]): V3[] => {
@@ -1798,6 +1815,27 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
       // slope at the new line; the strip outside becomes overhang.
       const shift = eShift
       add(moved(piece, floor), SLOT_WALL_EXTERIOR)
+      // Where the neighbouring stretch's real wall takes over, run on SEAM_LAP
+      // under it, between this floor and the neighbour's: ending exactly
+      // where that wall starts left a hairline crack between the two
+      // (operator 2026-10-04, "Check gaps" at Roof 9's west gable). The
+      // wall hides the lap; above the neighbour's floor its own piece is
+      // drawn, so nothing is doubled.
+      for (const [tb, nb, sgn] of [
+        [r.t0, runs[k - 1], -1],
+        [r.t1, runs[k + 1], 1],
+      ] as const) {
+        if (!nb || !Number.isFinite(nb.top)) continue
+        const nbFloor = Math.max(y0, nb.top)
+        if (nbFloor <= floor + 1e-3) continue
+        const a = tb * L
+        const b = Math.min(L, Math.max(0, a + sgn * SEAM_LAP))
+        let lap = _clipHalf(outline, (p) => along(p) - Math.min(a, b))
+        lap = _clipHalf(lap, (p) => Math.max(a, b) - along(p))
+        lap = _clipHalf(lap, (p) => p[1] - floor)
+        lap = _clipHalf(lap, (p) => nbFloor - p[1])
+        if (lap.length >= 3) add(moved(lap, floor), SLOT_WALL_EXTERIOR)
+      }
 
       // Return faces where a covered stretch meets an uncovered one (none
       // once the whole side is in one plane).
@@ -2090,6 +2128,7 @@ function _unionDormers(base: THREE.BufferGeometry, shape: ShellShape): THREE.Buf
       // a solid white or dark pane in the render (operator 2026-10-03:
       // "none of the dormer windows show what's inside").
       backs.push(w.isBack)
+      for (const q of w.reveal) glass.push({ verts: q, slot: SLOT_WALL_EXTERIOR })
     } catch (e) {
       console.warn('shell-preview: dormer window cut failed', e)
     }
@@ -2333,6 +2372,9 @@ function _dropFaces(geom: THREE.BufferGeometry, pred: (a: V3, b: V3, c: V3) => b
 /** How far a generated edge wall stands in front of a real wall's outer
  *  face (see edgeShift): clear of z-fighting, too little to see. */
 const EDGE_FACE_GAP = 0.01
+/** How far a generated edge wall runs on under the real wall that takes
+ *  over from it (see the run loop): no hairline crack at the seam. */
+const SEAM_LAP = 0.08
 
 /** Recess reveal depth and the wall kept around a dormer window. */
 const DORMER_WIN_DEPTH = 0.08
@@ -2354,7 +2396,7 @@ const DORMER_WIN_MIN = 0.3
  */
 function _dormerWindow(
   d: ResolvedDormer,
-): { recess: THREE.BufferGeometry; glass: V3[]; backing: V3[]; isBack: (p: V3) => boolean } | null {
+): { recess: THREE.BufferGeometry; glass: V3[]; backing: V3[]; isBack: (p: V3) => boolean; reveal: V3[][] } | null {
   const req = d.win ?? {}
   // Width: requested (default DORMER_WIN_W), keeping DORMER_WIN_SIDE of wall
   // each side.
@@ -2395,7 +2437,17 @@ function _dormerWindow(
   const recess = _closedOutward(faces)
   // Glass at the back of the recess, facing out of the dormer front.
   const gd = DORMER_WIN_DEPTH - 0.01
-  let pane: V3[] = [c(-halfW, gd, sill), c(halfW, gd, sill), c(halfW, gd, head), c(-halfW, gd, head)]
+  // A centimetre bigger than the opening all round, its edge tucked into
+  // the reveal: with the recess open behind it (the window looks into the
+  // dormer), a pane exactly the opening's size left a hairline along the
+  // sill you could see straight through (operator 2026-10-04, "Check gaps").
+  const lap = 0.01
+  let pane: V3[] = [
+    c(-halfW - lap, gd, sill - lap),
+    c(halfW + lap, gd, sill - lap),
+    c(halfW + lap, gd, head + lap),
+    c(-halfW - lap, gd, head + lap),
+  ]
   const n = _faceNormal(pane)
   if (n[0] * -d.inwardUnit[0] + n[2] * -d.inwardUnit[1] < 0) pane = pane.reverse()
   // An opaque dark panel just behind the glass: the window reads as a
@@ -2403,15 +2455,28 @@ function _dormerWindow(
   // dormer) shows through it (operator 2026-09-26: "two planes inside").
   const bd = gd + 0.02
   const backing: V3[] = pane.map((p) => [p[0] + d.inwardUnit[0] * (bd - gd), p[1], p[2] + d.inwardUnit[1] * (bd - gd)])
-  // The recess's back face, where the window opens into the dormer.
+  // Whatever the cut left on the recess's faces (its back, and a reveal it
+  // sometimes didn't make: the sill was missing on the north dormer, a 7 cm
+  // slot you could see down into the open dormer through -- operator
+  // 2026-10-04, "Check gaps"). All dropped and replaced by `reveal`.
+  const e = 2e-3
   const isBack = (p: V3): boolean => {
     const rx = p[0] - d.anchor[0]
     const rz = p[2] - d.anchor[1]
     const off = rx * d.inwardUnit[0] + rz * d.inwardUnit[1]
     const w = rx * d.eaveUnit[0] + rz * d.eaveUnit[1]
-    return Math.abs(off - f1) < 2e-3 && Math.abs(w) <= halfW + 2e-3 && p[1] >= sill - 2e-3 && p[1] <= head + 2e-3
+    return off >= f0 - e && off <= f1 + e && Math.abs(w) <= halfW + e && p[1] >= sill - e && p[1] <= head + e
   }
-  return { recess, glass: pane, backing, isBack }
+  // The reveal, explicitly: sill, head and both sides, from the dormer's
+  // front back to just behind the glass.
+  const r1 = gd + 0.005
+  const reveal: V3[][] = [
+    [c(-halfW, 0, sill), c(-halfW, r1, sill), c(halfW, r1, sill), c(halfW, 0, sill)],
+    [c(-halfW, 0, head), c(halfW, 0, head), c(halfW, r1, head), c(-halfW, r1, head)],
+    [c(-halfW, 0, sill), c(-halfW, 0, head), c(-halfW, r1, head), c(-halfW, r1, sill)],
+    [c(halfW, 0, sill), c(halfW, r1, sill), c(halfW, r1, head), c(halfW, 0, head)],
+  ]
+  return { recess, glass: pane, backing, isBack, reveal }
 }
 
 /** Faces of a convex closed solid -> geometry with every face turned to
