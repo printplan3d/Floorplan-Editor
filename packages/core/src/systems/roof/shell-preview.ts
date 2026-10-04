@@ -1589,11 +1589,18 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   // face -- not just the stretches over them, which left a 15 cm jog in
   // the middle of the side (operator 2026-09-27: "still crack, it should be
   // one wall", the L1 shed's east side).
+  // It stands EDGE_FACE_GAP in front of that face, never in its plane:
+  // exactly on it (or a few mm off the edge line) the two z-fought wherever
+  // the real wall rises above the span's top -- the storey above's wall
+  // under a gable (operator 2026-10-04, the L1 wall at the west roof's east
+  // gable).
   const edgeShift = [0, 1, 2, 3].map((e) => {
     const fs = _edgeRuns(shape.realWalls.filter((w) => w.edge === e))
-      .filter((r) => Number.isFinite(r.top) && r.face > 0.02)
+      .filter((r) => Number.isFinite(r.top))
       .map((r) => r.face)
-    return fs.length ? Math.max(...fs) : 0
+    if (!fs.length) return 0
+    const f = Math.max(...fs)
+    return f > 0.02 ? f - EDGE_FACE_GAP : Math.min(0, f - EDGE_FACE_GAP)
   })
   // Keep each side wall inside its neighbours' (moved) planes: no stub
   // past a corner.
@@ -1638,6 +1645,9 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
           const z = p[2] + inward[1] * eShift
           return [x, p[1] > floor + 1e-6 ? Math.max(floor, _slopeY(shape, x, z)) : p[1], z]
         })
+      } else if (eShift < 0) {
+        // A centimetre out, clear of the real wall's face: heights kept.
+        out = out.map((p): V3 => [p[0] + inward[0] * eShift, p[1], p[2] + inward[1] * eShift])
       }
       return insideOthers(i, out)
     }
@@ -2314,6 +2324,10 @@ function _dropFaces(geom: THREE.BufferGeometry, pred: (a: V3, b: V3, c: V3) => b
   if (!dropped) return geom
   return ensureGroupCoverage(_facesToGeometry(faces))
 }
+
+/** How far a generated edge wall stands in front of a real wall's outer
+ *  face (see edgeShift): clear of z-fighting, too little to see. */
+const EDGE_FACE_GAP = 0.01
 
 /** Recess reveal depth and the wall kept around a dormer window. */
 const DORMER_WIN_DEPTH = 0.08
