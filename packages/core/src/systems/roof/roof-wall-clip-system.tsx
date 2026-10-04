@@ -541,6 +541,27 @@ export function wallTopProfile(
     pts.length = 0
     pts.push(...kept)
   }
+  // Past either end the top never rises above its height AT that end. The
+  // pipeline cuts the wall only at profile points between its ends, so a
+  // higher roof (or a step) just past an end was joined straight to the
+  // next cut inside -- a wedge sloping up across the wall, metres high
+  // (operator 2026-10-04: L1 walls sticking out of the render).
+  // Heights at the ends as profiled -- after the steps, which may have been
+  // moved past an end.
+  const yOn = (s: number) => {
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1]!
+      const b = pts[i]!
+      if (s <= b.s) return a.y + ((b.y - a.y) * (s - a.s)) / (b.s - a.s || 1)
+    }
+    return pts[pts.length - 1]!.y
+  }
+  const y0 = yOn(0)
+  const y1 = yOn(len)
+  for (const p of pts) {
+    if (p.s < 0) p.y = Math.min(p.y, y0)
+    else if (p.s > len) p.y = Math.min(p.y, y1)
+  }
   // Drop points on a straight line between their neighbours (1 mm).
   const out: { s: number; y: number }[] = [pts[0]!]
   for (let i = 1; i < pts.length - 1; i++) {

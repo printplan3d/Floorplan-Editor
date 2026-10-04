@@ -21,6 +21,7 @@ const profZ = (prof, s) => {
 }
 for (const f of process.argv.slice(2)) {
   const d = JSON.parse(fs.readFileSync(f, 'utf8'))
+  if (!d.nodes) continue
   const ctx = resolveRoofContext(d.nodes)
   const out = []
   for (const w of Object.values(d.nodes).filter((n) => n.type === 'wall')) {
