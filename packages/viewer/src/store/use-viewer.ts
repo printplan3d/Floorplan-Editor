@@ -120,6 +120,14 @@ type ViewerState = {
   showRoofs: boolean
   setShowRoofs: (show: boolean) => void
 
+  /**
+   * "Check gaps": the house lit only from inside, magenta, so any crack or
+   * bleed between roof and walls shows from outside (see GapCheck). View
+   * only, not persisted.
+   */
+  checkGaps: boolean
+  setCheckGaps: (on: boolean) => void
+
   cameraDragging: boolean
   setCameraDragging: (dragging: boolean) => void
 }
@@ -245,6 +253,9 @@ const useViewer = create<ViewerState>()(
 
       showRoofs: true,
       setShowRoofs: (show) => set({ showRoofs: show }),
+
+      checkGaps: false,
+      setCheckGaps: (on) => set({ checkGaps: on }),
 
       cameraDragging: false,
       setCameraDragging: (dragging) => set({ cameraDragging: dragging }),

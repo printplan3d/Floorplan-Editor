@@ -440,6 +440,19 @@ const GridSnapIconNode = (
     <circle cx="15" cy="15" r="1.4" fill="currentColor" />
   </svg>
 );
+/** Check gaps: a house outline with light leaking through a crack. */
+const CheckGapsIconNode = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <path
+      d="M4 11 L12 4 L20 11 V20 H4 Z"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+    />
+    <path d="M12 9 L11 13 L13 15 L12 19" stroke="#ff00d4" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 const OrthoIconNode = (
   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
     <path
@@ -700,6 +713,8 @@ export function IconRail({
   const setOrthoEnabled = useEditor((s) => s.setOrthoEnabled);
   const showRoofs = useViewer((s) => s.showRoofs);
   const setShowRoofs = useViewer((s) => s.setShowRoofs);
+  const checkGaps = useViewer((s) => s.checkGaps);
+  const setCheckGaps = useViewer((s) => s.setCheckGaps);
   const { canUndo, canRedo, undo, redo } = useUndoRedo();
   const [mounted, setMounted] = useState(false);
   const traceInputRef = useRef<HTMLInputElement>(null);
@@ -1047,6 +1062,15 @@ export function IconRail({
         onClick={() => setShowRoofs(!showRoofs)}
         label={showRoofs ? "Roofs on" : "Roofs off"}
         iconNode={roofsIconNode(showRoofs)}
+      />
+      {/* View only: lights the house from inside in magenta, everything
+          else dark, so a crack or bleed between roof and walls shows in
+          the 3D view. */}
+      <RailButton
+        isActive={checkGaps}
+        onClick={() => setCheckGaps(!checkGaps)}
+        label="Check gaps"
+        iconNode={CheckGapsIconNode}
       />
 
       {/* Undo / Redo — grouped just below the build tools */}

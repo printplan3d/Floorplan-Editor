@@ -31,6 +31,7 @@ import { LevelSystem } from '../../systems/level/level-system'
 import { WallCutout } from '../../systems/wall/wall-cutout'
 import { ZoneSystem } from '../../systems/zone/zone-system'
 import { SceneRenderer } from '../renderers/scene-renderer'
+import { GapCheck } from './gap-check'
 import { Lights } from './lights'
 import { PerfMonitor } from './perf-monitor'
 import PostProcessing from './post-processing'
@@ -266,6 +267,7 @@ const Viewer: React.FC<ViewerProps> = ({
       {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
         /> */}
       <Lights />
+      <GapCheck />
       <Bvh>
         <SceneRenderer />
       </Bvh>
