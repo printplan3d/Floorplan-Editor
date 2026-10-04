@@ -1386,6 +1386,24 @@ function _realWallSpans(
         const h = roofOver(X, Z)
         if (h != null && h < top) top = h
       }
+      // A wall that reaches THIS roof all along the stretch (it is cut down
+      // by the roof, not shorter than it -- the storey above's wall under a
+      // gable) is the end wall there: no generated wall in front of it. Its
+      // lowest point is the eave, so the test below dropped it as "below the
+      // roof base", and the gable stood in the same plane as the wall's face
+      // and z-fought with it (operator 2026-10-04: L1 wall at the west
+      // roof's east gable).
+      let reaches = s.styles[e] === 'gable'
+      let roofMax = -Infinity
+      for (let k = 0; k <= 8 && reaches; k++) {
+        const t = lo + ((hi - lo) * k) / 8
+        const X = a[0] + d[0] * t * L + inN[0] * inset
+        const Z = a[1] + d[1] * t * L + inN[1] * inset
+        const h = heightWorld(p, s, X, Z, false)
+        if (h == null || wallTop < h - 0.05 || (lv ? lv.elev : 0) > p.baseY + 0.05) reaches = false
+        else roofMax = Math.max(roofMax, h)
+      }
+      if (reaches && roofMax > p.baseY + 0.3) top = Math.max(top, roofMax + 0.1)
       const topLocal = top - p.baseY
       // Below the roof base: not in the infill zone. Except a wall set in
       // from the edge that tops out AT the base: the infill stands on the
