@@ -1063,9 +1063,8 @@ export function IconRail({
         label={showRoofs ? "Roofs on" : "Roofs off"}
         iconNode={roofsIconNode(showRoofs)}
       />
-      {/* View only: lights the house from inside in magenta, everything
-          else dark, so a crack or bleed between roof and walls shows in
-          the 3D view. */}
+      {/* View only: fills every room with magenta, hidden by walls and
+          roof, so a crack or bleed between them shows in the 3D view. */}
       <RailButton
         isActive={checkGaps}
         onClick={() => setCheckGaps(!checkGaps)}

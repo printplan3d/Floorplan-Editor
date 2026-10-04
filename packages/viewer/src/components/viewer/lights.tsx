@@ -7,8 +7,6 @@ import useViewer from '../../store/use-viewer'
 export function Lights() {
   const theme = useViewer((state) => state.theme)
   const isDark = theme === 'dark'
-  // Check gaps: the house is lit from inside only (see GapCheck).
-  const k = useViewer((state) => state.checkGaps) ? 0.03 : 1
 
   const light1Ref = useRef<DirectionalLight>(null)
   const shadowCamera = useRef<OrthographicCamera>(null)
@@ -36,21 +34,21 @@ export function Lights() {
 
     if (!initialized.current) {
       if (light1Ref.current) {
-        light1Ref.current.intensity = k * (isDark ? 0.8 : 4)
+        light1Ref.current.intensity = isDark ? 0.8 : 4
         light1Ref.current.color.set(isDark ? '#e0e5ff' : '#ffffff')
 
         if (light1Ref.current.shadow) light1Ref.current.shadow.intensity = isDark ? 0.8 : 0.4
       }
       if (light2Ref.current) {
-        light2Ref.current.intensity = k * (isDark ? 0.2 : 0.75)
+        light2Ref.current.intensity = isDark ? 0.2 : 0.75
         light2Ref.current.color.set(isDark ? '#8090ff' : '#ffffff')
       }
       if (light3Ref.current) {
-        light3Ref.current.intensity = k * (isDark ? 0.3 : 1)
+        light3Ref.current.intensity = isDark ? 0.3 : 1
         light3Ref.current.color.set(isDark ? '#a0b0ff' : '#ffffff')
       }
       if (ambientRef.current) {
-        ambientRef.current.intensity = k * (isDark ? 0.15 : 0.5)
+        ambientRef.current.intensity = isDark ? 0.15 : 0.5
         ambientRef.current.color.set(isDark ? '#a0b0ff' : '#ffffff')
       }
       initialized.current = true
@@ -60,7 +58,7 @@ export function Lights() {
     if (light1Ref.current) {
       light1Ref.current.intensity = THREE.MathUtils.lerp(
         light1Ref.current.intensity,
-        k * (isDark ? 0.8 : 4),
+        isDark ? 0.8 : 4,
         dt,
       )
       targets.l1Color.set(isDark ? '#e0e5ff' : '#ffffff')
@@ -80,7 +78,7 @@ export function Lights() {
     if (light2Ref.current) {
       light2Ref.current.intensity = THREE.MathUtils.lerp(
         light2Ref.current.intensity,
-        k * (isDark ? 0.2 : 0.75),
+        isDark ? 0.2 : 0.75,
         dt,
       )
       targets.l2Color.set(isDark ? '#8090ff' : '#ffffff')
@@ -90,7 +88,7 @@ export function Lights() {
     if (light3Ref.current) {
       light3Ref.current.intensity = THREE.MathUtils.lerp(
         light3Ref.current.intensity,
-        k * (isDark ? 0.3 : 1),
+        isDark ? 0.3 : 1,
         dt,
       )
       targets.l3Color.set(isDark ? '#a0b0ff' : '#ffffff')
@@ -100,7 +98,7 @@ export function Lights() {
     if (ambientRef.current) {
       ambientRef.current.intensity = THREE.MathUtils.lerp(
         ambientRef.current.intensity,
-        k * (isDark ? 0.15 : 0.5),
+        isDark ? 0.15 : 0.5,
         dt,
       )
       targets.ambColor.set(isDark ? '#a0b0ff' : '#ffffff')

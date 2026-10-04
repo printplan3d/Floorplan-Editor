@@ -121,9 +121,9 @@ type ViewerState = {
   setShowRoofs: (show: boolean) => void
 
   /**
-   * "Check gaps": the house lit only from inside, magenta, so any crack or
-   * bleed between roof and walls shows from outside (see GapCheck). View
-   * only, not persisted.
+   * "Check gaps": every room filled with flat magenta, hidden by walls and
+   * roof, so any crack or bleed between them shows from outside (see
+   * GapCheck). View only, not persisted.
    */
   checkGaps: boolean
   setCheckGaps: (on: boolean) => void
