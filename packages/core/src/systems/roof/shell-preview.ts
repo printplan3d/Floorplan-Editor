@@ -1594,9 +1594,14 @@ function _buildRectangleShell(shape: ShellShape): THREE.BufferGeometry | null {
   // the real wall rises above the span's top -- the storey above's wall
   // under a gable (operator 2026-10-04, the L1 wall at the west roof's east
   // gable).
+  // Only walls that rise INTO the roof (top above its base) move the side:
+  // a lower storey's wall that tops out at the base, set in from a gable,
+  // pulled the whole gable 38 cm in onto its face, and the storey above's
+  // wall forming the rest of that gable stood out on the edge line -- an
+  // open slot between them (operator 2026-10-04, Roof 9's west gable).
   const edgeShift = [0, 1, 2, 3].map((e) => {
     const fs = _edgeRuns(shape.realWalls.filter((w) => w.edge === e))
-      .filter((r) => Number.isFinite(r.top))
+      .filter((r) => Number.isFinite(r.top) && r.top > 0.05)
       .map((r) => r.face)
     if (!fs.length) return 0
     const f = Math.max(...fs)
