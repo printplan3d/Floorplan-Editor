@@ -9,6 +9,7 @@ import {
   getStairFootprint,
   openingCoveredByRoof,
   roofMeshesForExport,
+  wallRoofCap,
   wallTopProfile,
   type RoofNode,
   type RoofSegmentNode,
@@ -160,6 +161,17 @@ export function exportFloorPlanJSON(): object {
             const lv = w.parentId ? roofCtx.levels.get(w.parentId) : undefined;
             const base = lv ? lv.elev : 0;
             return { roof_top: prof.map((p) => [p.s, Math.round((base + p.y) * 1000) / 1000]) };
+          })(),
+          // The preview's own trim of the wall, cross-section by cross-section
+          // ([s, left, centre, right], absolute heights; w = how far either
+          // side of the centreline left/right are measured). A pipeline that
+          // knows it cuts the wall to exactly this, so the render's walls
+          // are the preview's (operator 2026-10-04); roof_top above stays
+          // for one that doesn't. "Left" is looking from start to end in
+          // the editor's frame -- the pipeline's (x, -z) mirror swaps it.
+          ...(() => {
+            const cap = roofCtx.segments.size ? wallRoofCap(w, 0, roofCtx) : null;
+            return cap ? { roof_cap: cap } : {};
           })(),
         };
         levelWalls.push(wallExport);

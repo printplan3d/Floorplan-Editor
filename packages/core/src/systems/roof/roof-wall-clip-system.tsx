@@ -131,6 +131,23 @@ export function clipWallGeometry(
   ctx: RoofContext,
 ): THREE.BufferGeometry | null {
   if (!isStraight(node.bulge ?? 0)) return _clipArcWall(src, node, slabY, ctx)
+  const f = wallTrimSections(node, slabY, ctx)
+  return f ? _clipToHeightField(src, f.sections, f.top) : null
+}
+
+/**
+ * The trimming height field over a straight wall: cross-sections along it
+ * (wall-local x from the start; heights above the wall's base at the left
+ * face side z=+W, the centreline and the right z=-W), steps sharpened. Shared
+ * by the preview trim (clipWallGeometry) and the render (wallRoofCap), so the
+ * two cut the same wall. Null when the roof never dips below the wall top.
+ */
+export function wallTrimSections(
+  node: WallNode,
+  slabY: number,
+  ctx: RoofContext,
+): { sections: Section[]; W: number; top: number; baseY: number; len: number } | null {
+  if (!isStraight(node.bulge ?? 0)) return null
   const [sx, sz] = node.start
   const [ex, ez] = node.end
   const len = Math.hypot(ex - sx, ez - sz)
@@ -185,7 +202,7 @@ export function clipWallGeometry(
   // misclassified long thin walls and dropped most of them (operator
   // 2026-10-02: whole L0 walls missing, an L1 wall kept at 4% of what the
   // roof allows; nudging the prism didn't make it reliable).
-  return _clipToHeightField(src, _sharpenSteps(sections, cross, W), top)
+  return { sections: _sharpenSteps(sections, cross, W), W, top, baseY, len }
 }
 
 /** A rise between two 5 cm samples bigger than any roof slope makes. */
@@ -573,6 +590,39 @@ export function wallTopProfile(
   }
   out.push(pts[pts.length - 1]!)
   return out.map((p) => ({ s: Math.round(p.s * 1000) / 1000, y: Math.round(p.y * 1000) / 1000 }))
+}
+
+/**
+ * The preview's own trim of a straight wall, for the render pipeline: the
+ * cross-sections clipWallGeometry cuts with, as [s, yl, yc, yr] -- s metres
+ * along the wall from its start (may run past either end), absolute heights
+ * at the left face side (+w, the wall's left looking from start to end), the
+ * centreline and the right (-w). The pipeline cuts the wall at every s and
+ * down its centreline and puts each top vertex on this field, so render and
+ * preview trim the same wall (operator 2026-10-04: "the main reason I asked
+ * for the preview is that I can see what I get before render"). Points on a
+ * straight line with their neighbours (1 mm, all three heights) are dropped.
+ * Null when the roof doesn't trim the wall; straight walls only.
+ */
+export function wallRoofCap(
+  node: WallNode,
+  slabY: number,
+  ctx: RoofContext,
+): { w: number; pts: [number, number, number, number][] } | null {
+  const f = wallTrimSections(node, slabY, ctx)
+  if (!f) return null
+  const pts = f.sections.map((q) => [q.c[0], f.baseY + q.yl, f.baseY + q.yc, f.baseY + q.yr] as [number, number, number, number])
+  const out: typeof pts = [pts[0]!]
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = out[out.length - 1]!
+    const b = pts[i]!
+    const c = pts[i + 1]!
+    const k = (b[0] - a[0]) / (c[0] - a[0] || 1)
+    if ([1, 2, 3].some((j) => Math.abs(b[j]! - (a[j]! + (c[j]! - a[j]!) * k)) > 0.001)) out.push(b)
+  }
+  out.push(pts[pts.length - 1]!)
+  const r4 = (v: number) => Math.round(v * 10000) / 10000
+  return { w: r4(f.W), pts: out.map((q) => q.map(r4) as [number, number, number, number]) }
 }
 
 /** Total triangle area of a geometry. */
