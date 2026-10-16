@@ -32,6 +32,8 @@ import { cn } from "./../../../lib/utils";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import useEditor, { type StructureTool } from "./../../../store/use-editor";
+import { usePlanDetect } from "./../../../store/use-plan-detect";
+import { startPlanDetect } from "./../../editor/detect-plan-dialog";
 
 // Ritn3D 2026-07-19: undo/redo state from the temporal middleware
 // (zundo). useScene.temporal is a StoreApi, not a hook -- wrap it in
@@ -377,6 +379,24 @@ const CalibrateIconNode = (
     />
   </svg>
 );
+// AI detection onto the active level: a plan sheet with a spark.
+const DetectIconNode = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <path d="M5 4h9l5 5v11H5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    <path d="M8 12h4v4M12 12h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <path d="M17.5 2.5v3M16 4h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+  </svg>
+);
+
+// Align this storey to the one below: two stacked outlines, offset.
+const AlignIconNode = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+    <rect x="3.5" y="8.5" width="11" height="11" rx="1" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2.5 2" />
+    <rect x="9.5" y="4.5" width="11" height="11" rx="1" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M7 12l3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+);
+
 const TraceIconNode = (
   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
     <rect
@@ -718,6 +738,12 @@ export function IconRail({
   const { canUndo, canRedo, undo, redo } = useUndoRedo();
   const [mounted, setMounted] = useState(false);
   const traceInputRef = useRef<HTMLInputElement>(null);
+  const detectInputRef = useRef<HTMLInputElement>(null);
+  const planDetector = usePlanDetect((s) => s.detector);
+  // Align needs a storey below to align to.
+  const hasLevelBelow =
+    activeLevelNumber != null &&
+    levelsOnBuilding.some((l) => (l.level ?? 0) < activeLevelNumber);
 
   // Ritn3D 2026-07-27: Trace tool now opens a file picker directly and
   // creates a GuideNode from the chosen image on the active level.
@@ -1037,6 +1063,45 @@ export function IconRail({
         className="hidden"
         onChange={handleTraceFile}
       />
+      {/* 2026-10-16: AI detection onto the level you're on (multi-storey).
+          Only when the host wired a detector -- the editor never calls an
+          API itself. Align re-opens "Align to floor below" by hand; it
+          opens on its own after a detection. */}
+      {planDetector && (
+        <>
+          <RailButton
+            isActive={false}
+            onClick={() => detectInputRef.current?.click()}
+            label="Detect plan"
+            iconNode={DetectIconNode}
+          />
+          <input
+            ref={detectInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              const levelId = useViewer.getState().selection.levelId;
+              if (file && levelId) void startPlanDetect(file, levelId);
+            }}
+          />
+        </>
+      )}
+      {hasLevelBelow && (
+        <RailButton
+          isActive={false}
+          onClick={() => {
+            const levelId = useViewer.getState().selection.levelId;
+            if (levelId) {
+              emitter.emit("floorplan:align-level" as any, { levelId });
+            }
+          }}
+          label="Align to floor below"
+          iconNode={AlignIconNode}
+        />
+      )}
 
       {/* 2026-07-27/28: persistent snap / ortho toggles. Compact labels
           (just 'Grid' / 'Ortho') so the rail doesn't push the theme +

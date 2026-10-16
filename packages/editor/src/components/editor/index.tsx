@@ -1,5 +1,7 @@
 'use client'
 
+import { DetectPlanDialog } from './detect-plan-dialog'
+import { type PlanDetector, usePlanDetect } from '../../store/use-plan-detect'
 import { Icon } from '@iconify/react'
 import { initSpaceDetectionSync, initSpatialGridSync, useScene } from '@ritn3d/core'
 import { InteractiveSystem, useViewer, Viewer } from '@ritn3d/viewer'
@@ -93,6 +95,11 @@ export interface EditorProps {
   // returns a promise that resolves when the render job is QUEUED (not
   // rendered — that's server-side and can take minutes).
   onGenerate3D?: (drawing: object) => Promise<void>
+
+  // Ritn3D 2026-10-16: "Detect plan" on a level. The host runs AI detection
+  // on the image and returns editor nodes for that level; the editor places
+  // them and opens "Align to floor below". Omitted -> no Detect button.
+  onDetectPlan?: PlanDetector
 }
 
 function EditorSceneCrashFallback() {
@@ -330,8 +337,14 @@ export default function Editor({
   sitePanelProps,
   presetsAdapter,
   onGenerate3D,
+  onDetectPlan,
 }: EditorProps) {
   useKeyboard()
+
+  useEffect(() => {
+    usePlanDetect.getState().setDetector(onDetectPlan ?? null)
+    return () => usePlanDetect.getState().setDetector(null)
+  }, [onDetectPlan])
 
   const { isLoadingSceneRef } = useAutoSave({
     onSave,
@@ -485,6 +498,7 @@ export default function Editor({
             ways, so we don't need a separate presentation UI. */}
         <PanelManager />
         {!needs3D && <FloorplanPanel />}
+        <DetectPlanDialog />
         {needs3D && !isPreviewMode && <ActionMenu />}
         {/* Ritn3D 2026-07-04: Generate 3D — top-right floating button.
             Only rendered when the host wired onGenerate3D (webapp does;

@@ -61,7 +61,19 @@ export interface PdfRenderResult {
   height: number
 }
 
-export async function pdfFileToImageDataUrl(file: File): Promise<PdfRenderResult> {
+export interface PdfRenderOptions {
+  /** 1-based page number. Default 1. */
+  page?: number
+  /** Longest rendered edge in px. Default MAX_LONG_EDGE_PX. */
+  maxEdge?: number
+  /** Default PNG. Plan detection sends JPEG -- far smaller, same result. */
+  mime?: 'image/png' | 'image/jpeg'
+}
+
+export async function pdfFileToImageDataUrl(
+  file: File,
+  opts: PdfRenderOptions = {},
+): Promise<PdfRenderResult> {
   let pdfjs: typeof import('pdfjs-dist')
   try {
     pdfjs = await ensurePdfJs()
@@ -87,7 +99,8 @@ export async function pdfFileToImageDataUrl(file: File): Promise<PdfRenderResult
   }
 
   const totalPages = doc.numPages
-  const page = await doc.getPage(1)
+  const pageNo = Math.min(Math.max(1, Math.floor(opts.page ?? 1)), totalPages)
+  const page = await doc.getPage(pageNo)
 
   // Pick a scale so the longest rendered edge stays under MAX_LONG_EDGE_PX.
   // Start from the 1:1 viewport, scale up to 2 (the "trace quality" target),
@@ -95,7 +108,7 @@ export async function pdfFileToImageDataUrl(file: File): Promise<PdfRenderResult
   const baseViewport = page.getViewport({ scale: 1 })
   const longBase = Math.max(baseViewport.width, baseViewport.height)
   const desiredScale = 2
-  const capScale = MAX_LONG_EDGE_PX / longBase
+  const capScale = (opts.maxEdge ?? MAX_LONG_EDGE_PX) / longBase
   const scale = Math.min(desiredScale, capScale)
   const viewport = page.getViewport({ scale })
 
@@ -118,6 +131,28 @@ export async function pdfFileToImageDataUrl(file: File): Promise<PdfRenderResult
   // per upload if we skip this.
   void (doc as unknown as { destroy(): Promise<void> }).destroy?.()
 
-  const dataUrl = canvas.toDataURL('image/png')
+  const dataUrl =
+    opts.mime === 'image/jpeg' ? canvas.toDataURL('image/jpeg', 0.85) : canvas.toDataURL('image/png')
   return { dataUrl, totalPages, width: canvas.width, height: canvas.height }
+}
+
+/** Number of pages, for the page picker. Same errors as pdfFileToImageDataUrl. */
+export async function pdfPageCount(file: File): Promise<number> {
+  const pdfjs = await ensurePdfJs()
+  let doc: import('pdfjs-dist/types/src/display/api').PDFDocumentProxy
+  try {
+    doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise
+  } catch (e) {
+    const name = (e as { name?: string })?.name
+    if (name === 'PasswordException') {
+      throw new Error('This PDF is password protected. Unlock it before uploading.')
+    }
+    if (name === 'InvalidPDFException') {
+      throw new Error('This file is not a valid PDF. Try re-exporting from your CAD tool.')
+    }
+    throw e
+  }
+  const n = doc.numPages
+  void (doc as unknown as { destroy(): Promise<void> }).destroy?.()
+  return n
 }

@@ -21,6 +21,7 @@ export {
   saveSceneToLocalStorage,
 } from './lib/scene'
 export { exportFloorPlanJSON } from './lib/export-json'
+export type { DetectedPlan, PlanDetector } from './store/use-plan-detect'
 // Needed outside the editor too: the webapp's upload -> processing flow stashes
 // the original file to offer "trace over your plan" after a failed detection,
 // and a PDF stored as raw bytes can never render as a guide image.

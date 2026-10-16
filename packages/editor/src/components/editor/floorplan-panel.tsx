@@ -53,6 +53,14 @@ import {
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { sfxEmitter } from "../../lib/sfx-bus";
+import {
+  levelHasRoofs,
+  levelTransformUpdates,
+  similarityFromPairs,
+  transformAngle,
+  transformScale,
+  applyToPoint,
+} from "../../lib/level-transform";
 import { cn } from "../../lib/utils";
 import {
   segmentLocalToWorld,
@@ -4835,6 +4843,15 @@ export function FloorplanPanel() {
   // was SILENT, so the tool read as broken. This flag drives an
   // explanatory chip while an opening tool hovers a curved wall.
   const [arcOpeningBlocked, setArcOpeningBlocked] = useState(false);
+  // "Align to floor below" -- see the block after floorplanWorldUnitsPerPixel.
+  // Declared up here because canInteractWithGuides reads it during render.
+  const [levelAlign, setLevelAlign] = useState<{ levelId: string } | null>(
+    null,
+  );
+  // a1, b1, a2, b2: entries 0 and 2 on this floor, 1 and 3 on the floor below.
+  const [alignPts, setAlignPts] = useState<WallPlanPoint[]>([]);
+  const [alignHover, setAlignHover] = useState<WallPlanPoint | null>(null);
+  const [alignKeepScale, setAlignKeepScale] = useState(false);
   const [calibrationInput, setCalibrationInput] = useState("");
   const [calibrationUnit, setCalibrationUnit] = useState<"m" | "ft">("m");
   const [draftStart, setDraftStart] = useState<WallPlanPoint | null>(null);
@@ -5837,7 +5854,10 @@ export function FloorplanPanel() {
   // reference clicks get swallowed by "select this guide". Turning
   // interactions off makes the guide render-only during calibration.
   const canInteractWithGuides =
-    showGuides && canSelectElementFloorplanGeometry && !calibration;
+    showGuides &&
+    canSelectElementFloorplanGeometry &&
+    !calibration &&
+    !levelAlign;
   // Ritn3D 2026-07-27: zones are always selectable in select mode.
   // Was gated on structureLayer === 'zones' but the layer picker is
   // hidden in minimal launch mode, so users could see auto-detected
@@ -6402,6 +6422,134 @@ export function FloorplanPanel() {
 
     return (widthUnitsPerPixel + heightUnitsPerPixel) / 2;
   }, [surfaceSize.height, surfaceSize.width, viewBox.height, viewBox.width]);
+
+  // ── Align to floor below (multi-storey detection, 2026-10-16) ─────────
+  // A plan detected onto an upper level arrives at its own scale (detection
+  // assumes 80 cm doors) and its own origin (the image's top-left corner),
+  // so it lands offset, possibly turned, and a few percent off in size.
+  // Two matching corner pairs fix all three: click a corner on THIS floor,
+  // then the same corner on the floor below, twice. Clicks snap to wall
+  // ends on the respective floor, so the match is exact, not eyeballed.
+  // Apply moves everything on this level as one undo step; other storeys
+  // are never touched (see lib/level-transform).
+  // (state declared next to the calibration state, above)
+
+  const cancelLevelAlign = useCallback(() => {
+    setLevelAlign(null);
+    setAlignPts([]);
+    setAlignHover(null);
+  }, []);
+
+  // Wall ends of the storey directly below (depth 1 of the ghost stack).
+  const alignBelowWalls = useMemo(
+    () => (levelBelowGhost?.walls ?? []).filter((w) => w.depth === 1),
+    [levelBelowGhost],
+  );
+
+  useEffect(() => {
+    const handler = (data?: { levelId?: string; auto?: boolean }) => {
+      const id = data?.levelId;
+      if (!id) return;
+      // Detection on the ground floor (or a floor with nothing under it)
+      // has nothing to align to -- stay quiet when it opened on its own.
+      const nodes = useScene.getState().nodes as Record<string, AnyNode>;
+      const lvl = nodes[id] as LevelNode | undefined;
+      if (!lvl || lvl.type !== "level") return;
+      const mine = lvl.level ?? 0;
+      const building = lvl.parentId
+        ? (nodes[lvl.parentId] as BuildingNode | undefined)
+        : undefined;
+      const belowHasWalls = (building?.children ?? []).some((cid) => {
+        const c = nodes[cid] as LevelNode | undefined;
+        return (
+          c?.type === "level" &&
+          (c.level ?? 0) < mine &&
+          c.children.some((w) => (nodes[w] as AnyNode)?.type === "wall")
+        );
+      });
+      if (!belowHasWalls) {
+        if (!data?.auto) {
+          alert("Draw or detect the floor below first, then align this one to it.");
+        }
+        return;
+      }
+      setCalibration(null);
+      setLevelAlign({ levelId: id });
+      setAlignPts([]);
+      setAlignHover(null);
+    };
+    emitter.on("floorplan:align-level" as any, handler);
+    return () => {
+      emitter.off("floorplan:align-level" as any, handler);
+    };
+  }, []);
+
+  // Switching level mid-align abandons it: the points belong to that level.
+  useEffect(() => {
+    if (levelAlign && levelAlign.levelId !== levelId) cancelLevelAlign();
+  }, [levelAlign, levelId, cancelLevelAlign]);
+
+  useEffect(() => {
+    if (!levelAlign) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cancelLevelAlign();
+      if (e.key === "Backspace" && !(e.target instanceof HTMLInputElement)) {
+        e.preventDefault();
+        setAlignPts((p) => p.slice(0, -1));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [levelAlign, cancelLevelAlign]);
+
+  /** Snap to the nearest wall end on this floor (even steps) or the floor
+   *  below (odd steps) within 14 screen px; else the raw point. */
+  const alignSnap = useCallback(
+    (p: WallPlanPoint, step: number): WallPlanPoint => {
+      const ends: [number, number][] = [];
+      if (step % 2 === 0) {
+        for (const w of walls) ends.push(w.start, w.end);
+      } else {
+        for (const w of alignBelowWalls) ends.push(w.start, w.end);
+      }
+      let best: [number, number] | null = null;
+      let bd = 14 * floorplanWorldUnitsPerPixel;
+      for (const e of ends) {
+        const d = Math.hypot(e[0] - p[0], e[1] - p[1]);
+        if (d < bd) {
+          bd = d;
+          best = e;
+        }
+      }
+      return best ? [best[0], best[1]] : p;
+    },
+    [walls, alignBelowWalls, floorplanWorldUnitsPerPixel],
+  );
+
+  const alignTransform = useMemo(() => {
+    if (alignPts.length < 4) return null;
+    const [a1, b1, a2, b2] = alignPts as [
+      WallPlanPoint,
+      WallPlanPoint,
+      WallPlanPoint,
+      WallPlanPoint,
+    ];
+    return similarityFromPairs(a1, a2, b1, b2, alignKeepScale);
+  }, [alignPts, alignKeepScale]);
+
+  const applyLevelAlign = useCallback(() => {
+    if (!(levelAlign && alignTransform)) return;
+    const updates = levelTransformUpdates(
+      useScene.getState().nodes as Record<string, AnyNode>,
+      levelAlign.levelId,
+      alignTransform,
+    );
+    if (updates.length) updateNodes(updates);
+    cancelLevelAlign();
+    window.setTimeout(() => {
+      emitter.emit("floorplan:reset-view" as any);
+    }, 50);
+  }, [levelAlign, alignTransform, updateNodes, cancelLevelAlign]);
   /* One curve handle per edge of the selected floor, dragged perpendicular
      to bow that edge — the same gesture a selected wall already uses.
 
@@ -11077,6 +11225,113 @@ export function FloorplanPanel() {
         </div>
       )}
 
+      {/* Align-to-floor-below banner + result card. Same ink banner as
+          scale calibration so the two modes read as one family. */}
+      {levelAlign && (
+        <div
+          className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 bg-ink px-4 py-3 text-paper shadow-[0_4px_12px_rgba(22,24,28,0.12)]"
+          style={{ paddingLeft: "320px" }}
+        >
+          <span className="font-mono text-[11px] text-paper/60">
+            {Math.min(alignPts.length + 1, 4)}/4
+          </span>
+          <span className="font-medium text-[13.5px] tracking-[-0.005em]">
+            {alignPts.length === 0 &&
+              "Align to floor below: click an outside corner on THIS floor."}
+            {alignPts.length === 1 &&
+              "Now click the SAME corner on the floor below (the faint blue walls)."}
+            {alignPts.length === 2 &&
+              "Click a second corner on this floor, far from the first (e.g. the other end of the building)."}
+            {alignPts.length === 3 &&
+              "Now click that same corner on the floor below."}
+            {alignPts.length >= 4 &&
+              "Check the orange preview, then Apply. Backspace undoes a point."}
+          </span>
+          <button
+            type="button"
+            onClick={cancelLevelAlign}
+            className="ml-2 rounded-[5px] border border-paper/20 bg-transparent px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.05em] text-paper/80 hover:bg-paper/10 hover:text-paper"
+          >
+            Skip · Esc
+          </button>
+        </div>
+      )}
+      {levelAlign &&
+        alignPts.length >= 4 &&
+        (() => {
+          const k = alignTransform ? transformScale(alignTransform) : 1;
+          const deg = alignTransform
+            ? (transformAngle(alignTransform) * 180) / Math.PI
+            : 0;
+          const pct = (k - 1) * 100;
+          const suspicious = !alignKeepScale && Math.abs(pct) > 10;
+          const roofs = levelHasRoofs(
+            useScene.getState().nodes as Record<string, AnyNode>,
+            levelAlign.levelId,
+          );
+          return (
+            <div className="pointer-events-auto fixed bottom-10 left-1/2 z-50 w-[min(92vw,440px)] -translate-x-1/2 rounded-md border border-hair bg-paper px-4 py-3 text-ink shadow-[0_8px_28px_rgba(22,24,28,0.10)]">
+              {alignTransform ? (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] tabular-nums">
+                  <span>
+                    Turn <b>{deg.toFixed(1)}°</b>
+                  </span>
+                  <span>
+                    Size{" "}
+                    <b>
+                      {alignKeepScale
+                        ? "unchanged"
+                        : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`}
+                    </b>
+                  </span>
+                  <label className="ml-auto flex items-center gap-1.5 text-ink/70">
+                    <input
+                      type="checkbox"
+                      checked={alignKeepScale}
+                      onChange={(e) => setAlignKeepScale(e.target.checked)}
+                    />
+                    Keep scale
+                  </label>
+                </div>
+              ) : (
+                <p className="text-[12.5px]">
+                  Both corners on this floor are the same point. Redo with two
+                  corners far apart.
+                </p>
+              )}
+              {suspicious && (
+                <p className="mt-2 text-[12px] text-[#b45309]">
+                  That is a big size change, which usually means a wrong corner
+                  was clicked. Check the preview, or Redo.
+                </p>
+              )}
+              {roofs && (
+                <p className="mt-2 text-[12px] text-ink/60">
+                  Roofs on this level do not move with it. Align before adding
+                  roofs.
+                </p>
+              )}
+              <div className="mt-3 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAlignPts([])}
+                  className="rounded px-3 py-1 text-[12.5px] text-ink/70 hover:bg-ink/[0.05]"
+                >
+                  Redo
+                </button>
+                <button
+                  type="button"
+                  disabled={!alignTransform}
+                  onClick={applyLevelAlign}
+                  className="rounded bg-[var(--color-accent)] px-3 py-1 font-semibold text-[12.5px] text-white hover:opacity-90 disabled:opacity-40"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
       {/* Canvas scale bar — fixed overlay at bottom-left. Picks the nearest
           "nice" length (1, 2, 5, 10, 20, 50, 100 m, etc.) that maps to
           roughly 80-150 screen pixels at the current zoom. Updates live
@@ -13152,6 +13407,138 @@ export function FloorplanPanel() {
                         vectorEffect="non-scaling-stroke"
                       />
                     )}
+                  </g>
+                );
+              })()}
+
+            {/* Align to floor below: preview of this floor where Apply would
+                put it, the picked pairs, the snap ring, and a transparent
+                catcher on top so clicks land here and nowhere else.
+                Right-drag still pans (pointerdown bubbles to the svg). */}
+            {levelAlign &&
+              (() => {
+                const sv = (p: WallPlanPoint) =>
+                  toSvgPoint({ x: p[0], y: p[1] });
+                const px = floorplanWorldUnitsPerPixel;
+                const preview = alignTransform
+                  ? walls.map((w) => {
+                      const a = sv(applyToPoint(alignTransform, w.start));
+                      const b = sv(applyToPoint(alignTransform, w.end));
+                      return (
+                        <line
+                          key={w.id}
+                          x1={a.x}
+                          y1={a.y}
+                          x2={b.x}
+                          y2={b.y}
+                          stroke="#f97316"
+                          strokeWidth="0.1"
+                          strokeLinecap="round"
+                          opacity={0.85}
+                        />
+                      );
+                    })
+                  : null;
+                const pairs = [0, 2].map((i) => {
+                  const a = alignPts[i];
+                  const b = alignPts[i + 1];
+                  if (!a) return null;
+                  const sa = sv(a);
+                  const sb = b ? sv(b) : null;
+                  return (
+                    <g key={`pair-${i}`}>
+                      {sb && (
+                        <line
+                          x1={sa.x}
+                          y1={sa.y}
+                          x2={sb.x}
+                          y2={sb.y}
+                          stroke="#0f172a"
+                          strokeWidth="0.04"
+                          strokeDasharray="0.15 0.1"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      <circle
+                        cx={sa.x}
+                        cy={sa.y}
+                        r={7 * px}
+                        fill="#f97316"
+                        stroke="#fff"
+                        strokeWidth="0.03"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      {sb && (
+                        <circle
+                          cx={sb.x}
+                          cy={sb.y}
+                          r={7 * px}
+                          fill="#6366f1"
+                          stroke="#fff"
+                          strokeWidth="0.03"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      <text
+                        x={sa.x + 9 * px}
+                        y={sa.y - 9 * px}
+                        fontSize={13 * px}
+                        fontWeight={700}
+                        fill="#0f172a"
+                      >
+                        {i / 2 + 1}
+                      </text>
+                    </g>
+                  );
+                });
+                const hv =
+                  alignHover && alignPts.length < 4 ? sv(alignHover) : null;
+                return (
+                  <g key="level-align-overlay">
+                    {preview}
+                    {pairs}
+                    {hv && (
+                      <circle
+                        cx={hv.x}
+                        cy={hv.y}
+                        r={10 * px}
+                        fill="none"
+                        stroke={alignPts.length % 2 === 0 ? "#f97316" : "#6366f1"}
+                        strokeWidth="0.05"
+                        vectorEffect="non-scaling-stroke"
+                        pointerEvents="none"
+                      />
+                    )}
+                    <rect
+                      x={viewBox.minX}
+                      y={viewBox.minY}
+                      width={viewBox.width}
+                      height={viewBox.height}
+                      fill="transparent"
+                      style={{ cursor: "crosshair" }}
+                      onPointerMove={(event) => {
+                        const p = getPlanPointFromClientPoint(
+                          event.clientX,
+                          event.clientY,
+                        );
+                        setAlignHover(p ? alignSnap(p, alignPts.length) : null);
+                      }}
+                      onPointerLeave={() => setAlignHover(null)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (alignPts.length >= 4) return;
+                        const p = getPlanPointFromClientPoint(
+                          event.clientX,
+                          event.clientY,
+                        );
+                        if (!p) return;
+                        setAlignPts([
+                          ...alignPts,
+                          alignSnap(p, alignPts.length),
+                        ]);
+                      }}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                    />
                   </g>
                 );
               })()}
