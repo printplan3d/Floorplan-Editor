@@ -179,11 +179,6 @@ export type ShellBuildOptions = {
    *  that falls inside one is cut away, so meeting roofs read as ONE roof:
    *  no slope, gable, infill or board inside another roof. */
   clipVolumes?: ClipVolume[]
-  /** Like clipVolumes, but cutting only this roof's END walls: upright
-   *  faces facing along the ridge (closing walls, gable triangles). Slopes
-   *  and the eave-side infill are left alone, so no slot or hole can open
-   *  beside the join. See _continuationWallCut in roof-scene. */
-  wallClipVolumes?: ClipVolume[]
   /** Footprint edges shared with a neighbouring roof (see RoofSeam). */
   seams?: RoofSeam[]
 }
@@ -330,7 +325,6 @@ export type ShellShape = {
   undersides?: V3[][]
   infillFloor: number
   clipVolumes: ClipVolume[]
-  wallClipVolumes: ClipVolume[]
   dormers: ResolvedDormer[]
 }
 
@@ -572,7 +566,6 @@ export function resolveShellShape(
     flushHi: !!opts.sideHiFlush,
     infillFloor: Math.min(0, Number.isFinite(opts.infillFloor) ? opts.infillFloor! : 0),
     clipVolumes: opts.clipVolumes ?? [],
-    wallClipVolumes: opts.wallClipVolumes ?? [],
     dormers: [],
     footprintCuts,
     footprint,
@@ -660,12 +653,6 @@ export function generateShellSegmentGeometry(
     geom.dispose()
     geom = ensureGroupCoverage(cut)
   }
-  if (shape.wallClipVolumes.length > 0) {
-    const axis: V3 = shape.frame.ridgeAlongX ? [1, 0, 0] : [0, 0, 1]
-    const cut = _subtractVolumes(geom, shape.wallClipVolumes, axis)
-    geom.dispose()
-    geom = ensureGroupCoverage(cut)
-  }
   geom.computeVertexNormals()
   return geom
 }
@@ -675,13 +662,7 @@ export function generateShellSegmentGeometry(
  * surface of the UNION of this roof with its neighbours, as far as this roof
  * contributes to it. Works per triangle, so it applies after the dormer CSG.
  */
-function _subtractVolumes(
-  geom: THREE.BufferGeometry,
-  volumes: ClipVolume[],
-  /** Cut only triangles facing along this axis (end walls); everything
-   *  else passes through whole. */
-  facingAxis: V3 | null = null,
-): THREE.BufferGeometry {
+function _subtractVolumes(geom: THREE.BufferGeometry, volumes: ClipVolume[]): THREE.BufferGeometry {
   const pos = geom.getAttribute('position') as THREE.BufferAttribute
   const idx = geom.getIndex()
   const vert = (i: number): V3 => [pos.getX(i), pos.getY(i), pos.getZ(i)]
@@ -693,8 +674,7 @@ function _subtractVolumes(
     for (let k = g.start; k < g.start + g.count; k += 3) {
       const tri: V3[] = [0, 1, 2].map((o) => vert(idx ? idx.getX(k + o) : k + o))
       let pieces: V3[][] = [tri]
-      const skip = !!facingAxis && Math.abs(_unitNormalDot(tri, facingAxis)) < END_FACING
-      for (const vol of skip ? [] : volumes) {
+      for (const vol of volumes) {
         const next: V3[][] = []
         for (const pc of pieces) next.push(..._minusConvex(pc, vol))
         pieces = next
@@ -709,20 +689,6 @@ function _subtractVolumes(
     }
   }
   return _facesToGeometry(faces)
-}
-
-/** |normal . ridge axis| at or above this counts as an end wall (see
- *  wallClipVolumes). */
-const END_FACING = 0.9
-
-function _unitNormalDot(t: V3[], d: V3): number {
-  const [a, b, c] = t as [V3, V3, V3]
-  const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
-  const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
-  const x = u[1]! * v[2]! - u[2]! * v[1]!
-  const y = u[2]! * v[0]! - u[0]! * v[2]!
-  const z = u[0]! * v[1]! - u[1]! * v[0]!
-  return (x * d[0] + y * d[1] + z * d[2]) / (Math.hypot(x, y, z) || 1)
 }
 
 /** Planar convex polygon minus a convex volume -> the pieces outside it. */

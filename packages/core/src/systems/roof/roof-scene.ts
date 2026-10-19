@@ -98,10 +98,6 @@ export type ResolvedSegment = {
   /** Lower continuation roofs this roof keeps a gable end over (see the
    *  continuation join): they trim its overhang even as seam neighbours. */
   gableOver?: string[]
-  /** Roofs this one continues end to end with a DIFFERENT cross-section:
-   *  each closes its end with a wall, and those walls are trimmed to the
-   *  step between the two roofs (see _continuationWallCut). */
-  stepNbrs?: string[]
 }
 
 export type RoofContext = {
@@ -387,18 +383,8 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
     }
     // Eaves stop at a facade that carries on up past this roof.
     vols.push(..._abuttingWallCuts(r, walls, levels, [...segs.values()]))
-    const wallVols: ClipVolume[] = []
-    for (const id of r.stepNbrs ?? []) {
-      const o = segs.get(id)
-      const v = o ? _continuationWallCut(o, r, levels) : null
-      if (v) wallVols.push(v)
-    }
-    if (vols.length || wallVols.length) {
-      r.opts = {
-        ...r.opts,
-        ...(vols.length ? { clipVolumes: vols } : {}),
-        ...(wallVols.length ? { wallClipVolumes: wallVols } : {}),
-      }
+    if (vols.length) {
+      r.opts = { ...r.opts, clipVolumes: vols }
       rebuild(r)
     }
   }
@@ -533,7 +519,6 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
         A.opts = nearLo ? { ...A.opts, endLo: 'abut' } : { ...A.opts, endHi: 'abut' }
         rebuild(A)
       }
-      _markStep(A, B)
       return
     }
     // Share A's side lines when they're close, so the two masses read as
@@ -601,60 +586,7 @@ function _joinPair(A: ResolvedSegment, B: ResolvedSegment, rebuild: (r: Resolved
     } else if (!match) {
       B.gableOver = [...(B.gableOver ?? []), A.placement.seg.id]
     }
-    if (!match) _markStep(A, B)
   }
-}
-
-function _markStep(A: ResolvedSegment, B: ResolvedSegment) {
-  const a = A.placement.seg.id
-  const b = B.placement.seg.id
-  if (!A.stepNbrs?.includes(b)) A.stepNbrs = [...(A.stepNbrs ?? []), b]
-  if (!B.stepNbrs?.includes(a)) B.stepNbrs = [...(B.stepNbrs ?? []), a]
-}
-
-/** How far past a step neighbour's END walls its trimming volume reaches.
- *  The two closing walls of a continuation join don't sit on one line (each
- *  roof's end has its own offsets): 5-15 cm apart on the DFY Melissa house,
- *  so neither fell inside the other and both stood. Only the end walls: a
- *  volume stretched sideways too cut the next roof's eave infill and opened
- *  holes under the eave beside the join. */
-const STEP_WALL_REACH = 0.3
-/** How far below the lower roof's slope the higher roof's step wall
- *  carries on down: about a roof's thickness (deck + shingles). */
-const STEP_WALL_TUCK = 0.3
-
-/**
- * Continuation joins with different cross-sections close BOTH roofs' ends
- * with a wall (open ends would leave a hole). Each wall only belongs where
- * its roof stands higher than the other -- the step. The rest of it is
- * inside the house: two gable walls back to back across a room (DFY
- * Melissa 2026-10-18, the hall at the top of the stairs: "a wall that
- * shouldn't be there"). r's END walls are cut by o's body, stretched a
- * little past o's end walls and down to o's storey floor (the room under o
- * is inside too). End walls only (see wallClipVolumes): the slopes and the
- * eave infill keep meeting as before.
- */
-function _continuationWallCut(
-  o: ResolvedSegment,
-  r: ResolvedSegment,
-  levels: Map<string, { elev: number; height: number }>,
-): ClipVolume | null {
-  const lv = o.placement.levelId ? levels.get(o.placement.levelId) : undefined
-  if (!lv) return null
-  // o's end planes are the upright ones facing along its ridge.
-  const along = o.shape.frame.ridgeAlongX ? 0 : 2
-  const local = shellVolumeLocal(o.shape, false).map((h) => {
-    // Slopes (inside = below): lowered by a roof's thickness, so the step
-    // wall left standing on the higher roof reaches down past the lower
-    // roof's edge instead of stopping on its top -- that left a hairline
-    // slot you could see out through along the join.
-    if (h.n[1] < -1e-9) return { ...h, p: [h.p[0], h.p[1] - STEP_WALL_TUCK, h.p[2]] as [number, number, number] }
-    if (Math.abs(h.n[1]) > 1e-9 || Math.abs(h.n[along]) < 0.9) return h
-    return { ...h, p: [h.p[0] - h.n[0] * STEP_WALL_REACH, h.p[1], h.p[2] - h.n[2] * STEP_WALL_REACH] as [number, number, number] }
-  })
-  const vol = _halfSpacesInto(local, o, r).filter((h) => !(Math.abs(h.n[1] - 1) < 1e-9 && Math.hypot(h.n[0], h.n[2]) < 1e-9))
-  vol.push({ n: [0, 1, 0], p: [0, lv.elev - r.placement.baseY, 0], eps: 0.01 })
-  return vol
 }
 
 /**
