@@ -53,6 +53,14 @@ const LEVEL_MATCH_MIN_SPAN_RATIO = 0.6
 /** Ridges this close to parallel, and this close laterally, are one ridge. */
 const PARALLEL_SIN = Math.sin((10 * Math.PI) / 180)
 const CONTINUATION_LATERAL = 0.5
+/** Where a roof over a real wall steps down within this distance, the wall
+ *  is already cut to the lower height: the wall trim's STEP_INSET_M
+ *  (roof-wall-clip-system) plus a margin. */
+const WALL_STEP_REACH = 0.06 + 0.03
+/** How far below a neighbouring roof's slates a meeting roof is cut: less
+ *  than the roof build-up (ROOF_UNDERSIDE_M, 8 cm, in shell-preview), so
+ *  the overlap stays hidden between the neighbour's slates and underside. */
+const ROOF_JOIN_TUCK = 0.05
 /** A real wall within this distance of an edge line counts as standing on it. */
 const WALL_ON_EDGE = 0.5
 /** Continuation seams stay open only if both roofs' eaves agree this well;
@@ -379,7 +387,16 @@ export function resolveRoofContext(nodes: Nodes): RoofContext {
       // r must not be trimmed by it either, or neither roof covers that
       // band (operator 2026-09-27: a slot you could see down through at
       // the north gable).
-      vols.push(..._volumesInto(o, r, _rakeEdgesOver(o, r)))
+      // Cut a little INSIDE o's roof, not on its top (ROOF_JOIN_TUCK below
+      // o's slopes), so what r keeps -- an end wall, a slope at a valley --
+      // overlaps o instead of meeting it edge to edge. Edge to edge left a
+      // thread of sky along the join (DFY Melissa 2026-10-22: upstairs
+      // where the two east sections meet, and the north-west valley).
+      vols.push(
+        ..._volumesInto(o, r, _rakeEdgesOver(o, r)).map((v) =>
+          v.map((h) => (h.n[1] < -1e-9 ? { ...h, eps: Math.min(h.eps, -ROOF_JOIN_TUCK) } : h)),
+        ),
+      )
     }
     // Eaves stop at a facade that carries on up past this roof.
     vols.push(..._abuttingWallCuts(r, walls, levels, [...segs.values()]))
@@ -1390,16 +1407,49 @@ function _realWallSpans(
       const lo = Math.max(0, Math.min(t0, t1))
       const hi = Math.min(1, Math.max(t0, t1))
       if (hi - lo < 0.02) continue
-      // Lowest the wall actually stands along this stretch (on the wall's line).
-      let top = wallTop
-      for (let k = 0; k <= 8; k++) {
-        const t = lo + ((hi - lo) * k) / 8
-        const X = a[0] + d[0] * t * L + inN[0] * inset
-        const Z = a[1] + d[1] * t * L + inN[1] * inset
-        const h = roofOver(X, Z)
-        if (h != null && h < top) top = h
+      const wLo = Math.min(t0, t1)
+      const wHi = Math.max(t0, t1)
+      // How high the wall actually stands at t (on the wall's line): its own
+      // top, or the roof over it -- and where that roof steps DOWN within
+      // WALL_STEP_REACH of t, already the lower height: the wall trim puts a
+      // roof step STEP_INSET_M inside the higher roof (wall clip, see
+      // _sharpenSteps / wallTopProfile), so the wall is cut low a few cm
+      // before the higher roof ends.
+      const reach = WALL_STEP_REACH / L
+      const standsAt = (t: number) => {
+        let h = wallTop
+        for (const tt of [t - reach, t, t + reach]) {
+          if (tt < wLo || tt > wHi) continue
+          const X = a[0] + d[0] * tt * L + inN[0] * inset
+          const Z = a[1] + d[1] * tt * L + inN[1] * inset
+          const v = roofOver(X, Z)
+          if (v != null && v < h) h = v
+        }
+        return h
       }
-      const topLocal = top - p.baseY
+      // One span per stretch of (near) equal height. A single span at the
+      // stretch's LOWEST height let the infill stand in front of the whole
+      // wall; at its HIGHEST (before 2026-10-22: sampled 9 points, so the
+      // few cm where the wall is cut low were missed) it left a slit of sky
+      // between the wall's low top and this roof (Melissa, upstairs, where
+      // the two east roof sections meet: 4 cm x 1.8 m).
+      const nS = Math.max(8, Math.ceil(((hi - lo) * L) / 0.02))
+      const runs: { t0: number; t1: number; top: number }[] = []
+      for (let k = 0; k <= nS; k++) {
+        const t = lo + ((hi - lo) * k) / nS
+        const h = standsAt(t)
+        const last = runs[runs.length - 1]
+        if (last && Math.abs(h - last.top) <= 0.05) {
+          last.t1 = t
+          last.top = Math.min(last.top, h)
+        } else {
+          if (last) last.t1 = t
+          runs.push({ t0: t, t1: t, top: h })
+        }
+      }
+      for (const run of runs) {
+        if (run.t1 - run.t0 < 1e-6) continue
+      const topLocal = run.top - p.baseY
       // Below the roof base: not in the infill zone. Except a wall set in
       // from the edge that tops out AT the base: the infill stands on the
       // edge line, the wall inside it, and the strip between them needs its
@@ -1408,8 +1458,8 @@ function _realWallSpans(
       if (topLocal <= 0.05 && !atBase) continue
       out.push({
         edge: e,
-        t0: lo,
-        t1: hi,
+        t0: run.t0,
+        t1: run.t1,
         top: Math.max(topLocal, 0),
         inset: Math.max(0, inset),
         // Measured at the wall's nearer END, not its middle: a wall a
@@ -1425,6 +1475,7 @@ function _realWallSpans(
             (w.thickness ?? 0.15) / 2,
         ),
       })
+      }
     }
   }
   return out

@@ -25,7 +25,13 @@ function worldTris(ctx) {
   return out
 }
 
-/** Triangles (by centroid) buried more than 3 cm inside ANOTHER roof. */
+/** Meeting roofs are cut this far below each other's slates on purpose
+ *  (roof-scene ROOF_JOIN_TUCK): that overlap sits inside the neighbour's
+ *  build-up, between its slates and underside, and is not "buried". */
+const JOIN_TUCK = 0.05
+
+/** Triangles (by centroid) buried more than 3 cm inside ANOTHER roof,
+ *  below its build-up (JOIN_TUCK, measured square to its slope). */
 function buried(ctx, tris) {
   let n = 0
   for (const [a, b, c, id] of tris) {
@@ -37,9 +43,14 @@ function buried(ctx, tris) {
       const u = f.ridgeAlongX ? x : z, v = f.ridgeAlongX ? z : x
       const M = 0.03
       if (u < f.uMin + M || u > f.uMax - M || v < f.vMin + M || v > f.vMax - M) continue
-      const h = shellHeightAtLocal({ ...o.shape, dormers: [] }, x, z)
+      const sh = { ...o.shape, dormers: [] }
+      const h = shellHeightAtLocal(sh, x, z)
       if (h == null) continue
-      if (m[1] < pl.baseY + h - M && m[1] > pl.baseY + (o.shape.infillFloor ?? 0) + M) { n++; break }
+      // vertical depth of the tuck: JOIN_TUCK square to the slope here
+      const gx = ((shellHeightAtLocal(sh, x + 0.05, z) ?? h) - (shellHeightAtLocal(sh, x - 0.05, z) ?? h)) / 0.1
+      const gz = ((shellHeightAtLocal(sh, x, z + 0.05) ?? h) - (shellHeightAtLocal(sh, x, z - 0.05) ?? h)) / 0.1
+      const tuck = JOIN_TUCK * Math.hypot(1, gx, gz)
+      if (m[1] < pl.baseY + h - M - tuck && m[1] > pl.baseY + (o.shape.infillFloor ?? 0) + M) { n++; break }
     }
   }
   return n
@@ -103,7 +114,7 @@ function inOverhang(ctx, tris) {
       const [x, z] = local(pl, m[0], m[2])
       const q = [x, m[1] - pl.baseY, z]
       const inside = shellVolumeLocal(o.shape, true).every((h) =>
-        h.n[0] * (q[0] - h.p[0]) + h.n[1] * (q[1] - h.p[1]) + h.n[2] * (q[2] - h.p[2]) > 0.02)
+        h.n[0] * (q[0] - h.p[0]) + h.n[1] * (q[1] - h.p[1]) + h.n[2] * (q[2] - h.p[2]) > (h.n[1] < -1e-9 ? 0.02 + JOIN_TUCK : 0.02))
       if (inside) { n++; hits[`${id} in ${oid}`] = (hits[`${id} in ${oid}`] ?? 0) + 1; break }
     }
   }
