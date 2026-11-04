@@ -3706,6 +3706,10 @@ export function FloorplanPanel() {
   const [arcOpeningBlocked, setArcOpeningBlocked] = useState(false)
   const [calibrationInput, setCalibrationInput] = useState('')
   const [calibrationUnit, setCalibrationUnit] = useState<'m' | 'ft'>('m')
+  // Off: doors and windows keep their width. A hand-placed window is already
+  // real-size, so calibrating shouldn't shrink it; on a detected plan the width
+  // carries the scale error, so the user can choose to resize it (owner 2026-11-05).
+  const [calibrationScaleOpenings, setCalibrationScaleOpenings] = useState(false)
   const [draftStart, setDraftStart] = useState<WallPlanPoint | null>(null)
   const [draftEnd, setDraftEnd] = useState<WallPlanPoint | null>(null)
   // Arc-wall draft state. Three-step machine:
@@ -3804,6 +3808,7 @@ export function FloorplanPanel() {
         setCalibrationP1(null)
         setCalibrationP2(null)
         setCalibrationInput('')
+        setCalibrationScaleOpenings(false)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -3833,7 +3838,7 @@ export function FloorplanPanel() {
   // below.
   //
   // Single updateNodes call so zundo records it as ONE undo step.
-  const scalePlanBy = useCallback((k: number) => {
+  const scalePlanBy = useCallback((k: number, scaleOpenings: boolean) => {
     if (!Number.isFinite(k) || k <= 0 || Math.abs(k - 1) < 1e-9) return
     const nodes = useScene.getState().nodes as Record<string, AnyNode>
     const updates: { id: AnyNodeId; data: Partial<AnyNode> }[] = []
@@ -3858,13 +3863,28 @@ export function FloorplanPanel() {
           // along a wall that just grew to 3.36 m has to move with it, or it
           // drifts toward the wall's start. [1] and [2] are vertical and
           // thickness-wise, neither of which this correction touches.
-          updates.push({
-            id: n.id,
-            data: {
-              position: [n.position[0] * k, n.position[1], n.position[2]],
-              width: (n.width ?? 0) * k,
-            } as Partial<AnyNode>,
-          })
+          {
+            let along = n.position[0] * k
+            let width = n.width ?? 0
+            if (scaleOpenings) {
+              width *= k
+            } else {
+              // Kept at its size, it must still fit the wall that just shrank.
+              const wall = nodes[n.parentId ?? n.wallId] as any
+              if (wall?.type === 'wall' && !wall.bulge) {
+                const wallLen = Math.hypot(wall.end[0] - wall.start[0], wall.end[1] - wall.start[1]) * k
+                width = Math.min(width, wallLen)
+                along = Math.min(Math.max(along, width / 2), wallLen - width / 2)
+              }
+            }
+            updates.push({
+              id: n.id,
+              data: {
+                position: [along, n.position[1], n.position[2]],
+                width,
+              } as Partial<AnyNode>,
+            })
+          }
           break
         case 'zone':
           updates.push({
@@ -3960,7 +3980,7 @@ export function FloorplanPanel() {
       if (!guide) return
       updateNode(guideId as AnyNodeId, { scale: (guide.scale ?? 1) * ratio })
     } else {
-      scalePlanBy(ratio)
+      scalePlanBy(ratio, calibrationScaleOpenings)
     }
 
     // Exit calibration.
@@ -3968,6 +3988,7 @@ export function FloorplanPanel() {
     setCalibrationP1(null)
     setCalibrationP2(null)
     setCalibrationInput('')
+    setCalibrationScaleOpenings(false)
 
     // 2026-07-28: after calibration the world size just changed, often a
     // lot (a guide goes 5m default -> 15m real; a plan can move 12%).
@@ -3983,6 +4004,7 @@ export function FloorplanPanel() {
     calibrationP2,
     calibrationInput,
     calibrationUnit,
+    calibrationScaleOpenings,
     updateNode,
     scalePlanBy,
   ])
@@ -9825,6 +9847,21 @@ export function FloorplanPanel() {
                 ft
               </button>
             </div>
+            {(() => {
+              const all = Object.values(useScene.getState().nodes) as any[]
+              if (!all.some((n) => n?.type === 'wall')) return null
+              if (!all.some((n) => n?.type === 'door' || n?.type === 'window')) return null
+              return (
+                <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap text-[12px] text-ink/70">
+                  <input
+                    type="checkbox"
+                    checked={calibrationScaleOpenings}
+                    onChange={(e) => setCalibrationScaleOpenings(e.target.checked)}
+                  />
+                  Resize doors and windows too
+                </label>
+              )
+            })()}
             <button
               type="button"
               onClick={applyCalibration}
