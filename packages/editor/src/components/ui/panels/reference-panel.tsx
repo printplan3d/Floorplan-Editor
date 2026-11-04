@@ -37,6 +37,13 @@ export function ReferencePanel() {
     setSelectedReferenceId(null)
   }, [setSelectedReferenceId])
 
+  // Ritn3D 2026-10-02: there was no way to remove a trace from here.
+  const handleDelete = useCallback(() => {
+    if (!selectedReferenceId) return
+    setSelectedReferenceId(null)
+    useScene.getState().deleteNode(selectedReferenceId as AnyNode['id'])
+  }, [selectedReferenceId, setSelectedReferenceId])
+
   if (!node || node.type !== 'guide') return null
 
   // Ritn3D cleanup 2026-06-10: scans removed. `isScan` always false now —
@@ -211,6 +218,16 @@ export function ReferencePanel() {
           unit="%"
           value={node.opacity}
         />
+      </PanelSection>
+
+      <PanelSection title="Remove">
+        <button
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-red-500/60 px-3 py-2 font-medium text-[12.5px] text-red-500 transition-colors hover:bg-red-500/10"
+          onClick={handleDelete}
+          type="button"
+        >
+          Delete trace
+        </button>
       </PanelSection>
     </PanelWrapper>
   )

@@ -169,8 +169,16 @@ export const useKeyboard = () => {
 
         const sel = useViewer.getState().selection
         const selectedNodeIds = sel.selectedIds as AnyNodeId[]
+        // A trace image selected on the plan lives in its own slot
+        // (selectedReferenceId), not selectedIds, so Delete used to no-op on
+        // it (operator 2026-10-02: "no way to remove a trace plan").
+        const refId = useEditor.getState().selectedReferenceId
 
-        if (selectedNodeIds.length > 0) {
+        if (refId && selectedNodeIds.length === 0) {
+          sfxEmitter.emit('sfx:structure-delete')
+          useEditor.getState().setSelectedReferenceId(null)
+          useScene.getState().deleteNode(refId as AnyNodeId)
+        } else if (selectedNodeIds.length > 0) {
           // Play appropriate SFX based on what's being deleted
           if (selectedNodeIds.length === 1) {
             const node = useScene.getState().nodes[selectedNodeIds[0]!]
