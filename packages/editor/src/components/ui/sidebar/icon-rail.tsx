@@ -303,6 +303,13 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
             (n: any) => n.type === 'guide' && n.parentId === activeLevelId,
           ) as any
           if (!guide) {
+            // A drawn plan has no trace, and its walls are what get scaled, so
+            // start on its longest wall. With no walls either, there is nothing
+            // to measure yet.
+            if (Object.values(state.nodes).some((n: any) => n.type === 'wall')) {
+              emitter.emit('floorplan:calibrate-scale' as any, { seedLongestWall: true })
+              return
+            }
             alert(
               'No trace image to calibrate. Click the Trace button and pick a photo first, then calibrate its scale.',
             )
