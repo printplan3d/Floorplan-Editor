@@ -46,6 +46,8 @@ export interface CanonicalWall {
   type?: string
   bulge?: number
 }
+const DOOR_STYLES_KNOWN = new Set(['pedestrian', 'garage', 'sliding', 'glass', 'patio', 'double'])
+
 export interface CanonicalDoor {
   id: string
   wall_id: string
@@ -53,6 +55,13 @@ export interface CanonicalDoor {
   width: number
   height: number
   door_type?: string
+  /** The editor's FULL style, because door_type cannot carry it. door_type is
+   *  the shared mobile vocabulary (single / double / patio / glass), and
+   *  'garage' and 'sliding' both collapse into "single" and come back as
+   *  "pedestrian", so a garage door reverted to a plain wooden slab the first
+   *  time its plan was reopened. Kept alongside door_type so iOS and Flutter
+   *  keep reading what they know. Absent on older plans. (editor-dev 914ebcf) */
+  door_style?: string
   swing_direction?: string
   swing_side?: string
 }
@@ -175,6 +184,7 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
             width: c.width ?? 0.9,
             height: c.height ?? 2.1,
             door_type: styleToDoorType(c.style),
+            door_style: c.style || 'pedestrian',
             swing_direction: c.hingesSide === 'left' ? 'left' : 'right',
             swing_side: c.swingDirection === 'outward' ? 'outside' : 'inside',
           })
@@ -288,7 +298,9 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
       position: [(d.position_along_wall ?? 0.5) * len, height / 2, 0],
       width: d.width ?? 0.9,
       height,
-      style: doorTypeToStyle(d.door_type),
+      // The preserved style wins; door_type is the fallback for older plans.
+      // An unknown value would make DoorNode.parse throw and sink the whole load.
+      style: (DOOR_STYLES_KNOWN.has(d.door_style ?? '') ? d.door_style : doorTypeToStyle(d.door_type)) as any,
       hingesSide: d.swing_direction === 'left' ? 'left' : 'right',
       swingDirection: d.swing_side === 'outside' ? 'outward' : 'inward',
     })

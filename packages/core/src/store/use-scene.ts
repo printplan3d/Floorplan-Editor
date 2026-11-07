@@ -18,6 +18,26 @@ function migrateNodes(nodes: Record<string, any>): Record<string, AnyNode> {
     if (node.type === 'item' && !('scale' in node)) {
       patchedNodes[id] = { ...node, scale: [1, 1, 1] }
     }
+    // 1b. Doors placed from the 2D plan sat at y = 0, but a door's position is
+    // its CENTRE (y = height / 2), so it was drawn half sunk into the floor
+    // until the plan was next loaded from the cloud. (editor-dev 4ea8398)
+    if (node.type === 'door' && Array.isArray(node.position)) {
+      const h = typeof node.height === 'number' ? node.height : 2.1
+      if (Math.abs((node.position[1] ?? 0) - h / 2) > 1e-6) {
+        patchedNodes[id] = { ...node, position: [node.position[0] ?? 0, h / 2, node.position[2] ?? 0] }
+      }
+    }
+    // 1c. Doors/windows placed from the 2D plan carried the WALL's angle as
+    // their own rotation. They live in the wall's frame, so it was applied
+    // twice: off the wall on any wall not along x, cut-outs slicing across
+    // it. An opening's rotation is always 0 in the wall's frame.
+    // (editor-dev 6684623)
+    if ((node.type === 'door' || node.type === 'window') && Array.isArray(node.rotation)) {
+      const cur = patchedNodes[id]
+      if (cur.rotation.some((r: number) => Math.abs(r ?? 0) > 1e-9)) {
+        patchedNodes[id] = { ...cur, rotation: [0, 0, 0] }
+      }
+    }
     // 2. Old roof to new roof + segment migration
     if (node.type === 'roof' && !('children' in node)) {
       const oldRoof = node

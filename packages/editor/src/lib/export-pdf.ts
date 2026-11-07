@@ -412,6 +412,21 @@ export function cleanSvgForExport(svg: SVGSVGElement): SVGSVGElement {
     el.removeAttribute('data-element')
   })
 
+  // Door symbols — leaf, arc, track, hatch, jambs. Tagged separately from
+  // the door OPENING because these are strokes, and the generic
+  // dimension-line rule below would otherwise flatten them to faint grey
+  // (and delete the 2 px jamb ticks). They are non-scaling strokes, so their
+  // widths are PIXELS; only the colour needs forcing for paper.
+  // (editor-dev 1d5cddb)
+  clone.querySelectorAll('[data-element="door-symbol"] *').forEach(el => {
+    el.setAttribute('stroke', '#333333')
+    el.setAttribute('data-keep', '1')
+  })
+  clone.querySelectorAll('[data-element="door-symbol"]').forEach(el => {
+    el.removeAttribute('data-element')
+  })
+  // data-keep is stripped as the dimension rule passes over each line.
+
   // Door swing arcs — thin grey
   clone.querySelectorAll('path').forEach(path => {
     const d = path.getAttribute('d') || ''
@@ -423,6 +438,8 @@ export function cleanSvgForExport(svg: SVGSVGElement): SVGSVGElement {
 
   // Dimension lines — thin grey, remove outlines
   clone.querySelectorAll('line[vector-effect="non-scaling-stroke"]').forEach(line => {
+    // Skip anything already styled above (door symbols).
+    if (line.getAttribute('data-keep')) { line.removeAttribute('data-keep'); return }
     const sw = parseFloat(line.getAttribute('stroke-width') || '0')
     if (sw >= 2) { line.remove() }
     else { line.setAttribute('stroke', '#aaaaaa'); line.setAttribute('stroke-width', '0.5') }

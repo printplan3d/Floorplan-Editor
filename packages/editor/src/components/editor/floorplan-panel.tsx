@@ -2298,6 +2298,7 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   slabPolygons,
   wallPolygons,
   unit,
+  worldUnitsPerPixel,
 }: {
   canSelectSlabs: boolean
   canSelectGeometry: boolean
@@ -2317,7 +2318,25 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
   slabPolygons: SlabPolygonEntry[]
   wallPolygons: WallPolygonEntry[]
   unit: 'metric' | 'imperial'
+  /** World units (metres) per screen pixel at the current zoom. Door symbols
+   *  need it to keep their across-wall offsets legible -- see doorInflate. */
+  worldUnitsPerPixel: number
 }) {
+  /* Flutter's door offsets are metres scaled by its camera. With a whole
+     storey on screen a 0.03 m panel gap falls under one pixel while strokes
+     stay 1.5 px, and patio and sliding collapse into a bare line. So inflate a
+     symbol's across-wall offsets, one factor per symbol, only as far as its
+     smallest feature needs to clear DOOR_MIN_FEATURE_PX. The factor is 1
+     whenever the zoom already shows the feature, and capped so a zoomed-out
+     plan cannot grow a door into the room. (editor-dev a84d7b3) */
+  const DOOR_MIN_FEATURE_PX = 4
+  const DOOR_MAX_INFLATE = 3
+  const doorInflate = (featureMeters: number) => {
+    const px = featureMeters / Math.max(worldUnitsPerPixel, 1e-9)
+    if (!Number.isFinite(px) || px <= 0) return 1
+    return Math.min(DOOR_MAX_INFLATE, Math.max(1, DOOR_MIN_FEATURE_PX / px))
+  }
+
   let minX = Number.POSITIVE_INFINITY,
     maxX = Number.NEGATIVE_INFINITY,
     minZ = Number.POSITIVE_INFINITY,
@@ -2679,6 +2698,10 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
           const px = -ny
           const py = nx
 
+          // p1->p2 runs along the wall (length = door width), so p2->p3 is the
+          // across-wall side: the wall thickness, in SVG units.
+          const thickness = Math.hypot(svgP3.x - svgP2.x, svgP3.y - svgP2.y)
+
           const hingesSide = opening.hingesSide ?? 'left'
           const swingDirection = opening.swingDirection ?? 'inward'
           const width = opening.width
@@ -2771,103 +2794,293 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 }}
                 vectorEffect="non-scaling-stroke"
               />
-              {/* Ritn3D 2026-07-19: differentiate door style on the 2D
-                  plan so users can see at a glance what they placed.
-                    - patio: two parallel sliding panels, NO swing arc,
-                      slide arrows along the wall.
-                    - glass: current leaf + swing arc but with translucent
-                      blue tint on the leaf polygon (matches 3D glass).
-                    - pedestrian / other: default leaf + swing arc. */}
               {(() => {
+                /* Door symbols, ported from the Flutter editor's painter on
+                   MASTER (lib/features/editor/ui/editor_painter.dart), via
+                   editor-dev (9d62133, 704f00a, 1d5cddb, aa92dbb, a84d7b3,
+                   0363336). Before this only patio and glass had a plan
+                   symbol, so picking Double, Sliding or Garage changed the 3D
+                   and left the plan identical.
+
+                     single/pedestrian  leaf + swing arc
+                     double             two half-width leaves, hinged at
+                                        OPPOSITE ends, tips meeting mid-opening
+                     glass              single swing plus five hatch strokes
+                     patio              two half-length panels at +/-0.03 m
+                                        plus a short arrow
+                     sliding            ONE panel on a track (0.06 m), panel at
+                                        0.12 m, arrow beyond it. No swing arc.
+                     garage             heavy panel on the opening line with
+                                        section joints ticked across
+
+                   Stroke widths are SCREEN PIXELS (non-scaling-stroke), so
+                   they are Flutter's 1.5 / 1 / 2, not metres. */
                 const doorStyle = (opening as any).style ?? 'pedestrian'
                 const strokeColor = isSelected ? palette.selectedStroke : palette.doorStroke
-                if (doorStyle === 'patio') {
-                  // Two overlapping panels along the wall, offset in
-                  // perpendicular direction by ~30% of wall thickness.
-                  // Panel width = half the door width, positioned so each
-                  // panel occupies its half of the doorway.
-                  const halfW = width / 2
-                  const perpOffset = 0.06 // meters (~6 cm visual offset)
-                  const panelPoints = (
-                    startX: number, startY: number,
-                    lenAlong: number, sideMul: number,
-                  ) => {
-                    const ax = startX
-                    const ay = startY
-                    const bx = ax + nx * lenAlong
-                    const by = ay + ny * lenAlong
-                    const off = perpOffset * sideMul
-                    const wallThk = 0.15 // for visual width of panel
-                    const halfT = wallThk / 3
-                    return [
-                      [ax + px * (off - halfT), ay + py * (off - halfT)],
-                      [bx + px * (off - halfT), by + py * (off - halfT)],
-                      [bx + px * (off + halfT), by + py * (off + halfT)],
-                      [ax + px * (off + halfT), ay + py * (off + halfT)],
-                    ].map((p) => p.join(',')).join(' ')
-                  }
-                  // Left panel: from center-halfW to center, back-offset
-                  const leftPts = panelPoints(cx - nx * halfW, cy - ny * halfW, halfW, -1)
-                  // Right panel: from center to center+halfW, forward-offset
-                  const rightPts = panelPoints(cx, cy, halfW, +1)
+                const sgn = swingDirection === 'inward' ? 1 : -1
+                const half = width / 2
+                // Ends of the opening.
+                const aX = cx - nx * half
+                const aY = cy - ny * half
+                const bX = cx + nx * half
+                const bY = cy + ny * half
+
+                /* Jamb ticks, drawn for EVERY door type as Flutter does. Patio
+                   and sliding have no swing arc, so without these they read as
+                   a bare line. Length is wall.thickness / 2 + 0.05, both sides,
+                   in wall ink. */
+                const tick = thickness / 2 + 0.05
+                const jambColor = isSelected ? palette.selectedStroke : palette.wallStroke
+                const jambs = (
+                  <>
+                    {(
+                      [
+                        [aX, aY],
+                        [bX, bY],
+                      ] as const
+                    ).map(([jx, jy], i) => (
+                      <line
+                        key={`jamb${i}`}
+                        stroke={jambColor}
+                        strokeWidth={2}
+                        vectorEffect="non-scaling-stroke"
+                        x1={jx - px * tick}
+                        y1={jy - py * tick}
+                        x2={jx + px * tick}
+                        y2={jy + py * tick}
+                      />
+                    ))}
+                  </>
+                )
+
+                if (doorStyle === 'double') {
+                  const aOx = aX + px * half * sgn
+                  const aOy = aY + py * half * sgn
+                  const bOx = bX + px * half * sgn
+                  const bOy = bY + py * half * sgn
                   return (
-                    <>
-                      <polygon
-                        data-element="door"
-                        fill="rgba(140, 190, 220, 0.5)"
-                        points={leftPts}
-                        stroke={strokeColor}
-                        strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
-                      />
-                      <polygon
-                        data-element="door"
-                        fill="rgba(140, 190, 220, 0.5)"
-                        points={rightPts}
-                        stroke={strokeColor}
-                        strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
-                      />
-                      {/* Slide-arrow hint under the panels */}
+                    <g data-element="door-symbol">
+                      {jambs}
                       <line
                         stroke={strokeColor}
-                        strokeOpacity={0.45}
-                        strokeWidth={FLOORPLAN_OPENING_DASHED_STROKE_WIDTH}
-                        strokeDasharray="0.05 0.05"
-                        x1={cx - nx * halfW * 0.9}
-                        y1={cy - ny * halfW * 0.9}
-                        x2={cx + nx * halfW * 0.9}
-                        y2={cy + ny * halfW * 0.9}
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                        x1={aX}
+                        x2={aOx}
+                        y1={aY}
+                        y2={aOy}
                       />
-                    </>
+                      <path
+                        d={`M ${aOx} ${aOy} A ${half} ${half} 0 0 ${sgn > 0 ? 0 : 1} ${cx} ${cy}`}
+                        fill="none"
+                        stroke={strokeColor}
+                        strokeDasharray="4 3"
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        stroke={strokeColor}
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                        x1={bX}
+                        x2={bOx}
+                        y1={bY}
+                        y2={bOy}
+                      />
+                      <path
+                        d={`M ${bOx} ${bOy} A ${half} ${half} 0 0 ${sgn > 0 ? 1 : 0} ${cx} ${cy}`}
+                        fill="none"
+                        stroke={strokeColor}
+                        strokeDasharray="4 3"
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
                   )
                 }
-                // pedestrian / glass share the same leaf + swing arc.
-                // Glass gets a blue-tinted fill so users can distinguish.
-                const leafFill = doorStyle === 'glass'
-                  ? 'rgba(140, 190, 220, 0.55)'
-                  : palette.doorFill
+
+                if (doorStyle === 'patio') {
+                  // The 0.03 m stagger IS the symbol, so keep it legible.
+                  const off = 0.03 * doorInflate(0.03)
+                  return (
+                    <g data-element="door-symbol">
+                      {jambs}
+                      <line
+                        stroke={strokeColor}
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                        x1={aX + px * off}
+                        y1={aY + py * off}
+                        x2={cx + px * off}
+                        y2={cy + py * off}
+                      />
+                      <line
+                        stroke={strokeColor}
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                        x1={cx - px * off}
+                        y1={cy - py * off}
+                        x2={bX - px * off}
+                        y2={bY - py * off}
+                      />
+                      <line
+                        stroke={strokeColor}
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                        x1={cx}
+                        y1={cy}
+                        x2={cx + nx * width * 0.1}
+                        y2={cy + ny * width * 0.1}
+                      />
+                    </g>
+                  )
+                }
+
+                if (doorStyle === 'garage') {
+                  // Sectional overhead door: no swing, no track. The panel
+                  // sits on the opening line with its section joints ticked.
+                  const k = doorInflate(0.05)
+                  const panelOff = 0.05 * k * sgn
+                  const sectionTick = 0.07
+                  const SECTIONS = 4
+                  const ticks = []
+                  for (let s = 1; s < SECTIONS; s++) {
+                    const t = s / SECTIONS
+                    const jx = aX + (bX - aX) * t + px * panelOff
+                    const jy = aY + (bY - aY) * t + py * panelOff
+                    ticks.push(
+                      <line
+                        key={s}
+                        opacity={0.55}
+                        stroke={strokeColor}
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                        x1={jx - px * sectionTick}
+                        y1={jy - py * sectionTick}
+                        x2={jx + px * sectionTick}
+                        y2={jy + py * sectionTick}
+                      />,
+                    )
+                  }
+                  return (
+                    <g data-element="door-symbol">
+                      {jambs}
+                      <line
+                        stroke={strokeColor}
+                        strokeWidth={2}
+                        vectorEffect="non-scaling-stroke"
+                        x1={aX + px * panelOff}
+                        y1={aY + py * panelOff}
+                        x2={bX + px * panelOff}
+                        y2={bY + py * panelOff}
+                      />
+                      {ticks}
+                    </g>
+                  )
+                }
+
+                if (doorStyle === 'sliding') {
+                  // Panel reads against its track, so their 0.06 m gap is the
+                  // feature. The arrow keeps a fixed 0.10 m clearance.
+                  const k = doorInflate(0.06)
+                  const trackOff = 0.06 * k * sgn
+                  const panelOff = 0.12 * k * sgn
+                  const arrowOff = panelOff + 0.1 * sgn
+                  const headLen = 0.14
+                  const tipX = cx + nx * headLen + px * arrowOff
+                  const tipY = cy + ny * headLen + py * arrowOff
+                  const baseX = cx - nx * headLen + px * arrowOff
+                  const baseY = cy - ny * headLen + py * arrowOff
+                  return (
+                    <g data-element="door-symbol">
+                      {jambs}
+                      <line
+                        opacity={0.45}
+                        stroke={strokeColor}
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                        x1={aX + px * trackOff}
+                        y1={aY + py * trackOff}
+                        x2={bX + px * trackOff}
+                        y2={bY + py * trackOff}
+                      />
+                      <line
+                        stroke={strokeColor}
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                        x1={aX + px * panelOff}
+                        y1={aY + py * panelOff}
+                        x2={bX + px * panelOff}
+                        y2={bY + py * panelOff}
+                      />
+                      <line
+                        opacity={0.45}
+                        stroke={strokeColor}
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                        x1={baseX}
+                        y1={baseY}
+                        x2={tipX}
+                        y2={tipY}
+                      />
+                      {[1, -1].map((s) => (
+                        <line
+                          key={s}
+                          opacity={0.45}
+                          stroke={strokeColor}
+                          strokeWidth={1}
+                          vectorEffect="non-scaling-stroke"
+                          x1={tipX}
+                          y1={tipY}
+                          x2={cx + nx * (headLen - 0.06) + px * (arrowOff + s * 0.05 * k * sgn)}
+                          y2={cy + ny * (headLen - 0.06) + py * (arrowOff + s * 0.05 * k * sgn)}
+                        />
+                      ))}
+                    </g>
+                  )
+                }
+
+                // single / pedestrian / glass: leaf plus swing arc.
                 return (
-                  <>
-                    <polygon
-                      data-element="door"
-                      fill={leafFill}
-                      points={points}
-                      stroke={strokeColor}
-                      strokeOpacity={1}
-                      strokeWidth={FLOORPLAN_OPENING_STROKE_WIDTH}
-                    />
+                  <g data-element="door-symbol">
+                    {jambs}
                     <line
                       stroke={strokeColor}
-                      strokeWidth={FLOORPLAN_OPENING_DETAIL_STROKE_WIDTH}
-                      x1={hx} x2={ox} y1={hy} y2={oy}
+                      strokeWidth={1.5}
+                      vectorEffect="non-scaling-stroke"
+                      x1={hx}
+                      x2={ox}
+                      y1={hy}
+                      y2={oy}
                     />
                     <path
                       d={`M ${ox} ${oy} A ${width} ${width} 0 0 ${sweepFlag} ${ox2} ${oy2}`}
                       fill="none"
                       stroke={strokeColor}
-                      strokeDasharray="0.1 0.1"
-                      strokeWidth={FLOORPLAN_OPENING_DASHED_STROKE_WIDTH}
+                      strokeDasharray="4 3"
+                      strokeWidth={1}
+                      vectorEffect="non-scaling-stroke"
                     />
-                  </>
+                    {doorStyle === 'glass' &&
+                      [1, 2, 3, 4, 5].map((i) => {
+                        const t = i / 6
+                        const alongX = aX + nx * width * t
+                        const alongY = aY + ny * width * t
+                        return (
+                          <line
+                            key={i}
+                            opacity={0.6}
+                            stroke={strokeColor}
+                            strokeWidth={1.2}
+                            vectorEffect="non-scaling-stroke"
+                            x1={alongX + px * width * 0.15 * sgn}
+                            y1={alongY + py * width * 0.15 * sgn}
+                            x2={alongX + px * width * 0.55 * sgn}
+                            y2={alongY + py * width * 0.55 * sgn}
+                          />
+                        )
+                      })}
+                  </g>
                 )
               })()}
             </g>
@@ -6781,14 +6994,14 @@ export function FloorplanPanel() {
             return parentWall?.parentId === levelId
           }).length
           const name = `${isDoor ? 'Door' : 'Window'} ${existing + 1}`
-          const wallDx = wall.end[0] - wall.start[0]
-          const wallDy = wall.end[1] - wall.start[1]
-          const wallAngle = Math.atan2(wallDy, wallDx)
+          // Wall-local: an opening is a child of the wall, which already
+          // carries the wall's angle. Giving it the angle again turned it off
+          // the wall on any wall not along x (editor-dev 6684623).
           if (isDoor) {
             const node = DoorNode.parse({
               name,
               position: [distance, 0, 0],
-              rotation: [0, wallAngle, 0],
+              rotation: [0, 0, 0],
               side: 'front',
               wallId: wall.id,
               parentId: wall.id,
@@ -6797,13 +7010,16 @@ export function FloorplanPanel() {
               // driven by the same constant. See NEW_OPENING_WIDTH_M.
               width: NEW_OPENING_WIDTH_M.door,
             })
+            // A door's position is its centre: y = height / 2, on the floor.
+            // 0 drew it half sunk into the floor (editor-dev 4ea8398).
+            node.position = [distance, node.height / 2, 0]
             state.createNode(node, wall.id as AnyNodeId)
             useViewer.getState().setSelection({ selectedIds: [node.id] })
           } else {
             const node = WindowNode.parse({
               name,
               position: [distance, floorplanOpeningLocalY, 0],
-              rotation: [0, wallAngle, 0],
+              rotation: [0, 0, 0],
               side: 'front',
               wallId: wall.id,
               parentId: wall.id,
@@ -9093,6 +9309,7 @@ export function FloorplanPanel() {
               slabPolygons={displaySlabPolygons}
               unit={unit}
               wallPolygons={displayWallPolygons}
+              worldUnitsPerPixel={floorplanWorldUnitsPerPixel}
             />
 
             <FloorplanPolygonHandleLayer
