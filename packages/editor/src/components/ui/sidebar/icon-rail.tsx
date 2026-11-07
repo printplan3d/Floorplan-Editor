@@ -155,15 +155,17 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
     e.target.value = ''
     if (!file) return
     const isImage = file.type.startsWith('image/')
-    if (!isImage) {
-      // Fall back to opening the site panel for PDF uploads -- that
-      // path already handles pdf.js rendering.
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    if (!isImage && !isPdf) {
+      // Anything else goes to the Site panel, where the user can read a
+      // proper "invalid file" error next to the upload button.
       onPanelChange('site')
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result as string
+
+    // Commit a dataUrl (an image, or a PDF page rendered to a PNG) as a
+    // GuideNode. Same shape the Site panel upload produces.
+    const commitGuide = (dataUrl: string) => {
       const state = useScene.getState() as any
       const nodes = state.nodes as Record<string, any>
       const level = Object.values(nodes).find((n: any) => n.type === 'level')
@@ -189,6 +191,30 @@ export function IconRail({ activePanel, onPanelChange, appMenuButton, className 
         emitter.emit('floorplan:calibrate-scale' as any, { guideId: guide.id })
       }, 200)
     }
+
+    if (isPdf) {
+      /* A PDF used to just open the Site panel, which looked like "nothing
+         happens". Render page 1 to a PNG the way the Site panel already does
+         and commit it from here. (editor-dev c378b7e) */
+      ;(async () => {
+        try {
+          const { pdfFileToImageDataUrl } = await import('../../../lib/pdf-to-image')
+          const { dataUrl, totalPages } = await pdfFileToImageDataUrl(file)
+          if (totalPages > 1) {
+            console.info(`[ritn3d] PDF has ${totalPages} pages; rendered page 1 only.`)
+          }
+          commitGuide(dataUrl)
+        } catch (err) {
+          console.warn('[ritn3d] PDF trace upload failed', err)
+          // Fall back to the Site panel so the user sees an inline error.
+          onPanelChange('site')
+        }
+      })()
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => commitGuide(reader.result as string)
     reader.readAsDataURL(file)
   }
 
