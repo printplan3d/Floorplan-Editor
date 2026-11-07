@@ -406,7 +406,13 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
       roomType,
       // What the detector matches on, so the first pass after a load keeps
       // the names the user typed instead of treating every room as new.
-      metadata: { autoCreated: true, wallIds: r.wall_ids ?? [] },
+      // Walls get fresh ids on load (WallNode.parse mints them), so map the
+      // saved wall ids onto this load's walls. Without it nothing matches and
+      // every room is renamed on each open; ids we cannot map pass through.
+      metadata: {
+        autoCreated: true,
+        wallIds: (r.wall_ids ?? []).map((id) => wallIdMap.get(id)?.id ?? id),
+      },
     })
     nodes[zone.id] = zone
     level0.children.push(zone.id)

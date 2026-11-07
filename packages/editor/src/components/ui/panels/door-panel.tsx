@@ -208,7 +208,7 @@ export function DoorPanel() {
               <button
                 className={`rounded-md border px-2 py-2 text-[11px] font-medium transition-colors ${
                   isActive
-                    ? "border-amber-500/50 bg-amber-500/20 text-amber-100"
+                    ? "border-amber-500/70 bg-amber-500/20 text-foreground"
                     : "border-border/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
                 }`}
                 key={opt.value}
