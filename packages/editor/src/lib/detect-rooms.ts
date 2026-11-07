@@ -33,6 +33,11 @@ export interface DetectedRoom {
   signature: string
   polygon: [number, number][]
   areaM2: number
+  /** The walls that bound this room. This is how a room keeps its identity
+   *  across an edit and a save/load: matching on the polygon alone cannot,
+   *  since moving one wall changes every signature. iOS and Flutter match on
+   *  wall-id overlap for the same reason. (editor-dev fa7e452) */
+  wallIds: string[]
 }
 
 interface Node {
@@ -205,10 +210,19 @@ export function detectClosedRooms(walls: WallSegment[]): DetectedRoom[] {
     if (signedA <= 0) continue
     if (signedA < MIN_ROOM_AREA) continue
 
+    // A T-junction split gives one wall several edges, so dedupe: this is
+    // compared as a SET.
+    const wallIds: string[] = []
+    for (const eIdx of faceEdges) {
+      const wid = edges[eIdx]!.wallId
+      if (!wallIds.includes(wid)) wallIds.push(wid)
+    }
+
     rooms.push({
       signature: polygonSignature(poly),
       polygon: poly,
       areaM2: signedA,
+      wallIds,
     })
   }
 

@@ -212,7 +212,12 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
         id: n.id,
         label: n.name || 'Room',
         type,
-        wall_ids: [],
+        /* The walls bounding this room: the only thing that lets a room keep
+           its name across a save/load. Hard-coded [] made the detector match
+           on a metadata flag the wire does not carry, growing one duplicate
+           per room per open; and iOS/Flutter, which inherit labels by wall-id
+           overlap, got every webapp room unlabelled. (editor-dev fa7e452) */
+        wall_ids: ((n.metadata as Record<string, unknown> | undefined)?.wallIds as string[]) ?? [],
         area: 0,
         polygon: (n.polygon || []).map((p: number[]) => rot180([p[0], p[1]])),
       })
@@ -335,9 +340,16 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
     const roomType = WEB_ROOM_TYPES.has(r.type ?? '') ? r.type : 'other'
     const zone: any = ZoneNode.parse({
       parentId: level0.id,
+      /* Keep the id when it is one of ours. ZoneNode ids must start with
+         zone_, so a mobile-shaped id would throw inside parse and sink the
+         whole load; those get a fresh id. */
+      ...(typeof r.id === 'string' && r.id.startsWith('zone_') ? { id: r.id } : {}),
       name: r.label || 'Room',
       polygon,
       roomType,
+      // What the detector matches on, so the first pass after a load keeps
+      // the names the user typed instead of treating every room as new.
+      metadata: { autoCreated: true, wallIds: r.wall_ids ?? [] },
     })
     nodes[zone.id] = zone
     level0.children.push(zone.id)
