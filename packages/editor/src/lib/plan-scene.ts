@@ -64,6 +64,14 @@ export interface CanonicalDoor {
   door_style?: string
   swing_direction?: string
   swing_side?: string
+  /* Leaf detailing. Dropped by the save path, so frame, threshold and handle
+     settings reverted to defaults on reopen. Absent = default. (0a31a85) */
+  frame_thickness?: number
+  frame_depth?: number
+  threshold?: boolean
+  handle?: boolean
+  handle_side?: string
+  handle_height?: number
 }
 export interface CanonicalWindow {
   id: string
@@ -75,6 +83,17 @@ export interface CanonicalWindow {
   pane_rows?: number
   pane_columns?: number
   pane_count?: number
+  /* Frame, divider and sill detailing, dropped by the save path before, so
+     they reverted on reload. Absent = default. (0a31a85) */
+  column_ratios?: number[]
+  row_ratios?: number[]
+  column_divider_thickness?: number
+  row_divider_thickness?: number
+  frame_thickness?: number
+  frame_depth?: number
+  sill?: boolean
+  sill_depth?: number
+  sill_thickness?: number
 }
 export interface CanonicalRoom {
   id: string
@@ -187,6 +206,12 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
             door_style: c.style || 'pedestrian',
             swing_direction: c.hingesSide === 'left' ? 'left' : 'right',
             swing_side: c.swingDirection === 'outward' ? 'outside' : 'inside',
+            frame_thickness: c.frameThickness,
+            frame_depth: c.frameDepth,
+            threshold: c.threshold,
+            handle: c.handle,
+            handle_side: c.handleSide,
+            handle_height: c.handleHeight,
           })
         } else if (c?.type === 'window') {
           const cols = c.columnRatios?.length ?? 1
@@ -202,6 +227,15 @@ export function sceneGraphToCanonical(scene: SceneGraph): CanonicalScene {
             pane_rows: rowsN,
             pane_columns: cols,
             pane_count: Math.max(1, rowsN * cols),
+            column_ratios: c.columnRatios,
+            row_ratios: c.rowRatios,
+            column_divider_thickness: c.columnDividerThickness,
+            row_divider_thickness: c.rowDividerThickness,
+            frame_thickness: c.frameThickness,
+            frame_depth: c.frameDepth,
+            sill: c.sill,
+            sill_depth: c.sillDepth,
+            sill_thickness: c.sillThickness,
           })
         }
       }
@@ -308,6 +342,14 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
       style: (DOOR_STYLES_KNOWN.has(d.door_style ?? '') ? d.door_style : doorTypeToStyle(d.door_type)) as any,
       hingesSide: d.swing_direction === 'left' ? 'left' : 'right',
       swingDirection: d.swing_side === 'outside' ? 'outward' : 'inward',
+      // Spread only what the document carried, so older plans fall through
+      // to schema defaults rather than being handed undefined.
+      ...(d.frame_thickness !== undefined ? { frameThickness: d.frame_thickness } : {}),
+      ...(d.frame_depth !== undefined ? { frameDepth: d.frame_depth } : {}),
+      ...(d.threshold !== undefined ? { threshold: d.threshold } : {}),
+      ...(d.handle !== undefined ? { handle: d.handle } : {}),
+      ...(d.handle_side !== undefined ? { handleSide: d.handle_side } : {}),
+      ...(d.handle_height !== undefined ? { handleHeight: d.handle_height } : {}),
     })
     nodes[door.id] = door
     wall.children.push(door.id)
@@ -327,8 +369,23 @@ export function canonicalToSceneGraph(canonical: CanonicalScene | null | undefin
       position: [(win.position_along_wall ?? 0.5) * len, sill + height / 2, 0],
       width: win.width ?? 1.2,
       height,
-      columnRatios: Array(cols).fill(1),
-      rowRatios: Array(rowsN).fill(1),
+      // Real ratios when the document has them AND they still match the pane
+      // counts (a client that only knows pane_columns may have changed those
+      // and kept stale ratios); an even grid otherwise.
+      columnRatios:
+        win.column_ratios?.length === cols ? win.column_ratios : Array(cols).fill(1),
+      rowRatios: win.row_ratios?.length === rowsN ? win.row_ratios : Array(rowsN).fill(1),
+      ...(win.column_divider_thickness !== undefined
+        ? { columnDividerThickness: win.column_divider_thickness }
+        : {}),
+      ...(win.row_divider_thickness !== undefined
+        ? { rowDividerThickness: win.row_divider_thickness }
+        : {}),
+      ...(win.frame_thickness !== undefined ? { frameThickness: win.frame_thickness } : {}),
+      ...(win.frame_depth !== undefined ? { frameDepth: win.frame_depth } : {}),
+      ...(win.sill !== undefined ? { sill: win.sill } : {}),
+      ...(win.sill_depth !== undefined ? { sillDepth: win.sill_depth } : {}),
+      ...(win.sill_thickness !== undefined ? { sillThickness: win.sill_thickness } : {}),
     })
     nodes[window.id] = window
     wall.children.push(window.id)
