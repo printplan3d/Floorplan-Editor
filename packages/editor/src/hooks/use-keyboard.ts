@@ -24,6 +24,21 @@ export const useKeyboard = () => {
         _toolCancelConsumed = false
         emitter.emit('tool:cancel')
 
+        // Safety net: a move that no tool is handling (a door, window or item
+        // since the 2D-only editor) has nothing to cancel it, which left the
+        // "Place item" helper stuck on screen. End it here. A duplicate that
+        // was never placed is removed, and undo history -- paused when the
+        // duplicate was made -- is switched back on.
+        const stuck = useEditor.getState().movingNode
+        if (stuck && stuck.type !== 'roof' && stuck.type !== 'roof-segment') {
+          const meta = stuck.metadata as Record<string, unknown> | undefined
+          if (meta && meta.isNew && useScene.getState().nodes[stuck.id as AnyNodeId]) {
+            useScene.getState().deleteNode(stuck.id as AnyNodeId)
+          }
+          useEditor.getState().setMovingNode(null)
+          useScene.temporal.getState().resume()
+        }
+
         // Only switch to select mode if no tool had an active mid-action to cancel.
         // (e.g. mid-wall draw or mid-slab polygon should only cancel the action, not exit the tool)
         if (!_toolCancelConsumed) {

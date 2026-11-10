@@ -21,7 +21,10 @@ import useEditor from '../../store/use-editor'
 import { NodeActionMenu } from './node-action-menu'
 
 const ALLOWED_TYPES = ['item', 'door', 'window', 'roof', 'roof-segment', 'wall', 'slab']
-const DELETE_ONLY_TYPES = ['wall', 'slab']
+// Doors, windows and items are delete-only: there is no tool that finishes
+// a move or duplicate of them any more, so those buttons left the editor
+// stuck in a moving state (see use-keyboard Escape).
+const DELETE_ONLY_TYPES = ['wall', 'slab', 'door', 'window', 'item']
 
 export function FloatingActionMenu() {
   const selectedIds = useViewer((s) => s.selection.selectedIds)

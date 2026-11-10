@@ -9195,10 +9195,13 @@ export function FloorplanPanel() {
               transform: `translate(-50%, calc(-100% - ${FLOORPLAN_ACTION_MENU_OFFSET_Y}px))`,
             }}
           >
+            {/* Delete only. Move and Duplicate put the editor into a moving
+                state that only the old 3D move tools could finish, and those
+                are gone in the 2D editor: the "Place item" helper stuck on
+                screen and Esc did nothing. Move a door or window with its
+                panel's Position slider. */}
             <NodeActionMenu
               onDelete={handleSelectedOpeningDelete}
-              onDuplicate={handleSelectedOpeningDuplicate}
-              onMove={handleSelectedOpeningMove}
               onPointerDown={(event) => event.stopPropagation()}
               onPointerUp={(event) => event.stopPropagation()}
             />
